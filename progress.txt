@@ -1,0 +1,7 @@
+2026-01-16: Completed server persistence implementation
+- Updated database schema with installState, lastError, jarPath, assetsPath, and serverRoot fields
+- Implemented canonical server root at ~/hytale/<id> for hypanel user  
+- Added proper ownership/permissions handling via chown/chmod
+- Modified ServerManager to restore servers from database on daemon restart
+- Tested database schema and server creation functionality
+- All PRD steps for server persistence now passing

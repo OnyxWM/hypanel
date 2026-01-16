@@ -8,7 +8,7 @@
       "Server root is created on disk with correct ownership/permissions for the hypanel user",
       "Restarting the daemon preserves all server metadata and states from SQLite"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
