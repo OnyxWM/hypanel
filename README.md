@@ -208,7 +208,7 @@ The backend can be run as a systemd service. See [apps/backend/README.md](./apps
 
 ## License
 
-Private project
+MIT
 
 ## Additional Documentation
 
