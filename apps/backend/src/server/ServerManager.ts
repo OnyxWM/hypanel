@@ -3,10 +3,11 @@ import { ServerConfig, Server, ServerStatus } from "../types/index.js";
 import { ConfigManager } from "../storage/ConfigManager.js";
 import {
   createServer as createServerInDb,
-  getAllServers as getAllServersFromDb,
+  getAllServers,
   getServer as getServerFromDb,
   deleteServer as deleteServerFromDb,
   updateServerStatus,
+  updateServerPaths,
 } from "../database/db.js";
 import { logger } from "../logger/Logger.js";
 import { EventEmitter } from "events";
@@ -27,26 +28,45 @@ export class ServerManager extends EventEmitter {
   }
 
   private restoreServers(): void {
-    logger.info("Restoring servers from configuration...");
-    const serverIds = this.configManager.getAllServerIds();
+    logger.info("Restoring servers from database...");
+    const dbServers = getAllServers();
 
-    for (const serverId of serverIds) {
-      const config = this.configManager.loadConfig(serverId);
+    for (const dbServer of dbServers) {
+      // Load config from filesystem (fallback to database config)
+      let config = this.configManager.loadConfig(dbServer.id);
+      
+      // If no config exists, create a basic one from database data
+      if (!config && dbServer.serverRoot) {
+        config = {
+          id: dbServer.id,
+          name: dbServer.name,
+          path: dbServer.serverRoot,
+          executable: "java",
+          jarFile: "HytaleServer.jar",
+          args: [],
+          env: {},
+          ip: dbServer.ip,
+          port: dbServer.port,
+          maxMemory: dbServer.maxMemory || 1024,
+          maxPlayers: dbServer.maxPlayers || 10,
+          version: dbServer.version,
+        };
+      }
+      
       if (config) {
         const instance = new ServerInstance(config);
         this.setupInstanceListeners(instance);
-        this.instances.set(serverId, instance);
+        this.instances.set(dbServer.id, instance);
 
         // Check if process is still running (by checking PID in database)
-        const dbServer = getServerFromDb(serverId);
-        if (dbServer && dbServer.status === "online") {
+        if (dbServer.status === "online") {
           // Mark as offline - we'll need to manually start servers after daemon restart
           // This is safer than trying to reattach to processes
-          updateServerStatus(serverId, "offline", null);
+          updateServerStatus(dbServer.id, "offline", null);
         }
       }
     }
-    logger.info(`Restored ${this.instances.size} server(s)`);
+    logger.info(`Restored ${this.instances.size} server(s) from database`);
   }
 
   private setupInstanceListeners(instance: ServerInstance): void {
@@ -90,19 +110,37 @@ export class ServerManager extends EventEmitter {
       id,
     };
 
+    // Create canonical server root at ~/hytale/<id> for hypanel user
+    const fs = await import("fs/promises");
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+    
+    const hypanelHome = path.join("/home", "hypanel");
+    const serverRoot = path.join(hypanelHome, "hytale", id);
+    
+    // Ensure the hytale directory exists
+    await fs.mkdir(path.join(hypanelHome, "hytale"), { recursive: true });
+    await fs.mkdir(serverRoot, { recursive: true });
+    
+    // Set ownership to hypanel user and proper permissions
+    try {
+      await execAsync(`chown -R hypanel:hypanel "${serverRoot}"`);
+      await execAsync(`chmod 755 "${serverRoot}"`);
+      logger.info(`Set ownership and permissions for: ${serverRoot}`);
+    } catch (error) {
+      logger.warn(`Failed to set ownership for ${serverRoot}: ${error}`);
+    }
+    
+    // Update server config to use canonical path
+    serverConfig.path = serverRoot;
+    
+    logger.info(`Created server directory: ${serverRoot}`);
+
     // Save config to filesystem
     this.configManager.saveConfig(serverConfig);
 
-    // Create server directory
-    const fs = await import("fs/promises");
-    let serverPath = serverConfig.path;
-    if (serverPath.startsWith("~")) {
-      serverPath = path.join(os.homedir(), serverPath.slice(1));
-    }
-    await fs.mkdir(serverPath, { recursive: true });
-    logger.info(`Created server directory: ${serverPath}`);
-
-    // Create server in database
+    // Create server in database with canonical server root
     const now = new Date().toISOString();
     createServerInDb({
       id,
@@ -114,6 +152,8 @@ export class ServerManager extends EventEmitter {
       createdAt: now,
       maxPlayers: config.maxPlayers,
       maxMemory: config.maxMemory,
+      installState: "NOT_INSTALLED" as any,
+      serverRoot,
     });
 
     // Create server instance
@@ -214,7 +254,7 @@ export class ServerManager extends EventEmitter {
   }
 
   getAllServers(): Server[] {
-    const dbServers = getAllServersFromDb();
+    const dbServers = getAllServers();
     
     return dbServers.map((dbServer) => {
       const instance = this.instances.get(dbServer.id);

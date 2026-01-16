@@ -27,7 +27,12 @@ export function initDatabase(): Database.Database {
       port INTEGER NOT NULL,
       version TEXT,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      install_state TEXT DEFAULT 'NOT_INSTALLED',
+      last_error TEXT,
+      jar_path TEXT,
+      assets_path TEXT,
+      server_root TEXT
     );
 
     CREATE TABLE IF NOT EXISTS server_stats (
@@ -77,8 +82,8 @@ export function closeDatabase(): void {
 export function createServer(server: Omit<Server, "players" | "cpu" | "memory" | "uptime">): void {
   const database = getDatabase();
   const stmt = database.prepare(`
-    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const now = Date.now();
   stmt.run(
@@ -90,7 +95,12 @@ export function createServer(server: Omit<Server, "players" | "cpu" | "memory" |
     server.port,
     server.version || null,
     now,
-    now
+    now,
+    server.installState || "NOT_INSTALLED",
+    server.lastError || null,
+    server.jarPath || null,
+    server.assetsPath || null,
+    server.serverRoot || null
   );
 }
 
@@ -124,6 +134,11 @@ export function getServer(id: string): Server | null {
     port: row.port,
     version: row.version || "",
     createdAt: new Date(row.created_at).toISOString(),
+    installState: row.install_state as any,
+    lastError: row.last_error,
+    jarPath: row.jar_path,
+    assetsPath: row.assets_path,
+    serverRoot: row.server_root,
   };
 }
 
@@ -157,6 +172,11 @@ export function getAllServers(): Server[] {
       port: row.port,
       version: row.version || "",
       createdAt: new Date(row.created_at).toISOString(),
+      installState: row.install_state as any,
+      lastError: row.last_error,
+      jarPath: row.jar_path,
+      assetsPath: row.assets_path,
+      serverRoot: row.server_root,
     };
   });
 }
@@ -169,6 +189,26 @@ export function updateServerStatus(id: string, status: ServerStatus, pid: number
     WHERE id = ?
   `);
   stmt.run(status, pid, Date.now(), id);
+}
+
+export function updateServerInstallState(id: string, installState: any, lastError?: string, jarPath?: string, assetsPath?: string): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET install_state = ?, last_error = ?, jar_path = ?, assets_path = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(installState, lastError || null, jarPath || null, assetsPath || null, Date.now(), id);
+}
+
+export function updateServerPaths(id: string, serverRoot: string): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET server_root = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(serverRoot, Date.now(), id);
 }
 
 export function deleteServer(id: string): void {

@@ -1,4 +1,5 @@
 export type ServerStatus = "online" | "offline" | "starting" | "stopping";
+export type InstallState = "NOT_INSTALLED" | "INSTALLING" | "INSTALLED" | "FAILED";
 
 export interface Server {
   id: string;
@@ -14,6 +15,11 @@ export interface Server {
   port: number;
   version: string;
   createdAt: string;
+  installState?: InstallState;
+  lastError?: string;
+  jarPath?: string;
+  assetsPath?: string;
+  serverRoot?: string;
 }
 
 export interface ConsoleLog {
