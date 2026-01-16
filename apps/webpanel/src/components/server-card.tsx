@@ -11,6 +11,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import type { Server } from "@/lib/api"
 
@@ -19,10 +27,28 @@ interface ServerCardProps {
   onStart?: (id: string) => void
   onStop?: (id: string) => void
   onRestart?: (id: string) => void
+  onDelete?: (id: string) => void
 }
 
-export function ServerCard({ server, onStart, onStop, onRestart }: ServerCardProps) {
+export function ServerCard({ server, onStart, onStop, onRestart, onDelete }: ServerCardProps) {
   const [isLoading, setIsLoading] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+
+  const handleDelete = async () => {
+    if (!onDelete) {
+      return
+    }
+    
+    setIsLoading(true)
+    try {
+      await onDelete(server.id)
+      setShowDeleteDialog(false)
+    } catch (error) {
+      // Error is handled by parent component
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const formatUptime = (seconds: number) => {
     if (seconds === 0) return "—"
@@ -90,7 +116,12 @@ export function ServerCard({ server, onStart, onStop, onRestart }: ServerCardPro
                 <Link to={`/servers/${server.id}`}>Settings</Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive">Delete Server</DropdownMenuItem>
+              <DropdownMenuItem 
+                className="text-destructive"
+                onClick={() => setShowDeleteDialog(true)}
+              >
+                Delete Server
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -211,6 +242,40 @@ export function ServerCard({ server, onStart, onStop, onRestart }: ServerCardPro
           )}
         </div>
       </CardContent>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent className="bg-popover/80 backdrop-blur-xl border-border/50">
+          <DialogHeader>
+            <DialogTitle>Delete Server</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{server.name}</strong>? This action cannot be undone and will permanently remove the server configuration and all associated data.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowDeleteDialog(false)}
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                handleDelete()
+              }}
+              disabled={isLoading}
+            >
+              {isLoading ? "Deleting..." : "Delete Server"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

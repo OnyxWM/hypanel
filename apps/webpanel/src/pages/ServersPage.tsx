@@ -99,6 +99,16 @@ export default function ServersPage() {
     }
   }
 
+  const handleDeleteServer = async (id: string) => {
+    try {
+      await apiClient.deleteServer(id)
+      setServers((prev) => prev.filter((s) => s.id !== id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete server")
+      await loadServers()
+    }
+  }
+
   const handleCreateServer = async (data: {
     name: string
     path: string
@@ -200,6 +210,7 @@ export default function ServersPage() {
                   onStart={handleStartServer}
                   onStop={handleStopServer}
                   onRestart={handleRestartServer}
+                  onDelete={handleDeleteServer}
                 />
               ))}
             </div>

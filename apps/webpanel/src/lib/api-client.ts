@@ -29,7 +29,19 @@ export class ApiClient {
       throw new Error(error.error || error.message || `HTTP ${response.status}`)
     }
 
-    return response.json()
+    // Handle 204 No Content responses (no body)
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T
+    }
+
+    // Check if response has content before parsing JSON
+    const contentType = response.headers.get("content-type")
+    if (contentType && contentType.includes("application/json")) {
+      return response.json()
+    }
+
+    // If no JSON content, return undefined for void responses
+    return undefined as T
   }
 
   // Server operations
@@ -119,6 +131,7 @@ export class WebSocketClient {
   private reconnectDelay = 1000
   private listeners: Map<string, Set<(data: any) => void>> = new Map()
   private serverId: string | null = null
+  private isIntentionallyDisconnecting = false
 
   constructor(url: string = WS_URL) {
     this.url = url
@@ -150,12 +163,19 @@ export class WebSocketClient {
       }
 
       this.ws.onerror = (error) => {
-        console.error("WebSocket error:", error)
+        // Only log errors if we're not intentionally disconnecting
+        if (!this.isIntentionallyDisconnecting) {
+          console.error("WebSocket error:", error)
+        }
       }
 
       this.ws.onclose = () => {
         console.log("WebSocket disconnected")
-        this.attemptReconnect()
+        // Only attempt reconnect if we didn't intentionally disconnect
+        if (!this.isIntentionallyDisconnecting) {
+          this.attemptReconnect()
+        }
+        this.isIntentionallyDisconnecting = false
       }
     } catch (error) {
       console.error("Failed to create WebSocket:", error)
@@ -221,8 +241,19 @@ export class WebSocketClient {
 
   disconnect(): void {
     if (this.ws) {
+      this.isIntentionallyDisconnecting = true
       this.unsubscribe()
-      this.ws.close()
+      
+      // Only close if WebSocket is in a state where it can be closed
+      // WebSocket.CONNECTING = 0, WebSocket.OPEN = 1, WebSocket.CLOSING = 2, WebSocket.CLOSED = 3
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        try {
+          this.ws.close()
+        } catch (error) {
+          // Ignore errors when closing WebSocket
+          console.warn("Error closing WebSocket:", error)
+        }
+      }
       this.ws = null
     }
     this.listeners.clear()
