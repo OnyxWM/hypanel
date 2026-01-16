@@ -187,6 +187,41 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     }
   );
 
+  // POST /api/servers/:id/install - Install server
+  router.post(
+    "/:id/install",
+    validateParams(serverIdSchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        await serverManager.installServer(id);
+        const server = serverManager.getServer(id);
+        res.json({
+          success: true,
+          message: "Installation started",
+          server
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        if (error instanceof Error && (
+          error.message.includes("already installed") ||
+          error.message.includes("already in progress")
+        )) {
+          return res.status(409).json({
+            error: "Installation conflict",
+            message: error.message,
+          });
+        }
+        res.status(500).json({
+          error: "Failed to start installation",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+  );
+
   // GET /api/servers/:id/logs - Get server logs
   router.get(
     "/:id/logs",

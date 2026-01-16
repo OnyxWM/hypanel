@@ -15,15 +15,19 @@ import { v4 as uuidv4 } from "uuid";
 import pidusage from "pidusage";
 import os from "os";
 import path from "path";
+import { Installer } from "../installation/Installer.js";
 
 export class ServerManager extends EventEmitter {
   private instances: Map<string, ServerInstance>;
   private configManager: ConfigManager;
+  private installer: Installer;
 
   constructor() {
     super();
     this.instances = new Map();
     this.configManager = new ConfigManager();
+    this.installer = new Installer();
+    this.setupInstallerListeners();
     this.restoreServers();
   }
 
@@ -94,6 +98,12 @@ export class ServerManager extends EventEmitter {
     instance.on("error", (error: Error) => {
       logger.error(`Server ${instance.id} error: ${error.message}`);
       this.emit("serverError", instance.id, error);
+    });
+  }
+
+  private setupInstallerListeners(): void {
+    this.installer.on("installProgress", (serverId: string, progress) => {
+      this.emit("serverInstallProgress", serverId, progress);
     });
   }
 
@@ -215,6 +225,26 @@ export class ServerManager extends EventEmitter {
     }
 
     await instance.restart();
+  }
+
+  async installServer(id: string): Promise<void> {
+    const server = this.getServer(id);
+    if (!server) {
+      throw new Error(`Server ${id} not found`);
+    }
+
+    // Check if already installed
+    if (server.installState === "INSTALLED") {
+      throw new Error(`Server ${id} is already installed`);
+    }
+
+    // Check if installation is in progress
+    if (this.installer.isInstalling(id)) {
+      throw new Error(`Installation already in progress for server ${id}`);
+    }
+
+    logger.info(`Starting installation for server ${id}`);
+    await this.installer.installServer(id);
   }
 
   sendCommand(id: string, command: string): void {

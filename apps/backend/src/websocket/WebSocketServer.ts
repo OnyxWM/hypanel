@@ -86,6 +86,15 @@ export class WebSocketServerManager {
         stats,
       });
     });
+
+    // Listen for installation progress
+    this.serverManager.on("serverInstallProgress", (serverId: string, progress: any) => {
+      this.broadcastToServer(serverId, {
+        type: "server:install:progress",
+        serverId,
+        progress,
+      });
+    });
   }
 
   private handleMessage(client: Client, data: any): void {

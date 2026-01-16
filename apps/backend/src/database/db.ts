@@ -191,7 +191,7 @@ export function updateServerStatus(id: string, status: ServerStatus, pid: number
   stmt.run(status, pid, Date.now(), id);
 }
 
-export function updateServerInstallState(id: string, installState: any, lastError?: string, jarPath?: string, assetsPath?: string): void {
+export function updateServerInstallState(id: string, installState: any, lastError?: string | null, jarPath?: string | null, assetsPath?: string | null): void {
   const database = getDatabase();
   const stmt = database.prepare(`
     UPDATE servers
