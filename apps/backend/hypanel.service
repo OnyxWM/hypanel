@@ -1,0 +1,28 @@
+[Unit]
+Description=Hypanel - Hytale Server Management Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=hypanel
+Group=hypanel
+WorkingDirectory=/opt/hypanel/backend
+ExecStart=/usr/bin/node /opt/hypanel/backend/dist/daemon.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hypanel
+
+# Environment variables
+Environment=NODE_ENV=production
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hypanel/backend/data /opt/hypanel/backend/servers /opt/hypanel/backend/logs
+
+[Install]
+WantedBy=multi-user.target

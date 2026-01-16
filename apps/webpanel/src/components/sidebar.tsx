@@ -1,0 +1,65 @@
+import { Link, useLocation } from "react-router-dom"
+import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Activity, Plus } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+const navigation = [
+  { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Servers", href: "/servers", icon: Server },
+  { name: "Console", href: "/console", icon: Terminal },
+  { name: "Players", href: "/players", icon: Users },
+  { name: "Storage", href: "/storage", icon: HardDrive },
+  { name: "Activity", href: "/activity", icon: Activity },
+  { name: "Settings", href: "/settings", icon: Settings },
+]
+
+export function Sidebar() {
+  const location = useLocation()
+  const pathname = location.pathname
+
+  return (
+    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar backdrop-blur-xl">
+      <div className="flex h-full flex-col">
+        {/* Logo */}
+        <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-lg shadow-primary/25">
+            <Server className="h-4 w-4 text-primary-foreground" />
+          </div>
+          <span className="text-lg font-semibold text-sidebar-foreground">Hypanel</span>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 space-y-1 px-3 py-4">
+          {navigation.map((item) => {
+            const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
+            return (
+              <Link
+                key={item.name}
+                to={item.href}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
+                  isActive
+                    ? "bg-sidebar-accent backdrop-blur-sm text-sidebar-primary shadow-sm"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:backdrop-blur-sm hover:text-sidebar-foreground",
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.name}
+              </Link>
+            )
+          })}
+        </nav>
+
+        {/* Quick Actions */}
+        <div className="border-t border-sidebar-border p-4">
+          <Link
+            to="/servers"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:bg-primary/90 hover:shadow-xl hover:shadow-primary/30"
+          >
+            <Plus className="h-4 w-4" />
+            New Server
+          </Link>
+        </div>
+      </div>
+    </aside>
+  )
+}
