@@ -4,6 +4,7 @@ import { updateServerStatus, insertConsoleLog, insertServerStats } from "../data
 import { getServerLogger } from "../logger/Logger.js";
 import pidusage from "pidusage";
 import { EventEmitter } from "events";
+import path from "path";
 
 export class ServerInstance extends EventEmitter {
   public readonly id: string;
@@ -39,24 +40,93 @@ export class ServerInstance extends EventEmitter {
     try {
       const serverPath = this.config.path;
       const executable = this.config.executable || "java";
+      const fs = await import("fs/promises");
+      
+      // Expand ~ in paths
+      let expandedServerPath = serverPath;
+      if (expandedServerPath.startsWith("~")) {
+        const os = await import("os");
+        expandedServerPath = path.join(os.homedir(), expandedServerPath.slice(1));
+      }
+      
+      // Ensure server directory exists
+      try {
+        await fs.access(expandedServerPath);
+      } catch {
+        await fs.mkdir(expandedServerPath, { recursive: true });
+        this.logger.info(`Created server directory: ${expandedServerPath}`);
+      }
+      
+      // Auto-detect jarFile if not provided or is default
+      let jarFile = this.config.jarFile;
+      let gameRootPath = expandedServerPath;
+      let foundJar = false;
+
+      // Check if jarFile needs auto-detection (either not set or is the default)
+      const needsAutoDetect = !jarFile || jarFile === "HytaleServer.jar";
+      
+      if (needsAutoDetect) {
+        // Look for server/Server or Server folder (case-insensitive)
+        const subdirs = ["server", "Server"];
+        for (const subdir of subdirs) {
+          const candidatePath = path.join(expandedServerPath, subdir);
+          try {
+            await fs.access(path.join(candidatePath, "HytaleServer.jar"));
+            jarFile = "HytaleServer.jar";
+            gameRootPath = candidatePath;
+            foundJar = true;
+            this.logger.info(`Found jar in ${subdir}/HytaleServer.jar`);
+            break;
+          } catch { /* continue */ }
+        }
+        
+        if (!foundJar) {
+          // Look in root
+          try {
+            await fs.access(path.join(expandedServerPath, "HytaleServer.jar"));
+            jarFile = "HytaleServer.jar";
+            gameRootPath = expandedServerPath;
+            foundJar = true;
+          } catch {
+            this.logger.warn("HytaleServer.jar not found, using default");
+            jarFile = "HytaleServer.jar";
+            gameRootPath = expandedServerPath;
+          }
+        }
+      }
+      
+      // Auto-detect assetsPath - look in game root or parent
+      let assetsPath = this.config.assetsPath;
+      if (!assetsPath) {
+        const possiblePaths = [
+          path.join(gameRootPath, "Assets.zip"),
+          path.join(expandedServerPath, "Assets.zip"),
+        ];
+        for (const p of possiblePaths) {
+          try {
+            await fs.access(p);
+            assetsPath = p;
+            break;
+          } catch { /* continue */ }
+        }
+        if (!assetsPath) {
+          this.logger.warn("Assets.zip not found, --assets flag will be omitted");
+        }
+      }
       
       // Build command args - support Hytale-specific format
       let args: string[] = [];
       
-      // If jarFile is specified, assume it's a Java/JAR application (like Hytale)
-      if (this.config.jarFile) {
-        args.push("-jar", this.config.jarFile);
+      if (jarFile) {
+        args.push("-jar", jarFile);
         
-        // Add required Hytale flags if assetsPath is provided
-        if (this.config.assetsPath) {
-          args.push("--assets", this.config.assetsPath);
+        if (assetsPath) {
+          args.push("--assets", assetsPath);
         }
         
-        // Add bind address (Hytale uses --bind host:port)
         const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";
         args.push("--bind", `${bindAddress}:${this.config.port}`);
         
-        // Add authentication tokens if provided
         if (this.config.sessionToken) {
           args.push("--session-token", this.config.sessionToken);
         }
@@ -65,12 +135,14 @@ export class ServerInstance extends EventEmitter {
         }
       }
       
-      // Add any additional custom args
       args.push(...(this.config.args || []));
       
-      const env = { ...process.env, ...this.config.env };
+      const env: NodeJS.ProcessEnv = { 
+        ...process.env, 
+        PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+        ...this.config.env 
+      };
       
-      // Also set environment variables for tokens if provided (Hytale supports both)
       if (this.config.sessionToken && !env.HYTALE_SERVER_SESSION_TOKEN) {
         env.HYTALE_SERVER_SESSION_TOKEN = this.config.sessionToken;
       }
@@ -79,9 +151,10 @@ export class ServerInstance extends EventEmitter {
       }
 
       this.logger.info(`Starting server: ${executable} ${args.join(" ")}`);
+      this.logger.info(`Working directory: ${gameRootPath}`);
 
       const childProcess = spawn(executable, args, {
-        cwd: serverPath,
+        cwd: gameRootPath,
         env,
         stdio: ["pipe", "pipe", "pipe"],
       });

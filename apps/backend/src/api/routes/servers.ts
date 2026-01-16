@@ -12,7 +12,7 @@ const createServerSchema = z.object({
   assetsPath: z.string().optional(), // For Hytale: Path to Assets.zip
   args: z.array(z.string()).default([]),
   env: z.record(z.string()).default({}),
-  ip: z.string().ip().default("0.0.0.0"),
+  ip: z.string().default("0.0.0.0"),
   port: z.number().int().positive().max(65535).default(5520),
   maxMemory: z.number().int().positive().default(2048),
   maxPlayers: z.number().int().positive().default(20),

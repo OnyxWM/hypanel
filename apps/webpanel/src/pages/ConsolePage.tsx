@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { ServerConsole } from "@/components/server-console"
@@ -13,39 +13,9 @@ export default function ConsolePage() {
   const [logs, setLogs] = useState<ConsoleLog[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    loadServers()
-
-    // Set up WebSocket for real-time updates
-    wsClient.connect()
-
-    wsClient.on("server:log", (data: any) => {
-      if (data.serverId === selectedServer && data.log) {
-        setLogs((prev) => [...prev, data.log])
-      }
-    })
-
-    return () => {
-      wsClient.disconnect()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (selectedServer) {
-      loadLogs()
-      wsClient.subscribe(selectedServer)
-    } else {
-      wsClient.unsubscribe()
-      setLogs([])
-    }
-
-    return () => {
-      if (selectedServer) {
-        wsClient.unsubscribe()
-      }
-    }
-  }, [selectedServer])
+  const logsRef = useRef(logs)
+  
+  logsRef.current = logs
 
   const loadServers = async () => {
     try {
@@ -64,7 +34,7 @@ export default function ConsolePage() {
     }
   }
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     if (!selectedServer) return
     try {
       const data = await apiClient.getLogs(selectedServer)
@@ -72,13 +42,58 @@ export default function ConsolePage() {
     } catch (err) {
       console.error("Failed to load logs:", err)
     }
-  }
+  }, [selectedServer])
+
+  const handleLog = useCallback((data: any) => {
+    if (data.serverId === selectedServer && data.log) {
+      setLogs((prev) => [...prev, data.log])
+    }
+  }, [selectedServer])
+
+  const handleStatusChange = useCallback((data: any) => {
+    setServers((prev) => 
+      prev.map((s) => 
+        s.id === data.serverId 
+          ? { ...s, status: data.status } 
+          : s
+      )
+    )
+  }, [])
+
+  useEffect(() => {
+    loadServers()
+
+    wsClient.connect()
+    wsClient.on("server:log", handleLog)
+    wsClient.on("server:status", handleStatusChange)
+
+    return () => {
+      wsClient.off("server:log", handleLog)
+      wsClient.off("server:status", handleStatusChange)
+      wsClient.disconnect()
+    }
+  }, [handleLog, handleStatusChange])
+
+  useEffect(() => {
+    if (selectedServer) {
+      loadLogs()
+      wsClient.subscribe(selectedServer)
+    } else {
+      wsClient.unsubscribe()
+      setLogs([])
+    }
+
+    return () => {
+      if (selectedServer) {
+        wsClient.unsubscribe()
+      }
+    }
+  }, [selectedServer, loadLogs])
 
   const handleSendCommand = async (command: string) => {
     if (!selectedServer) return
     try {
       await apiClient.sendCommand(selectedServer, command)
-      // Command will appear in logs via WebSocket
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send command")
     }
@@ -97,7 +112,6 @@ export default function ConsolePage() {
               {error}
             </div>
           )}
-          {/* Server Selector */}
           <div className="flex items-center gap-4">
             <Select value={selectedServer} onValueChange={setSelectedServer} disabled={isLoading}>
               <SelectTrigger className="w-[250px]">
@@ -138,7 +152,6 @@ export default function ConsolePage() {
             )}
           </div>
 
-          {/* Console */}
           <div className="flex-1">
             <ServerConsole
               logs={logs}

@@ -1,0 +1,16 @@
+{
+  "name": "tert342",
+  "path": "~/hytale/tert342",
+  "executable": "java",
+  "jarFile": "HytaleServer.jar",
+  "assetsPath": "~/hytale/tert342/Assets.zip",
+  "args": [],
+  "env": {},
+  "ip": "0.0.0.0",
+  "port": 5520,
+  "maxMemory": 4096,
+  "maxPlayers": 20,
+  "version": "1.0.0-beta",
+  "bindAddress": "0.0.0.0",
+  "id": "56f1290c-95e0-4aeb-b8fc-fc6ef1b01799"
+}

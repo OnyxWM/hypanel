@@ -1,0 +1,16 @@
+{
+  "name": "test",
+  "path": "/srv/hytale/test",
+  "executable": "java",
+  "jarFile": "HytaleServer.jar",
+  "assetsPath": "/srv/hytale/test/Assets.zip",
+  "args": [],
+  "env": {},
+  "ip": "0.0.0.0",
+  "port": 5520,
+  "maxMemory": 4096,
+  "maxPlayers": 20,
+  "version": "1.0.0-beta",
+  "bindAddress": "0.0.0.0",
+  "id": "3f408851-a491-4e69-ac53-1be6161e9196"
+}

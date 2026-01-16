@@ -20,7 +20,6 @@ import { Slider } from "@/components/ui/slider"
 interface CreateServerDialogProps {
   onCreateServer: (data: {
     name: string
-    path: string
     jarFile?: string
     assetsPath?: string
     maxPlayers: number
@@ -35,9 +34,7 @@ interface CreateServerDialogProps {
 export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
-  const [path, setPath] = useState("")
   const [jarFile, setJarFile] = useState("HytaleServer.jar")
-  const [assetsPath, setAssetsPath] = useState("")
   const [maxPlayers, setMaxPlayers] = useState(20)
   const [maxMemory, setMaxMemory] = useState(4)
   const [port, setPort] = useState(5520)
@@ -46,13 +43,15 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
   const [identityToken, setIdentityToken] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
+  const serverPath = `~/hytale/${name.toLowerCase().replace(/\s+/g, "-")}`
+  const assetsPath = `${serverPath}/Assets.zip`
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     try {
       await onCreateServer({
         name,
-        path,
         jarFile,
         assetsPath,
         maxPlayers,
@@ -64,9 +63,7 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
       })
       setOpen(false)
       setName("")
-      setPath("")
       setJarFile("HytaleServer.jar")
-      setAssetsPath("")
       setMaxPlayers(20)
       setMaxMemory(4)
       setPort(5520)
@@ -105,17 +102,6 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="path">Server Path</Label>
-              <Input
-                id="path"
-                placeholder="/srv/hytale/server1"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                required
-                className="bg-secondary/50 backdrop-blur-sm border-border/50"
-              />
-            </div>
-            <div className="grid gap-2">
               <Label htmlFor="jarFile">JAR File</Label>
               <Input
                 id="jarFile"
@@ -125,15 +111,8 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
                 className="bg-secondary/50 backdrop-blur-sm border-border/50"
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="assetsPath">Assets Path</Label>
-              <Input
-                id="assetsPath"
-                placeholder="/srv/hytale/Assets.zip"
-                value={assetsPath}
-                onChange={(e) => setAssetsPath(e.target.value)}
-                className="bg-secondary/50 backdrop-blur-sm border-border/50"
-              />
+            <div className="text-xs text-muted-foreground px-1">
+              Server will be created at: {serverPath || "~/hytale/..."}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="port">Port</Label>
@@ -213,7 +192,7 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading || !name.trim() || !path.trim()} className="shadow-lg shadow-primary/20">
+            <Button type="submit" disabled={isLoading || !name.trim()} className="shadow-lg shadow-primary/20">
               {isLoading ? "Creating..." : "Create Server"}
             </Button>
           </DialogFooter>

@@ -12,6 +12,8 @@ import { logger } from "../logger/Logger.js";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 import pidusage from "pidusage";
+import os from "os";
+import path from "path";
 
 export class ServerManager extends EventEmitter {
   private instances: Map<string, ServerInstance>;
@@ -90,6 +92,15 @@ export class ServerManager extends EventEmitter {
 
     // Save config to filesystem
     this.configManager.saveConfig(serverConfig);
+
+    // Create server directory
+    const fs = await import("fs/promises");
+    let serverPath = serverConfig.path;
+    if (serverPath.startsWith("~")) {
+      serverPath = path.join(os.homedir(), serverPath.slice(1));
+    }
+    await fs.mkdir(serverPath, { recursive: true });
+    logger.info(`Created server directory: ${serverPath}`);
 
     // Create server in database
     const now = new Date().toISOString();

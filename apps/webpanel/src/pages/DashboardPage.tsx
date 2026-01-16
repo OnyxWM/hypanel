@@ -112,7 +112,6 @@ export default function DashboardPage() {
 
   const handleCreateServer = async (data: {
     name: string
-    path: string
     jarFile?: string
     assetsPath?: string
     maxPlayers: number
@@ -122,16 +121,17 @@ export default function DashboardPage() {
     sessionToken?: string
     identityToken?: string
   }) => {
+    const serverPath = `~/hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
     try {
       const newServer = await apiClient.createServer({
         name: data.name,
-        path: data.path,
+        path: serverPath,
         executable: "java",
         jarFile: data.jarFile || "HytaleServer.jar",
-        assetsPath: data.assetsPath,
+        assetsPath: `${serverPath}/Assets.zip`,
         port: data.port || 5520,
         maxPlayers: data.maxPlayers,
-        maxMemory: data.maxMemory * 1024, // Convert GB to MB
+        maxMemory: data.maxMemory * 1024,
         version: data.version,
         sessionToken: data.sessionToken,
         identityToken: data.identityToken,

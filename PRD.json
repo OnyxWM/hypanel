@@ -1,0 +1,200 @@
+[
+  {
+    "category": "functional",
+    "description": "Persist servers in SQLite (+ file-based config) with canonical server root at ~/hytale/<id>",
+    "steps": [
+      "Creating a server creates a SQLite row (id, name, createdAt, status, paths, installState, lastError)",
+      "Backend derives server root as ~hypanel/hytale/<id> (not the current OS user)",
+      "Server root is created on disk with correct ownership/permissions for the hypanel user",
+      "Restarting the daemon preserves all server metadata and states from SQLite"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Automate Hytale server installation on new server creation using bundled official hytale-downloader",
+    "steps": [
+      "On server create, backend marks installState=INSTALLING and starts an install job",
+      "Backend uses the bundled official hytale-downloader to download the server + Assets.zip into ~hypanel/hytale/<id>",
+      "Backend verifies expected artifacts exist (HytaleServer.jar and Assets.zip, plus any required directories)",
+      "On success: installState=INSTALLED and store assetsPath + jarPath in SQLite",
+      "On failure: installState=FAILED and store lastError (actionable)",
+      "No manual file placement is needed to start the server after installation completes"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Install progress streaming via websocket + UI states (queued/downloading/extracting/verifying/ready/failed)",
+    "steps": [
+      "Websocket emits install events with serverId, stage, message, and optional progress fields",
+      "React panel shows install state on the server card/details view",
+      "If install fails, UI shows lastError and offers a Retry Install action",
+      "Install state survives daemon restart (read from SQLite and/or on-disk markers)"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Prevent concurrent installs and make installs idempotent per server (locking + safe retry)",
+    "steps": [
+      "Trigger install twice concurrently (double click / multiple clients) and backend enforces a per-server lock",
+      "If install is already running, the second request returns a clear response and does not start a second job",
+      "If daemon crashes mid-install, restarting daemon leaves server in a recoverable state (FAILED or resumable)",
+      "Retry install either resumes safely or cleans and reinstalls deterministically"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Start/stop uses official launch requirements: java -jar HytaleServer.jar --assets <Assets.zip> and optional --bind",
+    "steps": [
+      "Start uses stored jarPath and assetsPath from SQLite, with a command equivalent to: java -jar HytaleServer.jar --assets <assetsPath>",
+      "If assetsPath/jarPath missing or invalid, backend refuses start with an actionable error",
+      "Optional per-server bind setting (default 0.0.0.0:5520) is supported via --bind <ip:port>",
+      "Stop works as it does today and updates state consistently (RUNNING -> STOPPING -> STOPPED)"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Config management: server-root config.json editor (read/write, validated JSON) per official manual",
+    "steps": [
+      "React panel adds a Config tab for server-root config.json under ~hypanel/hytale/<id>/config.json",
+      "Backend provides GET/PUT endpoints for config.json with JSON validation",
+      "UI supports editing core fields (ServerName, MOTD, Password, MaxPlayers, MaxViewRadius, LocalCompressionEnabled, Defaults.World, Defaults.GameMode)",
+      "Saving invalid JSON is rejected with a clear error message",
+      "Reloading the Config tab reflects changes on disk"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "World config management: universe/worlds/<world>/config.json editor (list worlds, read/write) per official manual",
+    "steps": [
+      "UI lists worlds discovered under ~hypanel/hytale/<id>/universe/worlds/",
+      "Selecting a world loads ~hypanel/hytale/<id>/universe/worlds/<world>/config.json",
+      "UI supports editing a safe subset (e.g. IsPvpEnabled, IsFallDamageEnabled, IsGameTimePaused, IsSpawningNPC, Seed, SaveNewChunks, IsUnloadingChunks)",
+      "Backend validates JSON and writes atomically (write temp + rename) to reduce corruption risk",
+      "Missing world/config yields an actionable error"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Guardrails: enforce stop-before-edit for config files (backend authoritative)",
+    "steps": [
+      "When server is RUNNING, UI blocks saving and explains why",
+      "Backend rejects config writes while server is RUNNING even if UI is bypassed",
+      "After stopping the server, config writes succeed"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Auth guidance: detect when server requires /auth login device and surface status in UI",
+    "steps": [
+      "Backend watches console output for auth-required signals and sets server status AUTH_REQUIRED",
+      "UI displays a short instruction: run /auth login device in console and follow URL/code",
+      "When auth succeeds (detected via console output), status returns to READY/RUNNING",
+      "No sensitive auth info is persisted beyond normal console streaming"
+    ],
+    "passes": false
+  },
+  {
+    "category": "quality",
+    "description": "Filesystem safety: sanitize server ids/paths and prevent traversal or accidental deletes outside ~hypanel/hytale",
+    "steps": [
+      "Attempt to create a server with id/name containing ../, leading /, or backslashes and backend rejects/sanitizes",
+      "All disk operations verify resolved path stays within ~hypanel/hytale",
+      "Delete server only removes ~hypanel/hytale/<id> and related DB records, nothing else",
+      "Add a unit test covering path normalization + root containment"
+    ],
+    "passes": false
+  },
+  {
+    "category": "quality",
+    "description": "Operational logging + structured errors for install/start/stop/config actions",
+    "steps": [
+      "Install logs include phases (download/extract/verify) with serverId context",
+      "Start/stop logs include command intent (without leaking secrets like passwords)",
+      "Errors sent to UI are consistent (code, message, details, suggested action)",
+      "A failed install/start has an actionable lastError stored in SQLite"
+    ],
+    "passes": false
+  },
+  {
+    "category": "quality",
+    "description": "Add smoke tests for core workflows (SQLite + install state machine + websocket events)",
+    "steps": [
+      "Automated tests can create a server record in a temporary SQLite DB",
+      "Install workflow is testable with a mocked downloader (so tests don’t hit the network)",
+      "Tests verify install state transitions and websocket event emission",
+      "Tests verify start/stop transitions with a mocked child_process spawn",
+      "Tests run via a single command (documented)"
+    ],
+    "passes": false
+  },
+  {
+    "category": "devops",
+    "description": "Create install.sh for Ubuntu 24.04 + Debian 12: idempotent installer that provisions hypanel user and installs dependencies",
+    "steps": [
+      "install.sh checks it is run with sudo/root and exits with instructions if not",
+      "Creates user 'hypanel' if missing, with home directory and shell",
+      "Prompts to set the hypanel user password (or asks operator to set it) without printing it",
+      "Ensures base packages installed (curl, ca-certificates, unzip/tar, jq if needed)",
+      "Checks for Java 25 and installs it if missing (document chosen distribution/repo)",
+      "Checks for Node.js + npm and installs supported version if missing (document chosen source, e.g. NodeSource)",
+      "Creates directories used by app (e.g. /opt/hypanel, /etc/hypanel, /var/log/hypanel, and ~hypanel/hytale)",
+      "Sets ownership so runtime does not require root"
+    ],
+    "passes": false
+  },
+  {
+    "category": "devops",
+    "description": "install.sh downloads and installs hypanel release build and serves the React/Vite panel from the Node daemon",
+    "steps": [
+      "install.sh accepts a version argument or env var (e.g. HYPANEL_VERSION) and downloads the matching release artifact",
+      "Artifact is installed into /opt/hypanel with read-only permissions for non-owner where appropriate",
+      "Node daemon is configured to serve the panel’s built static assets (verify UI loads in browser)",
+      "A config file is written to /etc/hypanel (or similar) and is readable by hypanel only where secrets exist",
+      "Script prints the URL/port to access the panel at the end"
+    ],
+    "passes": false
+  },
+  {
+    "category": "devops",
+    "description": "Systemd service: run hypanel as hypanel user with restart policy and journal logging",
+    "steps": [
+      "install.sh writes /etc/systemd/system/hypanel.service",
+      "Service runs as User=hypanel with correct WorkingDirectory=/opt/hypanel",
+      "Service loads environment from a managed file (e.g. /etc/hypanel/hypanel.env) if needed",
+      "Service is enabled and started: systemctl enable --now hypanel",
+      "systemctl status hypanel is active and UI is reachable",
+      "journalctl -u hypanel shows logs"
+    ],
+    "passes": false
+  },
+  {
+    "category": "devops",
+    "description": "Bundle and install the official hytale-downloader with hypanel and validate it works at runtime",
+    "steps": [
+      "Release artifacts include the hytale-downloader binary (or it’s fetched deterministically during install.sh)",
+      "Backend can invoke the downloader as hypanel user",
+      "Installer validates downloader presence/version and fails with clear instructions if missing",
+      "No runtime step requires interactive input for downloader use"
+    ],
+    "passes": false
+  },
+  {
+    "category": "devops",
+    "description": "Define and enforce runtime permissions model: no root required after install; servers live under ~hypanel/hytale/<id>",
+    "steps": [
+      "After installation, hypanel daemon runs without root privileges",
+      "hypanel owns ~hypanel/hytale and all server directories/files",
+      "No world-writable permissions are introduced",
+      "Attempting to escape server root via config/server id fails safely"
+    ],
+    "passes": false
+  }
+]
