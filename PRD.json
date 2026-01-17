@@ -128,12 +128,12 @@
     "description": "Add smoke tests for core workflows (SQLite + install state machine + websocket events)",
     "steps": [
       "Automated tests can create a server record in a temporary SQLite DB",
-      "Install workflow is testable with a mocked downloader (so tests don’t hit the network)",
+      "Install workflow is testable with a mocked downloader (so tests don't hit the network)",
       "Tests verify install state transitions and websocket event emission",
       "Tests verify start/stop transitions with a mocked child_process spawn",
       "Tests run via a single command (documented)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "devops",

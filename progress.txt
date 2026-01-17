@@ -144,3 +144,15 @@
 - All errors include actionable suggested actions for better user experience
 - TypeScript compilation successful with all new error types and logging functions
 - Addresses PRD requirement #11: Operational logging + structured errors for install/start/stop/config actions
+
+2026-01-17: Implemented comprehensive smoke tests for core workflows
+- Fixed smoke test script in package.json to use tsx instead of compiled JS
+- Added comprehensive Testing section to README.md documenting test approach
+- Verified all smoke tests pass (4/4 tests) covering all required workflows:
+  - SQLite database operations with temporary in-memory databases
+  - Install state machine with mocked downloader (no network dependencies)
+  - Install state transitions and websocket event emission verification
+  - Full workflow integration from server creation to installation
+- Tests run via single documented command: npm test from backend directory
+- Uses isolated test environments with temp databases and mock services
+- Addresses PRD requirement #12: Add smoke tests for core workflows (SQLite + install state machine + websocket events)
