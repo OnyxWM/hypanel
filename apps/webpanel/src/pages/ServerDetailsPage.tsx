@@ -7,6 +7,8 @@ import { StatsCard } from "@/components/stats-card"
 import { ResourceChart } from "@/components/resource-chart"
 import { ServerConsole } from "@/components/server-console"
 import { ServerConfig } from "@/components/server-config"
+import { WorldList } from "@/components/world-list"
+import { WorldConfig } from "@/components/world-config"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -22,6 +24,7 @@ export default function ServerDetailsPage() {
   const [stats, setStats] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedWorld, setSelectedWorld] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -293,6 +296,7 @@ export default function ServerDetailsPage() {
               <TabsTrigger value="console">Console</TabsTrigger>
               <TabsTrigger value="players">Players</TabsTrigger>
               <TabsTrigger value="config">Config</TabsTrigger>
+              <TabsTrigger value="worlds">Worlds</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
             </TabsList>
 
@@ -373,6 +377,38 @@ export default function ServerDetailsPage() {
 
             <TabsContent value="config">
               <ServerConfig serverId={server.id} serverStatus={server.status} />
+            </TabsContent>
+
+            <TabsContent value="worlds" className="space-y-4">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div className="lg:col-span-1">
+                  <WorldList 
+                    serverId={server.id}
+                    onWorldSelect={setSelectedWorld}
+                    selectedWorld={selectedWorld || undefined}
+                  />
+                </div>
+                <div className="lg:col-span-2">
+                  {selectedWorld ? (
+                    <WorldConfig 
+                      serverId={server.id}
+                      serverStatus={server.status}
+                      world={selectedWorld}
+                    />
+                  ) : (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">World Configuration</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-center py-8">
+                          <p className="text-muted-foreground">Select a world from the list to view and edit its configuration</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="files">

@@ -135,6 +135,21 @@ export class ApiClient {
       body: JSON.stringify(config),
     })
   }
+
+  async getWorlds(id: string): Promise<string[]> {
+    return this.request<string[]>(`/api/servers/${id}/worlds`)
+  }
+
+  async getWorldConfig(id: string, world: string): Promise<any> {
+    return this.request<any>(`/api/servers/${id}/worlds/${world}/config`)
+  }
+
+  async updateWorldConfig(id: string, world: string, config: any): Promise<any> {
+    return this.request<any>(`/api/servers/${id}/worlds/${world}/config`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    })
+  }
 }
 
 export const apiClient = new ApiClient()

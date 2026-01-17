@@ -335,6 +335,102 @@ export class ServerManager extends EventEmitter {
     return this.instances.get(id);
   }
 
+  getWorlds(id: string): string[] {
+    const instance = this.instances.get(id);
+    if (!instance) {
+      throw new Error(`Server ${id} not found`);
+    }
+
+    const dbServer = getServerFromDb(id);
+    if (!dbServer || !dbServer.serverRoot) {
+      throw new Error(`Server ${id} not properly configured`);
+    }
+
+    const fs = require("fs");
+    const path = require("path");
+    const worldsDir = path.join(dbServer.serverRoot, "universe", "worlds");
+
+    if (!fs.existsSync(worldsDir)) {
+      return [];
+    }
+
+    try {
+      return fs.readdirSync(worldsDir, { withFileTypes: true })
+        .filter((dirent: any) => dirent.isDirectory())
+        .map((dirent: any) => dirent.name);
+    } catch (error) {
+      logger.error(`Failed to read worlds directory for server ${id}: ${error}`);
+      return [];
+    }
+  }
+
+  getWorldConfig(id: string, world: string): any {
+    const instance = this.instances.get(id);
+    if (!instance) {
+      throw new Error(`Server ${id} not found`);
+    }
+
+    const dbServer = getServerFromDb(id);
+    if (!dbServer || !dbServer.serverRoot) {
+      throw new Error(`Server ${id} not properly configured`);
+    }
+
+    const fs = require("fs");
+    const path = require("path");
+    const configPath = path.join(dbServer.serverRoot, "universe", "worlds", world, "config.json");
+
+    if (!fs.existsSync(configPath)) {
+      throw new Error(`World ${world} not found or config.json does not exist`);
+    }
+
+    try {
+      const configContent = fs.readFileSync(configPath, "utf-8");
+      return JSON.parse(configContent);
+    } catch (parseError) {
+      throw new Error(`Failed to parse world config: ${parseError instanceof Error ? parseError.message : "Invalid JSON"}`);
+    }
+  }
+
+  updateWorldConfig(id: string, world: string, updates: any): any {
+    const instance = this.instances.get(id);
+    if (!instance) {
+      throw new Error(`Server ${id} not found`);
+    }
+
+    const dbServer = getServerFromDb(id);
+    if (!dbServer || !dbServer.serverRoot) {
+      throw new Error(`Server ${id} not properly configured`);
+    }
+
+    const fs = require("fs");
+    const path = require("path");
+    const configPath = path.join(dbServer.serverRoot, "universe", "worlds", world, "config.json");
+
+    if (!fs.existsSync(configPath)) {
+      throw new Error(`World ${world} not found or config.json does not exist`);
+    }
+
+    try {
+      // Load existing config to merge with updates
+      const existingContent = fs.readFileSync(configPath, "utf-8");
+      const existingConfig = JSON.parse(existingContent);
+
+      // Merge updates with existing config
+      const updatedConfig = { ...existingConfig, ...updates };
+
+      // Write to temporary file first, then rename to prevent corruption
+      const configContent = JSON.stringify(updatedConfig, null, 2);
+      const tempPath = configPath + ".tmp";
+      fs.writeFileSync(tempPath, configContent, "utf-8");
+      fs.renameSync(tempPath, configPath);
+
+      logger.info(`Updated world config for server ${id}, world ${world}`);
+      return updatedConfig;
+    } catch (error) {
+      throw new Error(`Failed to update world config: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
   async shutdown(): Promise<void> {
     logger.info("Shutting down all servers...");
     const stopPromises = Array.from(this.instances.values()).map((instance) => {

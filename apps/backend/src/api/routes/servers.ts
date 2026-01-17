@@ -48,6 +48,20 @@ const hytaleConfigSchema = z.object({
   }).optional(),
 }).partial();
 
+const worldConfigSchema = z.object({
+  IsPvpEnabled: z.boolean().optional(),
+  IsFallDamageEnabled: z.boolean().optional(),
+  IsGameTimePaused: z.boolean().optional(),
+  IsSpawningNPC: z.boolean().optional(),
+  Seed: z.number().int().optional(),
+  SaveNewChunks: z.boolean().optional(),
+  IsUnloadingChunks: z.boolean().optional(),
+}).partial();
+
+const worldNameSchema = z.object({
+  world: z.string().min(1).max(100),
+});
+
 export function createServerRoutes(serverManager: ServerManager): Router {
   const router = Router();
 
@@ -398,6 +412,94 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         }
       } catch (error) {
         res.status(500).json({ error: "Failed to update server config" });
+      }
+    }
+  );
+
+  // GET /api/servers/:id/worlds - List worlds
+  router.get(
+    "/:id/worlds",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const server = serverManager.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: "Server not found" });
+        }
+
+        const worlds = serverManager.getWorlds(id);
+        res.json(worlds);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Failed to get worlds" });
+      }
+    }
+  );
+
+  // GET /api/servers/:id/worlds/:world/config - Get world config.json
+  router.get(
+    "/:id/worlds/:world/config",
+    (req: Request, res: Response) => {
+      try {
+        // Validate params manually since we have conflicting schemas
+        const idSchema = serverIdSchema.parse({ id: req.params.id });
+        const worldSchema = worldNameSchema.parse({ world: req.params.world });
+        const { id, world } = { ...idSchema, ...worldSchema };
+        
+        const server = serverManager.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: "Server not found" });
+        }
+
+        const config = serverManager.getWorldConfig(id, world);
+        res.json(config);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Failed to get world config" });
+      }
+    }
+  );
+
+  // PUT /api/servers/:id/worlds/:world/config - Update world config.json
+  router.put(
+    "/:id/worlds/:world/config",
+    validateBody(worldConfigSchema),
+    (req: Request, res: Response) => {
+      try {
+        // Validate params manually since we have conflicting schemas
+        const idSchema = serverIdSchema.parse({ id: req.params.id });
+        const worldSchema = worldNameSchema.parse({ world: req.params.world });
+        const { id, world } = { ...idSchema, ...worldSchema };
+        
+        const server = serverManager.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: "Server not found" });
+        }
+
+        // Prevent config changes while server is running
+        if (server.status === "online" || server.status === "starting") {
+          return res.status(409).json({ 
+            error: "Server must be stopped",
+            message: "Cannot modify world config while server is running. Stop the server first."
+          });
+        }
+
+        const updatedConfig = serverManager.updateWorldConfig(id, world, req.body);
+        res.json({ 
+          success: true, 
+          message: "World config updated successfully",
+          config: updatedConfig 
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Failed to update world config" });
       }
     }
   );
