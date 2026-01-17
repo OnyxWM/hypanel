@@ -132,3 +132,15 @@
 - No sensitive authentication information is persisted beyond normal console streaming
 - TypeScript compilation successful for both backend and frontend
 - Addresses PRD requirement #8: Auth guidance: detect when server requires /auth login device and surface status in UI
+
+2026-01-17: Implemented operational logging + structured errors for install/start/stop/config actions
+- Created comprehensive error handling system with HypanelError types and structured responses
+- Added operational logging functions for all major operations (install, start, stop, config, world-config)
+- Enhanced Installer.ts with phase-by-phase logging (init, downloader_check, downloading, verification) with detailed context
+- Updated ServerInstance.ts start/stop methods with comprehensive logging and error context
+- Added structured error responses to all API endpoints with consistent format (code, message, details, suggested action)
+- Implemented config operation logging with server and world-specific context
+- Enhanced error context includes serverId, action, phase, and worldName for world config operations
+- All errors include actionable suggested actions for better user experience
+- TypeScript compilation successful with all new error types and logging functions
+- Addresses PRD requirement #11: Operational logging + structured errors for install/start/stop/config actions

@@ -121,7 +121,7 @@
       "Errors sent to UI are consistent (code, message, details, suggested action)",
       "A failed install/start has an actionable lastError stored in SQLite"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "quality",
