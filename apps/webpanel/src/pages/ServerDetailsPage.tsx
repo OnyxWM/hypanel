@@ -6,6 +6,7 @@ import { Header } from "@/components/header"
 import { StatsCard } from "@/components/stats-card"
 import { ResourceChart } from "@/components/resource-chart"
 import { ServerConsole } from "@/components/server-console"
+import { ServerConfig } from "@/components/server-config"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -291,6 +292,7 @@ export default function ServerDetailsPage() {
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="console">Console</TabsTrigger>
               <TabsTrigger value="players">Players</TabsTrigger>
+              <TabsTrigger value="config">Config</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
             </TabsList>
 
@@ -367,6 +369,10 @@ export default function ServerDetailsPage() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="config">
+              <ServerConfig serverId={server.id} serverStatus={server.status} />
             </TabsContent>
 
             <TabsContent value="files">

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { ServerManager } from "../../server/ServerManager.js";
 import { getConsoleLogs } from "../../database/db.js";
 import { validateBody, validateParams } from "../middleware/validation.js";
+import fs from "fs";
+import path from "path";
 
 const createServerSchema = z.object({
   name: z.string().min(1).max(100),
@@ -32,6 +34,19 @@ const commandSchema = z.object({
 });
 
 const updateServerSchema = createServerSchema.partial();
+
+const hytaleConfigSchema = z.object({
+  ServerName: z.string().min(1).max(100),
+  MOTD: z.string().optional(),
+  Password: z.string().optional(),
+  MaxPlayers: z.number().int().positive().max(1000).default(20),
+  MaxViewRadius: z.number().int().positive().max(32).default(10),
+  LocalCompressionEnabled: z.boolean().default(true),
+  Defaults: z.object({
+    World: z.string().optional(),
+    GameMode: z.enum(["survival", "creative", "adventure", "spectator"]).default("survival"),
+  }).optional(),
+}).partial();
 
 export function createServerRoutes(serverManager: ServerManager): Router {
   const router = Router();
@@ -260,6 +275,129 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         res.json(logs);
       } catch (error) {
         res.status(500).json({ error: "Failed to get logs" });
+      }
+    }
+  );
+
+  // GET /api/servers/:id/config - Get server config.json
+  router.get(
+    "/:id/config",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const server = serverManager.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: "Server not found" });
+        }
+
+        // Get the server root directory
+        const serverRoot = server.serverRoot;
+        if (!serverRoot) {
+          return res.status(400).json({ 
+            error: "Server root not configured",
+            message: "Server must be installed before accessing config"
+          });
+        }
+
+        const configPath = path.join(serverRoot, "config.json");
+        
+        // Check if config file exists
+        if (!fs.existsSync(configPath)) {
+          return res.status(404).json({ 
+            error: "Config file not found",
+            message: "config.json does not exist in server directory"
+          });
+        }
+
+        // Read and parse config file
+        try {
+          const configContent = fs.readFileSync(configPath, "utf-8");
+          const config = JSON.parse(configContent);
+          res.json(config);
+        } catch (parseError) {
+          res.status(500).json({ 
+            error: "Failed to parse config file",
+            message: "config.json is invalid or corrupted"
+          });
+        }
+      } catch (error) {
+        res.status(500).json({ error: "Failed to get server config" });
+      }
+    }
+  );
+
+  // PUT /api/servers/:id/config - Update server config.json
+  router.put(
+    "/:id/config",
+    validateParams(serverIdSchema),
+    validateBody(hytaleConfigSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const server = serverManager.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: "Server not found" });
+        }
+
+        // Prevent config changes while server is running
+        if (server.status === "online" || server.status === "starting") {
+          return res.status(409).json({ 
+            error: "Server must be stopped",
+            message: "Cannot modify config while server is running. Stop the server first."
+          });
+        }
+
+        // Get the server root directory
+        const serverRoot = server.serverRoot;
+        if (!serverRoot) {
+          return res.status(400).json({ 
+            error: "Server root not configured",
+            message: "Server must be installed before updating config"
+          });
+        }
+
+        const configPath = path.join(serverRoot, "config.json");
+        
+        // Load existing config to merge with updates
+        let existingConfig: any = {};
+        if (fs.existsSync(configPath)) {
+          try {
+            const existingContent = fs.readFileSync(configPath, "utf-8");
+            existingConfig = JSON.parse(existingContent);
+          } catch (parseError) {
+            return res.status(500).json({ 
+              error: "Failed to parse existing config",
+              message: "Existing config.json is invalid or corrupted"
+            });
+          }
+        }
+
+        // Merge updates with existing config
+        const updatedConfig = { ...existingConfig, ...req.body };
+
+        // Validate the merged config is valid JSON
+        try {
+          const configContent = JSON.stringify(updatedConfig, null, 2);
+          
+          // Write to temporary file first, then rename to prevent corruption
+          const tempPath = configPath + ".tmp";
+          fs.writeFileSync(tempPath, configContent, "utf-8");
+          fs.renameSync(tempPath, configPath);
+          
+          res.json({ 
+            success: true, 
+            message: "Config updated successfully",
+            config: updatedConfig 
+          });
+        } catch (writeError) {
+          res.status(500).json({ 
+            error: "Failed to write config file",
+            message: "Unable to save config changes"
+          });
+        }
+      } catch (error) {
+        res.status(500).json({ error: "Failed to update server config" });
       }
     }
   );

@@ -124,6 +124,17 @@ export class ApiClient {
       method: "POST",
     })
   }
+
+  async getServerConfig(id: string): Promise<any> {
+    return this.request<any>(`/api/servers/${id}/config`)
+  }
+
+  async updateServerConfig(id: string, config: any): Promise<any> {
+    return this.request<any>(`/api/servers/${id}/config`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    })
+  }
 }
 
 export const apiClient = new ApiClient()
