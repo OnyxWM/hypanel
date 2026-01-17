@@ -1,10 +1,11 @@
 import { spawn, ChildProcess } from "child_process";
 import { ServerConfig, ServerStatus, ServerProcess } from "../types/index.js";
 import { updateServerStatus, insertConsoleLog, insertServerStats, getServer } from "../database/db.js";
-import { getServerLogger } from "../logger/Logger.js";
+import { getServerLogger, logServerStart, logServerStop, logError } from "../logger/Logger.js";
 import pidusage from "pidusage";
 import { EventEmitter } from "events";
 import path from "path";
+import { createServerError, createFilesystemError, HypanelError } from "../errors/index.js";
 
 export class ServerInstance extends EventEmitter {
   public readonly id: string;
@@ -29,8 +30,17 @@ export class ServerInstance extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    logServerStart(this.id, "validation", "Starting server process");
+
     if (this.status === "online" || this.status === "starting") {
-      throw new Error(`Server ${this.id} is already ${this.status}`);
+      const error = createServerError(
+        "start",
+        `Server is already ${this.status}`,
+        this.id,
+        "Stop the server first before starting it again"
+      );
+      logError(error, "start", this.id);
+      throw error;
     }
 
     this.status = "starting";
@@ -44,12 +54,21 @@ export class ServerInstance extends EventEmitter {
       // Get server data from database to retrieve stored jarPath and assetsPath
       const dbServer = getServer(this.id);
       if (!dbServer) {
-        throw new Error(`Server ${this.id} not found in database`);
+        const error = createServerError("start", "Server not found in database", this.id);
+        logError(error, "start", this.id);
+        throw error;
       }
       
       // Verify server is installed
       if (dbServer.installState !== "INSTALLED") {
-        throw new Error(`Server is not installed. Current state: ${dbServer.installState}. Please install the server first.`);
+        const error = createServerError(
+          "start",
+          `Server is not installed. Current state: ${dbServer.installState}`,
+          this.id,
+          "Install the server first before attempting to start it"
+        );
+        logError(error, "start", this.id);
+        throw error;
       }
       
       // Use stored paths from database
@@ -57,25 +76,43 @@ export class ServerInstance extends EventEmitter {
       const assetsPath = dbServer.assetsPath;
       
       if (!jarPath) {
-        throw new Error(`Server jar path not found in database. The server may not have been installed correctly.`);
+        const error = createServerError(
+          "start",
+          "Server jar path not found in database",
+          this.id,
+          "Reinstall the server to ensure proper configuration"
+        );
+        logError(error, "start", this.id);
+        throw error;
       }
       
       if (!assetsPath) {
-        throw new Error(`Server assets path not found in database. The server may not have been installed correctly.`);
+        const error = createServerError(
+          "start",
+          "Server assets path not found in database",
+          this.id,
+          "Reinstall the server to ensure proper configuration"
+        );
+        logError(error, "start", this.id);
+        throw error;
       }
       
       // Verify jar file exists
       try {
         await fs.access(jarPath);
       } catch {
-        throw new Error(`Server jar file not found at ${jarPath}. Please reinstall the server.`);
+        const error = createFilesystemError("access", jarPath, "JAR file not found", this.id);
+        logError(error, "start", this.id);
+        throw error;
       }
       
       // Verify assets file exists
       try {
         await fs.access(assetsPath);
       } catch {
-        throw new Error(`Server assets file not found at ${assetsPath}. Please reinstall the server.`);
+        const error = createFilesystemError("access", assetsPath, "Assets file not found", this.id);
+        logError(error, "start", this.id);
+        throw error;
       }
       
       // Determine working directory (server root)
@@ -182,17 +219,32 @@ export class ServerInstance extends EventEmitter {
       // Wait a bit to see if process starts successfully
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error("Server failed to start within timeout"));
+          const error = createServerError(
+            "start",
+            "Server failed to start within timeout",
+            this.id,
+            "Check server logs for startup errors and ensure system resources are sufficient"
+          );
+          logError(error, "start", this.id);
+          reject(error);
         }, 10000);
 
         childProcess.once("spawn", () => {
           clearTimeout(timeout);
+          logServerStart(this.id, "process_spawn", "Server process spawned successfully");
           resolve();
         });
 
         childProcess.once("error", (error) => {
           clearTimeout(timeout);
-          reject(error);
+          const structuredError = createServerError(
+            "start",
+            `Process spawn failed: ${error.message}`,
+            this.id,
+            "Check executable path and system permissions"
+          );
+          logError(structuredError, "start", this.id);
+          reject(structuredError);
         });
       });
 
@@ -203,18 +255,31 @@ export class ServerInstance extends EventEmitter {
       // Start resource monitoring
       this.startResourceMonitoring();
 
-      this.logger.info(`Server started successfully with PID ${this.process.pid}`);
+      logServerStart(this.id, "complete", `Server started successfully with PID ${this.process.pid}`, {
+        pid: this.process.pid,
+        jarPath,
+        assetsPath
+      });
     } catch (error) {
       this.status = "offline";
       this.emit("statusChange", this.status);
       updateServerStatus(this.id, this.status);
-      this.logger.error(`Failed to start server: ${error}`);
+      
+      if (error instanceof HypanelError) {
+        logError(error, "start", this.id, error.context);
+      } else {
+        const genericError = createServerError("start", error instanceof Error ? error.message : "Unknown error", this.id);
+        logError(genericError, "start", this.id);
+      }
       throw error;
     }
   }
 
   async stop(force: boolean = false): Promise<void> {
+    logServerStop(this.id, "validation", `Stopping server (force: ${force})`);
+
     if (this.status === "offline" || this.status === "stopping") {
+      logServerStop(this.id, "validation", `Server already ${this.status}, skipping stop`);
       return;
     }
 
@@ -229,11 +294,13 @@ export class ServerInstance extends EventEmitter {
       this.status = "offline";
       this.emit("statusChange", this.status);
       updateServerStatus(this.id, this.status);
+      logServerStop(this.id, "validation", "No running process found, marking as offline");
       return;
     }
 
     try {
-      this.logger.info(`Stopping server (force: ${force})`);
+      const pid = this.process.pid;
+      logServerStop(this.id, "signal", `Sending ${force ? 'SIGKILL' : 'SIGTERM'} to PID ${pid}`);
 
       if (force) {
         this.process.process.kill("SIGKILL");
@@ -241,18 +308,26 @@ export class ServerInstance extends EventEmitter {
         this.process.process.kill("SIGTERM");
 
         // Wait for graceful shutdown
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
           const timeout = setTimeout(() => {
-            this.logger.warn("Server did not stop gracefully, forcing kill");
+            logServerStop(this.id, "force_kill", "Server did not stop gracefully, forcing kill", { pid });
             if (this.process.process) {
               this.process.process.kill("SIGKILL");
             }
             resolve();
           }, 10000);
 
-          this.process.process!.on("exit", () => {
+          this.process.process!.once("exit", () => {
             clearTimeout(timeout);
+            logServerStop(this.id, "graceful_exit", "Server stopped gracefully", { pid });
             resolve();
+          });
+
+          this.process.process!.once("error", (error) => {
+            clearTimeout(timeout);
+            const structuredError = createServerError("stop", `Stop failed: ${error.message}`, this.id);
+            logError(structuredError, "stop", this.id);
+            reject(structuredError);
           });
         });
       }

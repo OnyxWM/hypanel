@@ -10,13 +10,14 @@ import {
   updateServerPaths,
   updateServerConfig,
 } from "../database/db.js";
-import { logger } from "../logger/Logger.js";
+import { logger, logConfigOperation, logWorldConfigOperation, logError } from "../logger/Logger.js";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 import pidusage from "pidusage";
 import os from "os";
 import path from "path";
 import { Installer } from "../installation/Installer.js";
+import { createConfigError, createFilesystemError, HypanelError } from "../errors/index.js";
 
 export class ServerManager extends EventEmitter {
   private instances: Map<string, ServerInstance>;
@@ -194,24 +195,44 @@ export class ServerManager extends EventEmitter {
     identityToken?: string;
     bindAddress?: string;
   }>): Promise<Server> {
+    logConfigOperation(id, "validation", "Starting server config update");
+
     const instance = this.instances.get(id);
     if (!instance) {
-      throw new Error(`Server ${id} not found`);
+      const error = createConfigError("update", "Server not found", id);
+      logError(error, "config", id);
+      throw error;
     }
 
-    // Update database
-    updateServerConfig(id, config);
+    try {
+      // Update database
+      logConfigOperation(id, "database", "Updating server configuration in database");
+      updateServerConfig(id, config);
 
-    // Update config in filesystem
-    const currentConfig = instance.config;
-    const updatedConfig = { ...currentConfig, ...config };
-    this.configManager.saveConfig(updatedConfig);
+      // Update config in filesystem
+      const currentConfig = instance.config;
+      const updatedConfig = { ...currentConfig, ...config };
+      
+      logConfigOperation(id, "filesystem", "Saving server config to filesystem");
+      this.configManager.saveConfig(updatedConfig);
 
-    // Update instance config
-    instance.config = updatedConfig;
+      // Update instance config
+      instance.config = updatedConfig;
 
-    logger.info(`Updated configuration for server: ${id}`);
-    return this.getServer(id)!;
+      logConfigOperation(id, "complete", "Server configuration updated successfully", {
+        updatedFields: Object.keys(config)
+      });
+      return this.getServer(id)!;
+    } catch (error) {
+      const structuredError = createConfigError(
+        "update",
+        error instanceof Error ? error.message : "Unknown error",
+        id,
+        "Check file permissions and database connectivity"
+      );
+      logError(structuredError, "config", id);
+      throw structuredError;
+    }
   }
 
   async deleteServer(id: string): Promise<void> {
@@ -397,14 +418,20 @@ export class ServerManager extends EventEmitter {
   }
 
   getWorldConfig(id: string, world: string): any {
+    logWorldConfigOperation(id, world, "validation", "Reading world config");
+
     const instance = this.instances.get(id);
     if (!instance) {
-      throw new Error(`Server ${id} not found`);
+      const error = createConfigError("read", "Server not found", id);
+      logError(error, "world-config", id);
+      throw error;
     }
 
     const dbServer = getServerFromDb(id);
     if (!dbServer || !dbServer.serverRoot) {
-      throw new Error(`Server ${id} not properly configured`);
+      const error = createConfigError("read", "Server not properly configured", id);
+      logError(error, "world-config", id);
+      throw error;
     }
 
     // Sanitize world name to prevent path traversal
@@ -418,31 +445,68 @@ export class ServerManager extends EventEmitter {
     const resolvedPath = path.resolve(configPath);
     const rootPath = path.resolve(dbServer.serverRoot);
     if (!resolvedPath.startsWith(rootPath)) {
-      logger.warn(`Path traversal attempt detected for server ${id}: ${world}`);
-      throw new Error(`Invalid world name: ${world}`);
+      const error = createFilesystemError("access", configPath, "Path traversal attempt detected", id);
+      logError(error, "world-config", id, { worldName: world });
+      throw error;
     }
 
     if (!fs.existsSync(configPath)) {
-      throw new Error(`World ${world} not found or config.json does not exist`);
+      const error = createConfigError(
+        "read",
+        `World ${world} not found or config.json does not exist`,
+        id,
+        "Verify the world exists and has been initialized by the server"
+      );
+      logError(error, "world-config", id, { worldName: world });
+      throw error;
     }
 
     try {
+      logWorldConfigOperation(id, world, "loading", "Reading world config file");
       const configContent = fs.readFileSync(configPath, "utf-8");
-      return JSON.parse(configContent);
+      const config = JSON.parse(configContent);
+      
+      logWorldConfigOperation(id, world, "complete", "World config loaded successfully");
+      return config;
     } catch (parseError) {
-      throw new Error(`Failed to parse world config: ${parseError instanceof Error ? parseError.message : "Invalid JSON"}`);
+      const error = createConfigError(
+        "parse",
+        parseError instanceof Error ? parseError.message : "Invalid JSON",
+        id,
+        "Check the config.json file for valid JSON syntax"
+      );
+      logError(error, "world-config", id, { worldName: world });
+      throw error;
     }
   }
 
   updateWorldConfig(id: string, world: string, updates: any): any {
+    logWorldConfigOperation(id, world, "validation", "Starting world config update");
+
     const instance = this.instances.get(id);
     if (!instance) {
-      throw new Error(`Server ${id} not found`);
+      const error = createConfigError("write", "Server not found", id);
+      logError(error, "world-config", id);
+      throw error;
     }
 
     const dbServer = getServerFromDb(id);
     if (!dbServer || !dbServer.serverRoot) {
-      throw new Error(`Server ${id} not properly configured`);
+      const error = createConfigError("write", "Server not properly configured", id);
+      logError(error, "world-config", id);
+      throw error;
+    }
+
+    // Check if server is running
+    if (dbServer.status === "online" || dbServer.status === "starting") {
+      const error = createConfigError(
+        "write",
+        "Cannot modify world config while server is running",
+        id,
+        "Stop the server first before modifying world configuration"
+      );
+      logError(error, "world-config", id);
+      throw error;
     }
 
     // Sanitize world name to prevent path traversal
@@ -456,16 +520,25 @@ export class ServerManager extends EventEmitter {
     const resolvedPath = path.resolve(configPath);
     const rootPath = path.resolve(dbServer.serverRoot);
     if (!resolvedPath.startsWith(rootPath)) {
-      logger.warn(`Path traversal attempt detected for server ${id}: ${world}`);
-      throw new Error(`Invalid world name: ${world}`);
+      const error = createFilesystemError("access", configPath, "Path traversal attempt detected", id);
+      logError(error, "world-config", id, { worldName: world });
+      throw error;
     }
 
     if (!fs.existsSync(configPath)) {
-      throw new Error(`World ${world} not found or config.json does not exist`);
+      const error = createConfigError(
+        "write",
+        `World ${world} not found or config.json does not exist`,
+        id,
+        "Verify the world exists and has been initialized by the server"
+      );
+      logError(error, "world-config", id, { worldName: world });
+      throw error;
     }
 
     try {
       // Load existing config to merge with updates
+      logWorldConfigOperation(id, world, "loading", "Loading existing world config");
       const existingContent = fs.readFileSync(configPath, "utf-8");
       const existingConfig = JSON.parse(existingContent);
 
@@ -473,15 +546,25 @@ export class ServerManager extends EventEmitter {
       const updatedConfig = { ...existingConfig, ...updates };
 
       // Write to temporary file first, then rename to prevent corruption
+      logWorldConfigOperation(id, world, "saving", "Saving updated world config");
       const configContent = JSON.stringify(updatedConfig, null, 2);
       const tempPath = configPath + ".tmp";
       fs.writeFileSync(tempPath, configContent, "utf-8");
       fs.renameSync(tempPath, configPath);
 
-      logger.info(`Updated world config for server ${id}, world ${world}`);
+      logWorldConfigOperation(id, world, "complete", "World config updated successfully", {
+        updatedFields: Object.keys(updates)
+      });
       return updatedConfig;
     } catch (error) {
-      throw new Error(`Failed to update world config: ${error instanceof Error ? error.message : "Unknown error"}`);
+      const structuredError = createConfigError(
+        "write",
+        error instanceof Error ? error.message : "Unknown error",
+        id,
+        "Check file permissions and disk space"
+      );
+      logError(structuredError, "world-config", id, { worldName: world });
+      throw structuredError;
     }
   }
 

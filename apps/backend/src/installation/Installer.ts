@@ -1,10 +1,11 @@
 import { spawn } from "child_process";
 import { EventEmitter } from "events";
-import { logger } from "../logger/Logger.js";
+import { logger, logInstallationPhase, logError } from "../logger/Logger.js";
 import { updateServerInstallState, getServer, tryStartInstallation, getAllServers } from "../database/db.js";
 import { InstallState } from "../types/index.js";
 import path from "path";
 import fs from "fs/promises";
+import { createInstallationError, createFilesystemError, HypanelError } from "../errors/index.js";
 
 export type InstallProgress = {
   stage: "queued" | "downloading" | "extracting" | "verifying" | "ready" | "failed";
@@ -21,10 +22,19 @@ export class Installer extends EventEmitter {
   }
 
   async installServer(serverId: string): Promise<void> {
+    logInstallationPhase(serverId, "init", "Starting installation process");
+
     // Use database-based locking to prevent concurrent installations
     const lockResult = tryStartInstallation(serverId);
     if (!lockResult.success) {
-      throw new Error(lockResult.reason || `Failed to start installation for server ${serverId}`);
+      const error = createInstallationError(
+        "locking",
+        lockResult.reason || "Failed to acquire installation lock",
+        serverId,
+        "Check if another installation is already running for this server"
+      );
+      logError(error, "install", serverId);
+      throw error;
     }
 
     this.activeInstallations.set(serverId, true);
@@ -32,11 +42,15 @@ export class Installer extends EventEmitter {
     try {
       const server = getServer(serverId);
       if (!server) {
-        throw new Error(`Server ${serverId} not found`);
+        const error = createInstallationError("validation", "Server not found in database", serverId);
+        logError(error, "install", serverId);
+        throw error;
       }
 
       if (!server.serverRoot) {
-        throw new Error(`Server ${serverId} has no server root path`);
+        const error = createInstallationError("validation", "Server has no server root path configured", serverId);
+        logError(error, "install", serverId);
+        throw error;
       }
 
       // If this is a retry (from FAILED state), clean up any partial installation
@@ -61,10 +75,19 @@ export class Installer extends EventEmitter {
       // Check if hytale-downloader exists
       const downloaderPath = await this.findDownloader();
       if (!downloaderPath) {
-        throw new Error("hytale-downloader not found. Please ensure it is installed and in PATH.");
+        const error = createInstallationError(
+          "downloader_check",
+          "hytale-downloader not found",
+          serverId,
+          "Install hytale-downloader and ensure it's in PATH, or run the system installer"
+        );
+        logError(error, "install", serverId);
+        throw error;
       }
 
-      logger.info(`Starting installation for server ${serverId} using downloader: ${downloaderPath}`);
+      logInstallationPhase(serverId, "downloader_check", `Using downloader: ${downloaderPath}`, {
+        downloaderPath
+      });
 
       // Start download stage
       this.emitProgress(serverId, {
@@ -81,7 +104,14 @@ export class Installer extends EventEmitter {
       );
 
       if (!downloadResult.success) {
-        throw new Error(`Download failed: ${downloadResult.error}`);
+        const error = createInstallationError(
+          "downloading",
+          downloadResult.error || "Unknown download error",
+          serverId,
+          "Check network connectivity and disk space, then retry the installation"
+        );
+        logError(error, "install", serverId);
+        throw error;
       }
 
       // Start verification stage
@@ -94,7 +124,14 @@ export class Installer extends EventEmitter {
       // Verify required files exist
       const verification = await this.verifyInstallation(server.serverRoot);
       if (!verification.valid) {
-        throw new Error(`Installation verification failed: ${verification.error}`);
+        const error = createInstallationError(
+          "verification",
+          verification.error || "Required files not found",
+          serverId,
+          "Reinstall the server to ensure all required files are downloaded"
+        );
+        logError(error, "install", serverId);
+        throw error;
       }
 
       // Update database with paths
@@ -121,7 +158,14 @@ export class Installer extends EventEmitter {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      logger.error(`Installation failed for server ${serverId}: ${errorMessage}`);
+      
+      // Log the structured error if it's a HypanelError, otherwise create a generic one
+      if (error instanceof HypanelError) {
+        logError(error, "install", serverId, error.context);
+      } else {
+        const genericError = createInstallationError("unknown", errorMessage, serverId);
+        logError(genericError, "install", serverId);
+      }
 
       // Update state to FAILED
       await this.updateInstallState(serverId, "FAILED", errorMessage, null, null);
@@ -131,7 +175,10 @@ export class Installer extends EventEmitter {
         stage: "failed",
         progress: 0,
         message: "Installation failed",
-        details: { error: errorMessage }
+        details: { 
+          error: errorMessage,
+          suggestedAction: error instanceof HypanelError ? error.suggestedAction : "Check logs for details"
+        }
       });
 
       throw error;

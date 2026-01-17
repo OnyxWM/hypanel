@@ -5,6 +5,7 @@ import { getConsoleLogs } from "../../database/db.js";
 import { validateBody, validateParams } from "../middleware/validation.js";
 import fs from "fs";
 import path from "path";
+import { HypanelError } from "../../errors/index.js";
 
 const createServerSchema = z.object({
   name: z.string().min(1).max(100),
@@ -77,7 +78,14 @@ export function createServerRoutes(serverManager: ServerManager): Router {
       const servers = serverManager.getAllServers();
       res.json(servers);
     } catch (error) {
-      res.status(500).json({ error: "Failed to get servers" });
+      if (error instanceof HypanelError) {
+        return res.status(error.statusCode).json(error.toJSON());
+      }
+      res.status(500).json({ 
+        code: "INTERNAL_ERROR",
+        message: "Failed to get servers",
+        suggestedAction: "Check server logs for details"
+      });
     }
   });
 
@@ -94,7 +102,14 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         }
         res.json(server);
       } catch (error) {
-        res.status(500).json({ error: "Failed to get server" });
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({ 
+          code: "INTERNAL_ERROR", 
+          message: "Failed to get server",
+          suggestedAction: "Check server logs for details"
+        });
       }
     }
   );
@@ -108,9 +123,14 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const server = await serverManager.createServer(req.body);
         res.status(201).json(server);
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         res.status(500).json({
-          error: "Failed to create server",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to create server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -127,12 +147,21 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const server = await serverManager.updateServerConfig(id, req.body);
         res.json(server);
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
         }
         res.status(500).json({
-          error: "Failed to update server",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to update server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -148,10 +177,22 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         await serverManager.deleteServer(id);
         res.status(204).send();
       } catch (error) {
-        if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
         }
-        res.status(500).json({ error: "Failed to delete server" });
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
+        }
+        res.status(500).json({ 
+          code: "INTERNAL_ERROR",
+          message: "Failed to delete server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
+        });
       }
     }
   );
@@ -167,12 +208,21 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const server = serverManager.getServer(id);
         res.json(server);
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
         }
         res.status(500).json({
-          error: "Failed to start server",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to start server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -190,12 +240,21 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const server = serverManager.getServer(id);
         res.json(server);
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
         }
         res.status(500).json({
-          error: "Failed to stop server",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to stop server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -212,12 +271,21 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const server = serverManager.getServer(id);
         res.json(server);
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
         }
         res.status(500).json({
-          error: "Failed to restart server",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to restart server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -235,12 +303,21 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         serverManager.sendCommand(id, command);
         res.json({ success: true });
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
         }
         res.status(500).json({
-          error: "Failed to send command",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to send command",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -261,21 +338,31 @@ export function createServerRoutes(serverManager: ServerManager): Router {
           server
         });
       } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ error: error.message });
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
         }
         if (error instanceof Error && (
           error.message.includes("already installed") ||
           error.message.includes("already in progress")
         )) {
           return res.status(409).json({
-            error: "Installation conflict",
+            code: "INSTALL_ALREADY_RUNNING",
             message: error.message,
+            suggestedAction: "Wait for the current installation to complete or check the server status"
           });
         }
         res.status(500).json({
-          error: "Failed to start installation",
-          message: error instanceof Error ? error.message : "Unknown error",
+          code: "INTERNAL_ERROR",
+          message: "Failed to start installation",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for installation details"
         });
       }
     }
@@ -294,7 +381,14 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const logs = getConsoleLogs(id, limit);
         res.json(logs);
       } catch (error) {
-        res.status(500).json({ error: "Failed to get logs" });
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({ 
+          code: "INTERNAL_ERROR",
+          message: "Failed to get logs",
+          suggestedAction: "Check server logs for details"
+        });
       }
     }
   );
@@ -325,8 +419,10 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         // Check if config file exists
         if (!fs.existsSync(configPath)) {
           return res.status(404).json({ 
-            error: "Config file not found",
-            message: "config.json does not exist in server directory"
+            code: "FILE_NOT_FOUND",
+            message: "Config file not found",
+            details: "config.json does not exist in server directory",
+            suggestedAction: "Install the server or create a config.json file"
           });
         }
 
@@ -336,13 +432,22 @@ export function createServerRoutes(serverManager: ServerManager): Router {
           const config = JSON.parse(configContent);
           res.json(config);
         } catch (parseError) {
-          res.status(500).json({ 
-            error: "Failed to parse config file",
-            message: "config.json is invalid or corrupted"
+          return res.status(500).json({ 
+            code: "CONFIG_INVALID_JSON",
+            message: "Failed to parse config file",
+            details: parseError instanceof Error ? parseError.message : "Unknown parse error",
+            suggestedAction: "Check the config.json file for valid JSON syntax"
           });
         }
       } catch (error) {
-        res.status(500).json({ error: "Failed to get server config" });
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({ 
+          code: "INTERNAL_ERROR",
+          message: "Failed to get server config",
+          suggestedAction: "Check server logs for details"
+        });
       }
     }
   );
@@ -363,8 +468,10 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         // Prevent config changes while server is running
         if (server.status === "online" || server.status === "starting") {
           return res.status(409).json({ 
-            error: "Server must be stopped",
-            message: "Cannot modify config while server is running. Stop the server first."
+            code: "CONFIG_SERVER_RUNNING",
+            message: "Server must be stopped",
+            details: "Cannot modify config while server is running",
+            suggestedAction: "Stop the server first before modifying configuration"
           });
         }
 
@@ -372,8 +479,10 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const serverRoot = server.serverRoot;
         if (!serverRoot) {
           return res.status(400).json({ 
-            error: "Server root not configured",
-            message: "Server must be installed before updating config"
+            code: "INSTALL_NOT_INSTALLED",
+            message: "Server root not configured",
+            details: "Server must be installed before updating config",
+            suggestedAction: "Install the server first"
           });
         }
 
@@ -387,8 +496,10 @@ export function createServerRoutes(serverManager: ServerManager): Router {
             existingConfig = JSON.parse(existingContent);
           } catch (parseError) {
             return res.status(500).json({ 
-              error: "Failed to parse existing config",
-              message: "Existing config.json is invalid or corrupted"
+              code: "CONFIG_INVALID_JSON",
+              message: "Failed to parse existing config",
+              details: "Existing config.json is invalid or corrupted",
+              suggestedAction: "Check the existing config.json file for valid JSON syntax"
             });
           }
         }
@@ -412,12 +523,21 @@ export function createServerRoutes(serverManager: ServerManager): Router {
           });
         } catch (writeError) {
           res.status(500).json({ 
-            error: "Failed to write config file",
-            message: "Unable to save config changes"
+            code: "CONFIG_SAVE_FAILED",
+            message: "Failed to write config file",
+            details: writeError instanceof Error ? writeError.message : "Unknown write error",
+            suggestedAction: "Check file permissions and disk space"
           });
         }
       } catch (error) {
-        res.status(500).json({ error: "Failed to update server config" });
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({ 
+          code: "INTERNAL_ERROR",
+          message: "Failed to update server config",
+          suggestedAction: "Check server logs for details"
+        });
       }
     }
   );
