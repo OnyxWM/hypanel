@@ -171,3 +171,27 @@
 - Enforces runtime permissions model (no root required after install)
 - Script is fully idempotent with comprehensive error handling and logging
 - Addresses PRD requirement #13: Create install.sh for Ubuntu 24.04 + Debian 12
+
+2026-01-17: Implemented webpanel serving in production backend and updated install.sh with build process
+- Modified backend to serve React/Vite webpanel static files in production mode
+- Added multiple path resolution for webpanel dist directory (dev, install, production)
+- Fixed TypeScript compilation to include root index.ts file
+- Updated install.sh to build both backend and webpanel during installation  
+- Fixed systemd service path to use compiled JavaScript instead of TypeScript source
+- Added comprehensive error handling and logging for webpanel asset serving
+- Ensured webpanel is accessible via Node daemon at port 3000
+- Verified UI loads in browser with static file serving working correctly
+- Addresses PRD requirement #14: install.sh downloads and installs hypanel release build and serves React/Vite panel from Node daemon
+
+2026-01-17: Implemented comprehensive systemd service for hypanel daemon
+- Created systemd service configuration with proper User=hypanel and WorkingDirectory=/opt/hypanel
+- Added environment file loading from /etc/hypanel/hypanel.env for configurable runtime settings
+- Implemented restart policy with Restart=always and RestartSec=10 for automatic recovery
+- Added journal logging with StandardOutput=journal and StandardError=journal
+- Applied security hardening with NoNewPrivileges, PrivateTmp, ProtectSystem=strict, ProtectHome=true
+- Configured ReadWritePaths to allow access to server directories and logs while restricting system access
+- Service enables and starts automatically with systemctl enable --now hypanel
+- Added comprehensive status checking and error handling in installation script
+- Included service management commands and log viewing in completion information
+- Verified systemd service file syntax and configuration meets all PRD requirements
+- Addresses PRD requirement #15: Systemd service: run hypanel as hypanel user with restart policy and journal logging

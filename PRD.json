@@ -156,11 +156,11 @@
     "steps": [
       "install.sh accepts a version argument or env var (e.g. HYPANEL_VERSION) and downloads the matching release artifact",
       "Artifact is installed into /opt/hypanel with read-only permissions for non-owner where appropriate",
-      "Node daemon is configured to serve the panel’s built static assets (verify UI loads in browser)",
+      "Node daemon is configured to serve the panel's built static assets (verify UI loads in browser)",
       "A config file is written to /etc/hypanel (or similar) and is readable by hypanel only where secrets exist",
       "Script prints the URL/port to access the panel at the end"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "devops",
@@ -173,7 +173,7 @@
       "systemctl status hypanel is active and UI is reachable",
       "journalctl -u hypanel shows logs"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "devops",
