@@ -5,3 +5,28 @@
 - Modified ServerManager to restore servers from database on daemon restart
 - Tested database schema and server creation functionality
 - All PRD steps for server persistence now passing
+
+2026-01-17: Implemented Hytale server installation automation
+- Created Installer.ts service class for hytale-downloader integration
+- Added installServer method to ServerManager with state management
+- Added POST /api/servers/:id/install API endpoint with proper error handling
+- Added WebSocket events for real-time installation progress streaming
+- Implemented install state machine (NOT_INSTALLED → INSTALLING → INSTALLED/FAILED)
+- Added progress tracking with stage updates (queued → downloading → verifying → ready/failed)
+- Added robust error handling and retry capability
+- Implemented file verification for HytaleServer.jar and Assets.zip
+- Prevented concurrent installations per server
+- Added comprehensive logging throughout installation process
+- TypeScript compilation successful with all type safety checks passing
+- Addresses PRD requirement #2: Automate Hytale server installation using bundled official hytale-downloader
+
+2026-01-17: Implemented server configuration management API
+- Added PUT /api/servers/:id endpoint for updating server settings after creation
+- Created updateServerConfig method in ServerManager with proper validation
+- Modified ServerInstance.config to be mutable for runtime updates
+- Enhanced database updateServerConfig function with partial update support
+- Maintains consistency between database and filesystem config storage
+- Supports updating name, IP, port, version, maxMemory, maxPlayers, and other properties
+- Added proper error handling for non-existent servers
+- TypeScript compilation successful with all type checks passing
+- Addresses PRD requirement #3: Server configuration management
