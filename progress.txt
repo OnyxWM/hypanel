@@ -79,3 +79,28 @@
 - Created reusable Alert UI component for success/error notifications
 - TypeScript compilation successful with all type safety checks passing
 - Addresses PRD requirement #6: Config management: server-root config.json editor (read/write, validated JSON) per official manual
+
+2026-01-17: Implemented world config management with full UI integration
+- Added GET /api/servers/:id/worlds endpoint to discover worlds under universe/worlds/ directory
+- Added GET/PUT /api/servers/:id/worlds/:world/config endpoints for world config.json management
+- Created WorldList React component displaying discovered worlds with selection functionality
+- Created WorldConfig React component for editing safe world configuration fields
+- Added Worlds tab to ServerDetailsPage with responsive split-pane layout
+- Implemented server-running guardrails preventing config changes during operation
+- Added atomic config file writing using temp files and rename to prevent corruption
+- Support editing IsPvpEnabled, IsFallDamageEnabled, IsGameTimePaused, IsSpawningNPC, Seed, SaveNewChunks, IsUnloadingChunks
+- Comprehensive error handling for missing worlds/config files with actionable messages
+- Backend enforces config write restrictions even if UI is bypassed
+- TypeScript compilation successful for both backend and frontend components
+- Addresses PRD requirement #7: World config management: universe/worlds/<world>/config.json editor (list worlds, read/write)
+
+2026-01-17: Verified guardrails implementation for config file editing
+- Confirmed UI blocks config changes when server is online/starting with clear messaging
+- Verified backend rejects server config writes via PUT /api/servers/:id/config when server is running
+- Verified backend rejects world config writes via PUT /api/servers/:id/worlds/:world/config when server is running
+- ServerConfig component disables all form fields when server is not offline/stopping
+- WorldConfig component disables all form fields when server is not offline/stopping
+- Both components show clear alert messages explaining why changes are blocked
+- Config writes succeed normally after server is stopped
+- Backend enforcement ensures bypassing UI is not possible
+- Addresses PRD requirement #8: Guardrails: enforce stop-before-edit for config files (backend authoritative)

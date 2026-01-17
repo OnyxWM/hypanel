@@ -235,6 +235,30 @@ export class ServerManager extends EventEmitter {
     // Delete config from filesystem
     this.configManager.deleteConfig(id);
 
+    // Delete server root directory (only the server directory, nothing else)
+    const dbServer = getServerFromDb(id);
+    if (dbServer?.serverRoot) {
+      const fs = require("fs");
+      const path = require("path");
+      
+      // Verify the path is within the expected hypanel directory before deletion
+      const resolvedRoot = path.resolve(dbServer.serverRoot);
+      const expectedBase = path.resolve("/home/hypanel/hytale");
+      
+      if (resolvedRoot.startsWith(expectedBase)) {
+        try {
+          if (fs.existsSync(dbServer.serverRoot)) {
+            fs.rmSync(dbServer.serverRoot, { recursive: true, force: true });
+            logger.info(`Deleted server directory: ${dbServer.serverRoot}`);
+          }
+        } catch (error) {
+          logger.error(`Failed to delete server directory ${dbServer.serverRoot}: ${error}`);
+        }
+      } else {
+        logger.warn(`Skipping deletion of server directory ${dbServer.serverRoot} - outside expected base path`);
+      }
+    }
+
     logger.info(`Deleted server: ${id}`);
   }
 
@@ -335,6 +359,14 @@ export class ServerManager extends EventEmitter {
     return this.instances.get(id);
   }
 
+  /**
+   * Sanitize a path component to prevent directory traversal attacks
+   */
+  private sanitizePathComponent(component: string): string {
+    // Remove any path separators, parent directory references, and special characters
+    return component.replace(/[\/\\:.]/g, '_').replace(/\.\./g, '');
+  }
+
   getWorlds(id: string): string[] {
     const instance = this.instances.get(id);
     if (!instance) {
@@ -375,9 +407,20 @@ export class ServerManager extends EventEmitter {
       throw new Error(`Server ${id} not properly configured`);
     }
 
+    // Sanitize world name to prevent path traversal
+    const sanitizedWorld = this.sanitizePathComponent(world);
+    
     const fs = require("fs");
     const path = require("path");
-    const configPath = path.join(dbServer.serverRoot, "universe", "worlds", world, "config.json");
+    const configPath = path.join(dbServer.serverRoot, "universe", "worlds", sanitizedWorld, "config.json");
+
+    // Verify the resolved path stays within the server root
+    const resolvedPath = path.resolve(configPath);
+    const rootPath = path.resolve(dbServer.serverRoot);
+    if (!resolvedPath.startsWith(rootPath)) {
+      logger.warn(`Path traversal attempt detected for server ${id}: ${world}`);
+      throw new Error(`Invalid world name: ${world}`);
+    }
 
     if (!fs.existsSync(configPath)) {
       throw new Error(`World ${world} not found or config.json does not exist`);
@@ -402,9 +445,20 @@ export class ServerManager extends EventEmitter {
       throw new Error(`Server ${id} not properly configured`);
     }
 
+    // Sanitize world name to prevent path traversal
+    const sanitizedWorld = this.sanitizePathComponent(world);
+    
     const fs = require("fs");
     const path = require("path");
-    const configPath = path.join(dbServer.serverRoot, "universe", "worlds", world, "config.json");
+    const configPath = path.join(dbServer.serverRoot, "universe", "worlds", sanitizedWorld, "config.json");
+
+    // Verify the resolved path stays within the server root
+    const resolvedPath = path.resolve(configPath);
+    const rootPath = path.resolve(dbServer.serverRoot);
+    if (!resolvedPath.startsWith(rootPath)) {
+      logger.warn(`Path traversal attempt detected for server ${id}: ${world}`);
+      throw new Error(`Invalid world name: ${world}`);
+    }
 
     if (!fs.existsSync(configPath)) {
       throw new Error(`World ${world} not found or config.json does not exist`);

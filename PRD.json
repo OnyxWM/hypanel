@@ -78,7 +78,7 @@
       "Backend validates JSON and writes atomically (write temp + rename) to reduce corruption risk",
       "Missing world/config yields an actionable error"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -88,7 +88,7 @@
       "Backend rejects config writes while server is RUNNING even if UI is bypassed",
       "After stopping the server, config writes succeed"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

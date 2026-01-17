@@ -8,7 +8,13 @@ import path from "path";
 
 const createServerSchema = z.object({
   name: z.string().min(1).max(100),
-  path: z.string().min(1),
+  path: z.string().min(1).refine((path) => {
+    // Reject path traversal attempts
+    if (path.includes('..') || path.includes('~') || path.startsWith('/') || path.includes('\\')) {
+      return false;
+    }
+    return true;
+  }, "Path contains invalid characters. Path traversal is not allowed."),
   executable: z.string().default("java"),
   jarFile: z.string().optional(), // For Hytale: "HytaleServer.jar"
   assetsPath: z.string().optional(), // For Hytale: Path to Assets.zip
@@ -59,7 +65,7 @@ const worldConfigSchema = z.object({
 }).partial();
 
 const worldNameSchema = z.object({
-  world: z.string().min(1).max(100),
+  world: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, "World name can only contain letters, numbers, underscores, and hyphens"),
 });
 
 export function createServerRoutes(serverManager: ServerManager): Router {
