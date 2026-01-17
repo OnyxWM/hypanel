@@ -21,7 +21,7 @@
       "On failure: installState=FAILED and store lastError (actionable)",
       "No manual file placement is needed to start the server after installation completes"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -179,12 +179,12 @@
     "category": "devops",
     "description": "Bundle and install the official hytale-downloader with hypanel and validate it works at runtime",
     "steps": [
-      "Release artifacts include the hytale-downloader binary (or it’s fetched deterministically during install.sh)",
+      "Release artifacts include the hytale-downloader binary (or it's fetched deterministically during install.sh)",
       "Backend can invoke the downloader as hypanel user",
       "Installer validates downloader presence/version and fails with clear instructions if missing",
       "No runtime step requires interactive input for downloader use"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "devops",
