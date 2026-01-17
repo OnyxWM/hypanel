@@ -30,3 +30,28 @@
 - Added proper error handling for non-existent servers
 - TypeScript compilation successful with all type checks passing
 - Addresses PRD requirement #3: Server configuration management
+
+2026-01-17: Implemented install progress streaming via websocket
+- Added InstallProgress and InstallState types to frontend TypeScript definitions
+- Added installServer method to ApiClient for triggering installations
+- Created InstallProgressDisplay component with progress bars and stage indicators
+- Updated ServerCard to show install state, progress bars, and install/retry buttons
+- Added install progress WebSocket event handling to ServersPage and DashboardPage
+- Implemented real-time install progress updates with proper error handling
+- Supports all install stages: queued, downloading, extracting, verifying, ready, failed
+- UI displays install failures with actionable error messages and retry functionality
+- WebSocket events properly update server state in real-time across all components
+- TypeScript compilation successful with all type safety checks passing
+- Addresses PRD requirement #4: Install progress streaming via websocket + UI states
+
+2026-01-17: Implemented concurrent install prevention and idempotent installations
+- Added database-based install locking with tryStartInstallation function for atomic operations
+- Implemented atomic install state management to prevent race conditions across multiple clients
+- Added install recovery logic during daemon startup to handle crashed installations
+- Implemented safe retry logic with cleanup of partial installation artifacts
+- Added clear error responses for concurrent install requests with actionable messages
+- Removed redundant checks in ServerManager and rely on database locking for consistency
+- Mark interrupted installations as FAILED with actionable error messages about daemon restart
+- Ensure installations survive daemon restarts with proper state recovery and cleanup
+- TypeScript compilation successful with all type safety checks passing
+- Addresses PRD requirement #5: Prevent concurrent installs and make installs idempotent per server

@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { ServerConfig, ServerStatus, ServerProcess } from "../types/index.js";
-import { updateServerStatus, insertConsoleLog, insertServerStats } from "../database/db.js";
+import { updateServerStatus, insertConsoleLog, insertServerStats, getServer } from "../database/db.js";
 import { getServerLogger } from "../logger/Logger.js";
 import pidusage from "pidusage";
 import { EventEmitter } from "events";
@@ -38,111 +38,99 @@ export class ServerInstance extends EventEmitter {
     updateServerStatus(this.id, this.status);
 
     try {
-      const serverPath = this.config.path;
       const executable = this.config.executable || "java";
       const fs = await import("fs/promises");
       
-      // Expand ~ in paths
-      let expandedServerPath = serverPath;
-      if (expandedServerPath.startsWith("~")) {
-        const os = await import("os");
-        expandedServerPath = path.join(os.homedir(), expandedServerPath.slice(1));
+      // Get server data from database to retrieve stored jarPath and assetsPath
+      const dbServer = getServer(this.id);
+      if (!dbServer) {
+        throw new Error(`Server ${this.id} not found in database`);
       }
       
-      // Ensure server directory exists
-      try {
-        await fs.access(expandedServerPath);
-      } catch {
-        await fs.mkdir(expandedServerPath, { recursive: true });
-        this.logger.info(`Created server directory: ${expandedServerPath}`);
+      // Verify server is installed
+      if (dbServer.installState !== "INSTALLED") {
+        throw new Error(`Server is not installed. Current state: ${dbServer.installState}. Please install the server first.`);
       }
       
-      // Auto-detect jarFile if not provided or is default
-      let jarFile = this.config.jarFile;
-      let gameRootPath = expandedServerPath;
-      let foundJar = false;
-
-      // Check if jarFile needs auto-detection (either not set or is the default)
-      const needsAutoDetect = !jarFile || jarFile === "HytaleServer.jar";
+      // Use stored paths from database
+      const jarPath = dbServer.jarPath;
+      const assetsPath = dbServer.assetsPath;
       
-      if (needsAutoDetect) {
-        // Look for server/Server or Server folder (case-insensitive)
-        const subdirs = ["server", "Server"];
-        for (const subdir of subdirs) {
-          const candidatePath = path.join(expandedServerPath, subdir);
-          try {
-            await fs.access(path.join(candidatePath, "HytaleServer.jar"));
-            jarFile = "HytaleServer.jar";
-            gameRootPath = candidatePath;
-            foundJar = true;
-            this.logger.info(`Found jar in ${subdir}/HytaleServer.jar`);
-            break;
-          } catch { /* continue */ }
-        }
-        
-        if (!foundJar) {
-          // Look in root
-          try {
-            await fs.access(path.join(expandedServerPath, "HytaleServer.jar"));
-            jarFile = "HytaleServer.jar";
-            gameRootPath = expandedServerPath;
-            foundJar = true;
-          } catch {
-            this.logger.warn("HytaleServer.jar not found, using default");
-            jarFile = "HytaleServer.jar";
-            gameRootPath = expandedServerPath;
-          }
-        }
+      if (!jarPath) {
+        throw new Error(`Server jar path not found in database. The server may not have been installed correctly.`);
       }
       
-      // Auto-detect assetsPath - look in game root or parent
-      let assetsPath = this.config.assetsPath;
       if (!assetsPath) {
-        const possiblePaths = [
-          path.join(gameRootPath, "Assets.zip"),
-          path.join(expandedServerPath, "Assets.zip"),
-        ];
-        for (const p of possiblePaths) {
-          try {
-            await fs.access(p);
-            assetsPath = p;
-            break;
-          } catch { /* continue */ }
-        }
-        if (!assetsPath) {
-          this.logger.warn("Assets.zip not found, --assets flag will be omitted");
-        }
+        throw new Error(`Server assets path not found in database. The server may not have been installed correctly.`);
       }
       
-      // Build command args - support Hytale-specific format
-      let args: string[] = [];
-      
-      if (jarFile) {
-        args.push("-jar", jarFile);
-        
-        if (assetsPath) {
-          args.push("--assets", assetsPath);
-        }
-        
-        const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";
-        args.push("--bind", `${bindAddress}:${this.config.port}`);
-        
-        if (this.config.sessionToken) {
-          args.push("--session-token", this.config.sessionToken);
-        }
-        if (this.config.identityToken) {
-          args.push("--identity-token", this.config.identityToken);
-        }
+      // Verify jar file exists
+      try {
+        await fs.access(jarPath);
+      } catch {
+        throw new Error(`Server jar file not found at ${jarPath}. Please reinstall the server.`);
       }
       
-      args.push(...(this.config.args || []));
+      // Verify assets file exists
+      try {
+        await fs.access(assetsPath);
+      } catch {
+        throw new Error(`Server assets file not found at ${assetsPath}. Please reinstall the server.`);
+      }
       
+      // Determine working directory (server root)
+      let workingDir = dbServer.serverRoot || this.config.path;
+      if (!workingDir) {
+        throw new Error(`Server working directory not configured`);
+      }
+      
+      // Expand ~ in paths
+      if (workingDir.startsWith("~")) {
+        const os = await import("os");
+        workingDir = path.join(os.homedir(), workingDir.slice(1));
+      }
+      
+      // Ensure working directory exists
+      try {
+        await fs.access(workingDir);
+      } catch {
+        await fs.mkdir(workingDir, { recursive: true });
+        this.logger.info(`Created working directory: ${workingDir}`);
+      }
+      
+      // Build command args using official Hytale launch requirements
+      const args: string[] = [
+        "-jar",
+        jarPath,
+        "--assets",
+        assetsPath
+      ];
+      
+      // Add bind address (default to 0.0.0.0:port if not specified)
+      const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";
+      args.push("--bind", `${bindAddress}:${this.config.port}`);
+      
+      // Add optional session tokens
+      if (this.config.sessionToken) {
+        args.push("--session-token", this.config.sessionToken);
+      }
+      if (this.config.identityToken) {
+        args.push("--identity-token", this.config.identityToken);
+      }
+      
+      // Add any additional args
+      if (this.config.args && this.config.args.length > 0) {
+        args.push(...this.config.args);
+      }
+      
+      // Prepare environment variables
       const env: NodeJS.ProcessEnv = { 
         ...process.env, 
         PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
         ...this.config.env 
       };
       
+      // Add session tokens to environment if not already present
       if (this.config.sessionToken && !env.HYTALE_SERVER_SESSION_TOKEN) {
         env.HYTALE_SERVER_SESSION_TOKEN = this.config.sessionToken;
       }
@@ -150,11 +138,13 @@ export class ServerInstance extends EventEmitter {
         env.HYTALE_SERVER_IDENTITY_TOKEN = this.config.identityToken;
       }
 
-      this.logger.info(`Starting server: ${executable} ${args.join(" ")}`);
-      this.logger.info(`Working directory: ${gameRootPath}`);
+      this.logger.info(`Starting server with official Hytale command: ${executable} ${args.join(" ")}`);
+      this.logger.info(`Working directory: ${workingDir}`);
+      this.logger.info(`Using jar: ${jarPath}`);
+      this.logger.info(`Using assets: ${assetsPath}`);
 
       const childProcess = spawn(executable, args, {
-        cwd: gameRootPath,
+        cwd: workingDir,
         env,
         stdio: ["pipe", "pipe", "pipe"],
       });

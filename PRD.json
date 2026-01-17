@@ -32,7 +32,7 @@
       "If install fails, UI shows lastError and offers a Retry Install action",
       "Install state survives daemon restart (read from SQLite and/or on-disk markers)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -43,7 +43,7 @@
       "If daemon crashes mid-install, restarting daemon leaves server in a recoverable state (FAILED or resumable)",
       "Retry install either resumes safely or cleans and reinstalls deterministically"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
