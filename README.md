@@ -194,6 +194,22 @@ cd apps/webpanel
 npm run build
 ```
 
+### Testing
+
+**Smoke Tests:**
+```bash
+cd apps/backend
+npm test
+```
+
+The smoke tests cover core workflows including:
+- SQLite database operations and server persistence
+- Install state machine with locking and retry logic  
+- WebSocket event emission for real-time progress updates
+- Full workflow integration from server creation to installation
+
+These tests use in-memory databases and mock services to avoid external dependencies and can be run as part of CI/CD pipelines.
+
 ### Linting
 
 **Frontend:**

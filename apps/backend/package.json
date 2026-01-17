@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "daemon": "node dist/daemon.js",
-    "test": "tsc && node test/smoke.test.js",
+    "test": "tsx test/smoke.test.ts",
     "test:dev": "tsx test/smoke.test.ts"
   },
   "devDependencies": {
