@@ -55,3 +55,15 @@
 - Ensure installations survive daemon restarts with proper state recovery and cleanup
 - TypeScript compilation successful with all type safety checks passing
 - Addresses PRD requirement #5: Prevent concurrent installs and make installs idempotent per server
+
+2026-01-17: Implemented official Hytale server launch requirements
+- Modified ServerInstance.start() to use stored jarPath and assetsPath from SQLite database
+- Added verification for jarPath and assetsPath existence before starting servers
+- Updated command construction to use proper Hytale launch format: java -jar HytaleServer.jar --assets <Assets.zip>
+- Added support for optional --bind <ip:port> setting with default 0.0.0.0:port
+- Enhanced error handling with actionable error messages for missing/invalid paths
+- Replaced auto-detection logic with database-driven path management for reliability
+- Improved logging to show jar/assets paths being used for better debugging
+- Added verification that server installState is INSTALLED before allowing start
+- TypeScript compilation successful with all type safety checks passing
+- Addresses PRD requirement #6: Start/stop uses official launch requirements

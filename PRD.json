@@ -54,7 +54,7 @@
       "Optional per-server bind setting (default 0.0.0.0:5520) is supported via --bind <ip:port>",
       "Stop works as it does today and updates state consistently (RUNNING -> STOPPING -> STOPPED)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
