@@ -277,6 +277,75 @@ download_and_install_hypanel() {
     log "Webpanel will be served by the Node daemon at http://$(hostname -I | awk '{print $1}'):3000"
 }
 
+install_hytale_downloader() {
+    log "Installing hytale-downloader"
+    
+    local downloader_dir="/opt/hytale-downloader"
+    local downloader_bin="$downloader_dir/hytale-downloader"
+    
+    # Check if already installed
+    if [[ -f "$downloader_bin" ]]; then
+        log "hytale-downloader already installed at $downloader_bin"
+        return 0
+    fi
+    
+    # Create directory
+    mkdir -p "$downloader_dir"
+    
+    # Determine latest version from GitHub API
+    local downloader_version
+    downloader_version=$(curl -s https://api.github.com/repos/Hytale/hytale-downloader/releases/latest | grep '"tag_name"' | cut -d '"' -f4)
+    
+    if [[ -z "$downloader_version" ]]; then
+        error "Failed to fetch latest hytale-downloader version from GitHub API"
+    fi
+    
+    log "Downloading hytale-downloader $downloader_version"
+    
+    # Detect architecture
+    local arch
+    case "$(uname -m)" in
+        x86_64) arch="x86_64" ;;
+        aarch64|arm64) arch="aarch64" ;;
+        *) error "Unsupported architecture: $(uname -m). Only x86_64 and aarch64 are supported." ;;
+    esac
+    
+    # Determine OS
+    local os
+    case "$OS" in
+        ubuntu|debian) os="linux" ;;
+        *) error "Unsupported OS for hytale-downloader: $OS. Only Ubuntu and Debian are supported." ;;
+    esac
+    
+    local download_url="https://github.com/Hytale/hytale-downloader/releases/download/$downloader_version/hytale-downloader-$arch-$os"
+    local temp_downloader="/tmp/hytale-downloader"
+    
+    # Download the binary
+    if ! curl -fsSL "$download_url" -o "$temp_downloader"; then
+        error "Failed to download hytale-downloader from $download_url"
+    fi
+    
+    # Make it executable and install
+    chmod +x "$temp_downloader"
+    mv "$temp_downloader" "$downloader_bin"
+    
+    # Create symlink in PATH
+    ln -sf "$downloader_bin" "/usr/local/bin/hytale-downloader"
+    
+    # Set ownership
+    chown root:root "$downloader_bin"
+    chmod 755 "$downloader_bin"
+    
+    log "hytale-downloader installed successfully to $downloader_bin"
+    
+    # Test the downloader
+    if "$downloader_bin" --version >/dev/null 2>&1; then
+        log "hytale-downloader test successful"
+    else
+        warning "hytale-downloader test failed, but installation completed"
+    fi
+}
+
 create_config_files() {
     log "Creating configuration files"
     
@@ -403,6 +472,7 @@ main() {
     install_nodejs
     create_directories
     download_and_install_hypanel
+    install_hytale_downloader
     create_config_files
     create_systemd_service
     start_service

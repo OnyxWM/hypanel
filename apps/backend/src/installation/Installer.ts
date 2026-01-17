@@ -79,7 +79,7 @@ export class Installer extends EventEmitter {
           "downloader_check",
           "hytale-downloader not found",
           serverId,
-          "Install hytale-downloader and ensure it's in PATH, or run the system installer"
+          "Run the install.sh script to install hytale-downloader, or install it manually and ensure it's in PATH"
         );
         logError(error, "install", serverId);
         throw error;
@@ -189,9 +189,9 @@ export class Installer extends EventEmitter {
 
   private async findDownloader(): Promise<string | null> {
     const commonPaths = [
+      "/opt/hytale-downloader/hytale-downloader", // Bundled installation location
       "/usr/local/bin/hytale-downloader",
       "/usr/bin/hytale-downloader",
-      "/opt/hytale-downloader/bin/hytale-downloader",
       "./hytale-downloader"
     ];
 
@@ -199,6 +199,7 @@ export class Installer extends EventEmitter {
     for (const downloadPath of commonPaths) {
       try {
         await fs.access(downloadPath, fs.constants.F_OK | fs.constants.X_OK);
+        logger.info(`Found hytale-downloader at: ${downloadPath}`);
         return downloadPath;
       } catch {
         // Continue checking
@@ -211,6 +212,7 @@ export class Installer extends EventEmitter {
       
       which.on("close", (code) => {
         if (code === 0) {
+          logger.info("Found hytale-downloader in PATH");
           resolve("hytale-downloader");
         } else {
           resolve(null);
