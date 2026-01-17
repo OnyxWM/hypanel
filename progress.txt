@@ -67,3 +67,15 @@
 - Added verification that server installState is INSTALLED before allowing start
 - TypeScript compilation successful with all type safety checks passing
 - Addresses PRD requirement #6: Start/stop uses official launch requirements
+
+2026-01-17: Implemented server config.json management with GUI editor
+- Added GET/PUT /api/servers/:id/config endpoints for config.json management with proper validation
+- Created ServerConfig React component with form validation, error handling, and real-time updates
+- Added Config tab to ServerDetailsPage with comprehensive editing capabilities
+- Implemented guardrails to prevent config changes while server is running for safety
+- Support core Hytale config fields: ServerName, MOTD, Password, MaxPlayers, MaxViewRadius, LocalCompressionEnabled, Defaults.World/Defaults.GameMode
+- Added atomic config file writing with temporary files to prevent corruption
+- Include proper JSON validation and user-friendly error messages throughout the UI
+- Created reusable Alert UI component for success/error notifications
+- TypeScript compilation successful with all type safety checks passing
+- Addresses PRD requirement #6: Config management: server-root config.json editor (read/write, validated JSON) per official manual
