@@ -8,6 +8,7 @@ import {
   deleteServer as deleteServerFromDb,
   updateServerStatus,
   updateServerPaths,
+  updateServerConfig,
 } from "../database/db.js";
 import { logger } from "../logger/Logger.js";
 import { EventEmitter } from "events";
@@ -173,6 +174,39 @@ export class ServerManager extends EventEmitter {
 
     logger.info(`Created server: ${id} (${config.name})`);
 
+    return this.getServer(id)!;
+  }
+
+  async updateServerConfig(id: string, config: Partial<{
+    name: string;
+    ip: string;
+    port: number;
+    maxMemory: number;
+    maxPlayers: number;
+    version?: string;
+    args: string[];
+    env: Record<string, string>;
+    sessionToken?: string;
+    identityToken?: string;
+    bindAddress?: string;
+  }>): Promise<Server> {
+    const instance = this.instances.get(id);
+    if (!instance) {
+      throw new Error(`Server ${id} not found`);
+    }
+
+    // Update database
+    updateServerConfig(id, config);
+
+    // Update config in filesystem
+    const currentConfig = instance.config;
+    const updatedConfig = { ...currentConfig, ...config };
+    this.configManager.saveConfig(updatedConfig);
+
+    // Update instance config
+    instance.config = updatedConfig;
+
+    logger.info(`Updated configuration for server: ${id}`);
     return this.getServer(id)!;
   }
 

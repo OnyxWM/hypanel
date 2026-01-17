@@ -211,6 +211,61 @@ export function updateServerPaths(id: string, serverRoot: string): void {
   stmt.run(serverRoot, Date.now(), id);
 }
 
+export function updateServerConfig(id: string, config: Partial<{
+  name?: string;
+  ip?: string;
+  port?: number;
+  maxMemory?: number;
+  maxPlayers?: number;
+  version?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  sessionToken?: string;
+  identityToken?: string;
+  bindAddress?: string;
+}>): void {
+  const database = getDatabase();
+  
+  // Only update fields that are stored in the database
+  const updates: string[] = [];
+  const values: any[] = [];
+  
+  if (config.name !== undefined) {
+    updates.push("name = ?");
+    values.push(config.name);
+  }
+  
+  if (config.ip !== undefined) {
+    updates.push("ip = ?");
+    values.push(config.ip);
+  }
+  
+  if (config.port !== undefined) {
+    updates.push("port = ?");
+    values.push(config.port);
+  }
+  
+  if (config.version !== undefined) {
+    updates.push("version = ?");
+    values.push(config.version);
+  }
+  
+  if (updates.length === 0) {
+    return; // No database fields to update
+  }
+  
+  updates.push("updated_at = ?");
+  values.push(Date.now());
+  values.push(id);
+  
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET ${updates.join(", ")}
+    WHERE id = ?
+  `);
+  stmt.run(...values);
+}
+
 export function deleteServer(id: string): void {
   const database = getDatabase();
   const stmt = database.prepare("DELETE FROM servers WHERE id = ?");

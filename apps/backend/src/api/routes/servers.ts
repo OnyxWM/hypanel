@@ -31,6 +31,8 @@ const commandSchema = z.object({
   command: z.string().min(1),
 });
 
+const updateServerSchema = createServerSchema.partial();
+
 export function createServerRoutes(serverManager: ServerManager): Router {
   const router = Router();
 
@@ -73,6 +75,28 @@ export function createServerRoutes(serverManager: ServerManager): Router {
       } catch (error) {
         res.status(500).json({
           error: "Failed to create server",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+  );
+
+  // PUT /api/servers/:id - Update server configuration
+  router.put(
+    "/:id",
+    validateParams(serverIdSchema),
+    validateBody(updateServerSchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const server = await serverManager.updateServerConfig(id, req.body);
+        res.json(server);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({
+          error: "Failed to update server",
           message: error instanceof Error ? error.message : "Unknown error",
         });
       }

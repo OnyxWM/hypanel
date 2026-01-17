@@ -8,7 +8,7 @@ import path from "path";
 
 export class ServerInstance extends EventEmitter {
   public readonly id: string;
-  public readonly config: ServerConfig;
+  public config: ServerConfig;
   private process: ServerProcess;
   private status: ServerStatus;
   private statsInterval: NodeJS.Timeout | null = null;
