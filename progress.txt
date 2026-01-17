@@ -156,3 +156,18 @@
 - Tests run via single documented command: npm test from backend directory
 - Uses isolated test environments with temp databases and mock services
 - Addresses PRD requirement #12: Add smoke tests for core workflows (SQLite + install state machine + websocket events)
+
+2026-01-17: Created comprehensive install.sh script for Ubuntu 24.04 and Debian 12
+- Implemented idempotent installer that provisions hypanel user and installs dependencies
+- Added OS detection with version validation for Ubuntu 24.04+ and Debian 12+ 
+- Creates hypanel system user with home directory and prompts for password securely
+- Installs base packages: curl, ca-certificates, unzip, tar, jq if missing
+- Checks for Java 25 and installs via OpenJDK if missing from system repositories
+- Installs Node.js 20 LTS from NodeSource repository if missing
+- Creates required directories with proper permissions ownership (/opt/hypanel, /etc/hypanel, /var/log/hypanel, ~/hytale)
+- Downloads and installs hypanel release from GitHub with configurable HYPANEL_VERSION
+- Creates systemd service with security settings and proper user permissions
+- Provides comprehensive completion information with URLs and service commands
+- Enforces runtime permissions model (no root required after install)
+- Script is fully idempotent with comprehensive error handling and logging
+- Addresses PRD requirement #13: Create install.sh for Ubuntu 24.04 + Debian 12

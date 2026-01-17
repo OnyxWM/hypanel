@@ -148,7 +148,7 @@
       "Creates directories used by app (e.g. /opt/hypanel, /etc/hypanel, /var/log/hypanel, and ~hypanel/hytale)",
       "Sets ownership so runtime does not require root"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "devops",

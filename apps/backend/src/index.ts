@@ -1,4 +1,6 @@
 import express from "express";
+import path from "path";
+import fs from "fs";
 import { config } from "./config/config.js";
 import { initDatabase, closeDatabase } from "./database/db.js";
 import { ServerManager } from "./server/ServerManager.js";
@@ -41,6 +43,50 @@ async function initialize(): Promise<void> {
       }
       next();
     });
+
+    // Serve webpanel static files in production
+    logger.info(`NODE_ENV = ${process.env.NODE_ENV}`);
+    if (process.env.NODE_ENV === "production") {
+      logger.info("In production mode, setting up webpanel static files");
+      
+      // Try different possible paths for webpanel dist
+      let webpanelDistPath = path.join(process.cwd(), "..", "webpanel", "dist");
+      logger.info(`Checking primary path: ${webpanelDistPath}`);
+      
+      // Alternative paths if the above doesn't exist
+      const alternativePaths = [
+        path.join(process.cwd(), "apps", "webpanel", "dist"),
+        path.join(process.env.HYPANEL_INSTALL_DIR || "/opt/hypanel", "apps", "webpanel", "dist"),
+        "/opt/hypanel/apps/webpanel/dist"
+      ];
+      
+      // Find the first existing path
+      for (const altPath of alternativePaths) {
+        if (fs.existsSync(altPath)) {
+          webpanelDistPath = altPath;
+          logger.info(`Found webpanel at alternative path: ${webpanelDistPath}`);
+          break;
+        }
+      }
+      
+      if (fs.existsSync(webpanelDistPath)) {
+        logger.info(`Setting up static file serving for webpanel at: ${webpanelDistPath}`);
+        app.use(express.static(webpanelDistPath));
+        
+        // Serve index.html for all non-API routes (SPA support)
+        app.get("*", (req, res) => {
+          if (!req.path.startsWith("/api")) {
+            res.sendFile(path.join(webpanelDistPath, "index.html"));
+          }
+        });
+        
+        logger.info(`Webpanel static files being served from: ${webpanelDistPath}`);
+      } else {
+        logger.warn(`Webpanel static files not found at: ${webpanelDistPath}`);
+      }
+    } else {
+      logger.info("Not in production mode, skipping webpanel static files");
+    }
 
     // API routes
     app.use("/api/servers", createServerRoutes(serverManager));

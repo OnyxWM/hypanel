@@ -242,13 +242,39 @@ download_and_install_hypanel() {
     rm -rf "$temp_extract"
     rm -f "$temp_download"
 
+    log "Building backend and webpanel..."
+    
+    # Build backend
+    cd "$HYPANEL_INSTALL_DIR/apps/backend"
+    if ! npm install --production=false; then
+        error "Failed to install backend dependencies"
+    fi
+    
+    if ! npm run build; then
+        error "Failed to build backend"
+    fi
+    
+    # Build webpanel
+    cd "$HYPANEL_INSTALL_DIR/apps/webpanel"
+    if ! npm install --production=false; then
+        error "Failed to install webpanel dependencies"
+    fi
+    
+    if ! npm run build; then
+        error "Failed to build webpanel"
+    fi
+    
+    cd "$HYPANEL_INSTALL_DIR"
+    
+    # Set proper permissions
     chmod -R 644 "$HYPANEL_INSTALL_DIR"/*
     find "$HYPANEL_INSTALL_DIR" -type d -exec chmod 755 {} \;
-    chmod +x "$HYPANEL_INSTALL_DIR"/apps/backend/hypanel 2>/dev/null || true
+    chmod +x "$HYPANEL_INSTALL_DIR"/apps/backend/dist/index.js 2>/dev/null || true
 
     chown -R root:root "$HYPANEL_INSTALL_DIR"
     
-    log "hypanel installed successfully to $HYPANEL_INSTALL_DIR"
+    log "hypanel installed and built successfully to $HYPANEL_INSTALL_DIR"
+    log "Webpanel will be served by the Node daemon at http://$(hostname -I | awk '{print $1}'):3000"
 }
 
 create_config_files() {
@@ -285,7 +311,7 @@ User=$HYPANEL_USER
 Group=$HYPANEL_USER
 WorkingDirectory=$HYPANEL_INSTALL_DIR
 EnvironmentFile=$HYPANEL_CONFIG_DIR/hypanel.env
-ExecStart=/usr/bin/node $HYPANEL_INSTALL_DIR/apps/backend/src/index.ts
+ExecStart=/usr/bin/node $HYPANEL_INSTALL_DIR/apps/backend/dist/index.js
 Restart=always
 RestartSec=10
 StandardOutput=journal
