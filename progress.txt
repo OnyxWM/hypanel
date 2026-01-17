@@ -104,3 +104,17 @@
 - Config writes succeed normally after server is stopped
 - Backend enforcement ensures bypassing UI is not possible
 - Addresses PRD requirement #8: Guardrails: enforce stop-before-edit for config files (backend authoritative)
+
+2026-01-17: Implemented comprehensive filesystem safety and path traversal protection
+- Added sanitizePathComponent method to convert dangerous characters to safe underscores
+- Implemented path containment verification using path.resolve() to ensure operations stay within server root
+- Added world name sanitization in getWorldConfig and updateWorldConfig methods  
+- Added regex validation for world names (alphanumeric, underscore, hyphen only)
+- Added path validation to createServerSchema rejecting traversal characters (.., ~, /, \)
+- Enhanced server deletion with proper server directory removal and path verification
+- Created comprehensive test suite covering path sanitization and containment scenarios
+- Verified protection against ../../../etc/passwd and other traversal attacks
+- All filesystem operations now verify paths stay within ~/hypanel/hytale directory
+- Server deletion only removes intended server directories with boundary checks
+- TypeScript compilation successful with all safety measures in place
+- Addresses PRD requirement #10: Filesystem safety: sanitize server ids/paths and prevent traversal

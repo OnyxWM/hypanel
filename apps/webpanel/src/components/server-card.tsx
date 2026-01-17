@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Play, Square, RotateCcw, MoreVertical, Users, Cpu, HardDrive, Clock, Download } from "lucide-react"
+import { Play, Square, RotateCcw, MoreVertical, Users, Cpu, HardDrive, Clock, Download, Key } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -75,6 +75,7 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
     offline: { label: "Offline", className: "bg-muted/50 text-muted-foreground border-border backdrop-blur-sm" },
     starting: { label: "Starting", className: "bg-warning/20 text-warning border-warning/30 backdrop-blur-sm" },
     stopping: { label: "Stopping", className: "bg-warning/20 text-warning border-warning/30 backdrop-blur-sm" },
+    auth_required: { label: "Auth Required", className: "bg-destructive/20 text-destructive border-destructive/30 backdrop-blur-sm" },
   }
 
   const status = statusConfig[server.status]
@@ -98,6 +99,7 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
                 server.status === "online" && "bg-success",
                 server.status === "offline" && "bg-muted-foreground",
                 (server.status === "starting" || server.status === "stopping") && "bg-warning animate-pulse",
+                server.status === "auth_required" && "bg-destructive animate-pulse",
               )}
             />
             {status.label}
@@ -257,6 +259,28 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
                 disabled={isLoading}
               >
                 <RotateCcw className="mr-2 h-3 w-3" />
+              </Button>
+            </>
+          ) : server.status === "auth_required" ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="flex-1 bg-destructive/20 text-destructive border-destructive/30 backdrop-blur-sm hover:bg-destructive/30"
+                onClick={() => window.open(`/servers/${server.id}/console`, '_blank')}
+                disabled={isLoading}
+              >
+                <Key className="mr-2 h-3 w-3" />
+                Authenticate
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="bg-secondary/50 backdrop-blur-sm hover:bg-secondary/70"
+                onClick={() => onStop && handleAction(() => onStop(server.id))}
+                disabled={isLoading}
+              >
+                <Square className="mr-2 h-3 w-3" />
               </Button>
             </>
           ) : (

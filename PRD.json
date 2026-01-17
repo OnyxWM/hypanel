@@ -110,7 +110,7 @@
       "Delete server only removes ~hypanel/hytale/<id> and related DB records, nothing else",
       "Add a unit test covering path normalization + root containment"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "quality",

@@ -326,6 +326,9 @@ export class ServerInstance extends EventEmitter {
         level = "warning";
       }
 
+      // Check for authentication requirements
+      this.checkAuthRequirements(lowerLine);
+
       // Parse player count from Hytale logs
       // Common patterns: "joined", "connected", "left", "disconnected", "logged in", "logged out"
       if (lowerLine.includes("joined") || lowerLine.includes("connected") || 
@@ -368,6 +371,55 @@ export class ServerInstance extends EventEmitter {
         level,
         message: line,
       });
+    }
+  }
+
+  private checkAuthRequirements(line: string): void {
+    // Detect authentication requirement patterns in Hytale server output
+    const authPatterns = [
+      /authentication required/i,
+      /please authenticate/i,
+      /auth login required/i,
+      /use \/auth login/i,
+      /run \/auth login device/i,
+      /authentication token needed/i,
+      /login required to continue/i,
+      /please run \/auth/i,
+      /auth: login required/i,
+      /server requires authentication/i
+    ];
+
+    // Check if any auth pattern matches
+    for (const pattern of authPatterns) {
+      if (pattern.test(line)) {
+        // Set status to auth_required if not already set
+        if (this.status !== "auth_required") {
+          this.logger.info(`Authentication required detected: ${line}`);
+          this.status = "auth_required";
+          this.emit("statusChange", this.status);
+          updateServerStatus(this.id, this.status);
+        }
+        return;
+      }
+    }
+
+    // Check for successful authentication patterns
+    const authSuccessPatterns = [
+      /authentication successful/i,
+      /auth login successful/i,
+      /successfully authenticated/i,
+      /login completed/i,
+      /authentication verified/i
+    ];
+
+    for (const pattern of authSuccessPatterns) {
+      if (pattern.test(line) && this.status === "auth_required") {
+        this.logger.info(`Authentication successful detected: ${line}`);
+        this.status = "online";
+        this.emit("statusChange", this.status);
+        updateServerStatus(this.id, this.status);
+        return;
+      }
     }
   }
 

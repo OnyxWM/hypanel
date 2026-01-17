@@ -1,4 +1,4 @@
-export type ServerStatus = "online" | "offline" | "starting" | "stopping"
+export type ServerStatus = "online" | "offline" | "starting" | "stopping" | "auth_required"
 export type InstallState = "NOT_INSTALLED" | "INSTALLING" | "INSTALLED" | "FAILED"
 
 export interface Server {

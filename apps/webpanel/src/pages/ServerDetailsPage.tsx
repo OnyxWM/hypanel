@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
-import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy } from "lucide-react"
+import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { StatsCard } from "@/components/stats-card"
@@ -9,6 +9,7 @@ import { ServerConsole } from "@/components/server-console"
 import { ServerConfig } from "@/components/server-config"
 import { WorldList } from "@/components/world-list"
 import { WorldConfig } from "@/components/world-config"
+import { AuthGuidance } from "@/components/auth-guidance"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -212,6 +213,7 @@ export default function ServerDetailsPage() {
     offline: { label: "Offline", className: "bg-muted text-muted-foreground border-border" },
     starting: { label: "Starting", className: "bg-warning/20 text-warning border-warning/30" },
     stopping: { label: "Stopping", className: "bg-warning/20 text-warning border-warning/30" },
+    auth_required: { label: "Auth Required", className: "bg-destructive/20 text-destructive border-destructive/30" },
   }
 
   const status = statusConfig[server.status]
@@ -244,7 +246,9 @@ export default function ServerDetailsPage() {
                       ? "bg-success"
                       : server.status === "offline"
                         ? "bg-muted-foreground"
-                        : "bg-warning animate-pulse"
+                        : server.status === "auth_required"
+                          ? "bg-destructive animate-pulse"
+                          : "bg-warning animate-pulse"
                   }`}
                 />
                 {status.label}
@@ -263,6 +267,17 @@ export default function ServerDetailsPage() {
                   <Button variant="secondary" onClick={handleRestart}>
                     <RotateCcw className="mr-2 h-4 w-4" />
                     Restart
+                  </Button>
+                </>
+              ) : server.status === "auth_required" ? (
+                <>
+                  <Button variant="outline" onClick={() => window.location.hash = '#console'}>
+                    <Key className="mr-2 h-4 w-4" />
+                    Authenticate
+                  </Button>
+                  <Button variant="secondary" onClick={handleStop}>
+                    <Square className="mr-2 h-4 w-4" />
+                    Stop
                   </Button>
                 </>
               ) : (
@@ -301,6 +316,11 @@ export default function ServerDetailsPage() {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">
+              {/* Auth Guidance */}
+              {server.status === "auth_required" && (
+                <AuthGuidance serverId={server.id} />
+              )}
+              
               {/* Charts */}
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <ResourceChart title="CPU Usage" data={cpuChartData} color="var(--chart-1)" maxValue={100} />
@@ -356,8 +376,17 @@ export default function ServerDetailsPage() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="console" className="h-[500px]">
-              <ServerConsole logs={logs} onSendCommand={handleSendCommand} isLoading={server.status !== "online"} />
+            <TabsContent value="console" className="space-y-4">
+              {server.status === "auth_required" && (
+                <AuthGuidance serverId={server.id} />
+              )}
+              <div className="h-[400px]">
+                <ServerConsole 
+                  logs={logs} 
+                  onSendCommand={handleSendCommand} 
+                  isLoading={server.status === "starting" || server.status === "stopping"} 
+                />
+              </div>
             </TabsContent>
 
             <TabsContent value="players">

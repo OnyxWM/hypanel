@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { ServerConsole } from "@/components/server-console"
+import { AuthGuidance } from "@/components/auth-guidance"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { apiClient, wsClient } from "@/lib/api-client"
@@ -127,7 +128,9 @@ export default function ConsolePage() {
                             ? "bg-success"
                             : s.status === "offline"
                               ? "bg-muted-foreground"
-                              : "bg-warning"
+                              : s.status === "auth_required"
+                                ? "bg-destructive animate-pulse"
+                                : "bg-warning"
                         }`}
                       />
                       {s.name}
@@ -144,7 +147,9 @@ export default function ConsolePage() {
                     ? "bg-success/20 text-success border-success/30"
                     : server.status === "offline"
                       ? "bg-muted text-muted-foreground"
-                      : "bg-warning/20 text-warning border-warning/30"
+                      : server.status === "auth_required"
+                        ? "bg-destructive/20 text-destructive border-destructive/30"
+                        : "bg-warning/20 text-warning border-warning/30"
                 }
               >
                 {server.status}
@@ -152,11 +157,15 @@ export default function ConsolePage() {
             )}
           </div>
 
+          {server && server.status === "auth_required" && (
+            <AuthGuidance serverId={server.id} />
+          )}
+          
           <div className="flex-1">
             <ServerConsole
               logs={logs}
               onSendCommand={handleSendCommand}
-              isLoading={!server || server.status !== "online"}
+              isLoading={!server || server.status === "starting" || server.status === "stopping"}
             />
           </div>
         </div>
