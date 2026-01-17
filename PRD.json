@@ -99,7 +99,7 @@
       "When auth succeeds (detected via console output), status returns to READY/RUNNING",
       "No sensitive auth info is persisted beyond normal console streaming"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "quality",

@@ -118,3 +118,17 @@
 - Server deletion only removes intended server directories with boundary checks
 - TypeScript compilation successful with all safety measures in place
 - Addresses PRD requirement #10: Filesystem safety: sanitize server ids/paths and prevent traversal
+
+2026-01-17: Implemented auth guidance for /auth login device requirements
+- Added AUTH_REQUIRED status to backend and frontend TypeScript types
+- Updated ServerInstance to detect authentication requirement patterns in console output
+- Added checkAuthRequirements method with pattern matching for auth signals
+- Created AuthGuidance React component with clear instructions for users
+- Updated ServerCard to show auth_required status with authenticate and stop buttons
+- Enhanced ServerDetailsPage to display auth guidance in overview and console tabs
+- Updated ConsolePage to handle auth_required status with proper UI indicators
+- Modified console components to allow command input when auth is required
+- Added comprehensive auth success detection to return status to online
+- No sensitive authentication information is persisted beyond normal console streaming
+- TypeScript compilation successful for both backend and frontend
+- Addresses PRD requirement #8: Auth guidance: detect when server requires /auth login device and surface status in UI
