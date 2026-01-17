@@ -15,6 +15,7 @@ export default function ServersPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [installProgress, setInstallProgress] = useState<Record<string, any>>({})
 
   useEffect(() => {
     loadServers()
@@ -35,6 +36,25 @@ export default function ServersPage() {
               cpu: data.stats.cpu || s.cpu,
               memory: data.stats.memory || s.memory,
               uptime: data.stats.uptime || s.uptime,
+            }
+          }
+          return s
+        })
+      )
+    })
+    wsClient.on("server:install:progress", (data: any) => {
+      setInstallProgress((prev) => ({
+        ...prev,
+        [data.serverId]: data.progress
+      }))
+      setServers((prev) =>
+        prev.map((s) => {
+          if (s.id === data.serverId && data.progress) {
+            return {
+              ...s,
+              installState: data.progress.stage === "ready" ? "INSTALLED" : 
+                           data.progress.stage === "failed" ? "FAILED" : "INSTALLING",
+              lastError: data.progress.stage === "failed" ? data.progress.message : undefined
             }
           }
           return s
@@ -106,6 +126,20 @@ export default function ServersPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete server")
       await loadServers()
+    }
+  }
+
+  const handleInstallServer = async (id: string) => {
+    try {
+      setServers((prev) => 
+        prev.map((s) => (s.id === id ? { ...s, installState: "INSTALLING", lastError: undefined } : s))
+      )
+      await apiClient.installServer(id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start installation")
+      setServers((prev) => 
+        prev.map((s) => (s.id === id ? { ...s, installState: "FAILED", lastError: err instanceof Error ? err.message : "Installation failed" } : s))
+      )
     }
   }
 
@@ -211,6 +245,8 @@ export default function ServersPage() {
                   onStop={handleStopServer}
                   onRestart={handleRestartServer}
                   onDelete={handleDeleteServer}
+                  onInstall={handleInstallServer}
+                  installProgress={installProgress[server.id]}
                 />
               ))}
             </div>

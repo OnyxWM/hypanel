@@ -118,6 +118,12 @@ export class ApiClient {
   async getStats(id: string, limit: number = 100): Promise<any[]> {
     return this.request<any[]>(`/api/servers/${id}/stats?limit=${limit}`)
   }
+
+  async installServer(id: string): Promise<void> {
+    await this.request(`/api/servers/${id}/install`, {
+      method: "POST",
+    })
+  }
 }
 
 export const apiClient = new ApiClient()

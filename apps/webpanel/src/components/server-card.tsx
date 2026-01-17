@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Play, Square, RotateCcw, MoreVertical, Users, Cpu, HardDrive, Clock } from "lucide-react"
+import { Play, Square, RotateCcw, MoreVertical, Users, Cpu, HardDrive, Clock, Download } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import type { Server } from "@/lib/api"
+import { InstallProgressDisplay } from "@/components/install-progress"
 
 interface ServerCardProps {
   server: Server
@@ -28,9 +29,11 @@ interface ServerCardProps {
   onStop?: (id: string) => void
   onRestart?: (id: string) => void
   onDelete?: (id: string) => void
+  onInstall?: (id: string) => void
+  installProgress?: any
 }
 
-export function ServerCard({ server, onStart, onStop, onRestart, onDelete }: ServerCardProps) {
+export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onInstall, installProgress }: ServerCardProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
@@ -127,6 +130,13 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete }: Ser
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Install Progress */}
+        <InstallProgressDisplay 
+          installState={server.installState}
+          lastError={server.lastError}
+          progress={installProgress}
+        />
+
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-4">
           <div className="flex items-center gap-2">
@@ -203,7 +213,21 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete }: Ser
 
         {/* Actions */}
         <div className="flex gap-2">
-          {server.status === "offline" ? (
+          {server.installState === "NOT_INSTALLED" || server.installState === "FAILED" ? (
+            <Button
+              size="sm"
+              className="flex-1 shadow-lg shadow-primary/20"
+              onClick={() => onInstall && handleAction(() => onInstall(server.id))}
+              disabled={isLoading}
+            >
+              <Download className="mr-2 h-3 w-3" />
+              {server.installState === "FAILED" ? "Retry Install" : "Install"}
+            </Button>
+          ) : server.installState === "INSTALLING" ? (
+            <Button size="sm" variant="secondary" className="flex-1 bg-secondary/50 backdrop-blur-sm" disabled>
+              Installing...
+            </Button>
+          ) : server.status === "offline" ? (
             <Button
               size="sm"
               className="flex-1 shadow-lg shadow-primary/20"
@@ -232,7 +256,7 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete }: Ser
                 onClick={() => onRestart && handleAction(() => onRestart(server.id))}
                 disabled={isLoading}
               >
-                <RotateCcw className="h-3 w-3" />
+                <RotateCcw className="mr-2 h-3 w-3" />
               </Button>
             </>
           ) : (
