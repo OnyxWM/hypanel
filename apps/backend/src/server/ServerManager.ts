@@ -135,15 +135,33 @@ export class ServerManager extends EventEmitter {
     const hypanelHome = path.join("/home", "hypanel");
     const serverRoot = path.join(hypanelHome, "hytale", id);
     
-    // Ensure the hytale directory exists
-    await fs.mkdir(path.join(hypanelHome, "hytale"), { recursive: true });
-    await fs.mkdir(serverRoot, { recursive: true });
+    // Ensure the hytale directory exists with secure permissions
+    const hytaleDir = path.join(hypanelHome, "hytale");
+    await fs.mkdir(hytaleDir, { recursive: true });
     
-    // Set ownership to hypanel user and proper permissions
+    // Create server directory with secure permissions (not world-writable)
+    await fs.mkdir(serverRoot, { recursive: true, mode: 0o755 });
+    
+    // Set ownership to hypanel user and verify permissions
     try {
       await execAsync(`chown -R hypanel:hypanel "${serverRoot}"`);
       await execAsync(`chmod 755 "${serverRoot}"`);
-      logger.info(`Set ownership and permissions for: ${serverRoot}`);
+      
+      // In production, verify no world-writable permissions
+      if (process.env.NODE_ENV === "production") {
+        // Ensure parent directories also have proper permissions
+        await execAsync(`chmod 755 "${hytaleDir}"`);
+        await execAsync(`chown hypanel:hypanel "${hytaleDir}"`);
+        
+        // Verify no world-writable permissions on server root
+        const { stdout: perms } = await execAsync(`stat -c "%a" "${serverRoot}"`);
+        if (parseInt(perms, 8) & 0o002) {
+          logger.warn(`Server directory ${serverRoot} has world-writable permissions, fixing`);
+          await execAsync(`chmod 755 "${serverRoot}"`);
+        }
+      }
+      
+      logger.info(`Set ownership and secure permissions for: ${serverRoot}`);
     } catch (error) {
       logger.warn(`Failed to set ownership for ${serverRoot}: ${error}`);
     }

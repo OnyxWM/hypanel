@@ -108,11 +108,14 @@ export class Installer extends EventEmitter {
           "downloading",
           downloadResult.error || "Unknown download error",
           serverId,
-          "Check network connectivity and disk space, then retry the installation"
+          "Check network connectivity and disk space, then retry installation"
         );
         logError(error, "install", serverId);
         throw error;
       }
+
+      // Verify and fix file permissions for security
+      await this.verifyAndFixPermissions(server.serverRoot, serverId);
 
       // Start verification stage
       this.emitProgress(serverId, {
@@ -128,7 +131,7 @@ export class Installer extends EventEmitter {
           "verification",
           verification.error || "Required files not found",
           serverId,
-          "Reinstall the server to ensure all required files are downloaded"
+          "Reinstall server to ensure all required files are downloaded"
         );
         logError(error, "install", serverId);
         throw error;
@@ -223,6 +226,46 @@ export class Installer extends EventEmitter {
         resolve(null);
       });
     });
+  }
+
+  private async verifyAndFixPermissions(serverRoot: string, serverId: string): Promise<void> {
+    logInstallationPhase(serverId, "permission_check", "Verifying and fixing file permissions");
+
+    try {
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+
+      // In production, ensure proper ownership and permissions
+      if (process.env.NODE_ENV === "production") {
+        // Set ownership to hypanel user for all files in server root
+        await execAsync(`chown -R hypanel:hypanel "${serverRoot}"`);
+        
+        // Set appropriate permissions: 755 for directories, 644 for files
+        await execAsync(`find "${serverRoot}" -type d -exec chmod 755 {} \\;`);
+        await execAsync(`find "${serverRoot}" -type f -exec chmod 644 {} \\;`);
+        
+        // Ensure executable files have proper permissions
+        await execAsync(`find "${serverRoot}" -name "*.jar" -exec chmod 644 {} \\;`);
+        
+        // Verify no world-writable permissions exist
+        const { stdout: worldWritable } = await execAsync(`find "${serverRoot}" -perm -o+w | head -10`);
+        if (worldWritable.trim()) {
+          logger.warn(`Found world-writable files in ${serverRoot}, fixing permissions`);
+          await execAsync(`find "${serverRoot}" -perm -o+w -exec chmod o-w {} \\;`);
+        }
+        
+        logger.info(`Applied secure permissions to server directory: ${serverRoot}`);
+      }
+
+      logInstallationPhase(serverId, "permission_complete", "File permissions verified and secured");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      logger.warn(`Failed to verify permissions for ${serverRoot}: ${errorMessage}`);
+      
+      // Don't fail the installation for permission issues, just log warning
+      logInstallationPhase(serverId, "permission_warning", `Permission verification completed with warnings: ${errorMessage}`);
+    }
   }
 
   private async executeDownloader(

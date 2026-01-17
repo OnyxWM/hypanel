@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { config } from "../config/config.js";
 import { ServerConfig } from "../types/index.js";
+import { logger } from "../logger/Logger.js";
 
 export class ConfigManager {
   private serversDir: string;
@@ -13,7 +14,21 @@ export class ConfigManager {
 
   private ensureDirectoryExists(): void {
     if (!fs.existsSync(this.serversDir)) {
-      fs.mkdirSync(this.serversDir, { recursive: true });
+      fs.mkdirSync(this.serversDir, { recursive: true, mode: 0o755 });
+    }
+    
+    // In production, verify directory ownership and permissions
+    if (process.env.NODE_ENV === "production") {
+      try {
+        const stats = fs.statSync(this.serversDir);
+        // Ensure directory is not world-writable for security
+        if ((stats.mode & 0o002) !== 0) {
+          logger.warn(`Server directory ${this.serversDir} is world-writable, fixing permissions`);
+          fs.chmodSync(this.serversDir, 0o755);
+        }
+      } catch (error) {
+        logger.warn(`Cannot verify permissions for ${this.serversDir}: ${error}`);
+      }
     }
   }
 
@@ -29,13 +44,16 @@ export class ConfigManager {
     const serverDir = this.getServerDir(serverConfig.id);
     const configPath = this.getConfigPath(serverConfig.id);
 
-    // Ensure server directory exists
+    // Ensure server directory exists with secure permissions
     if (!fs.existsSync(serverDir)) {
-      fs.mkdirSync(serverDir, { recursive: true });
+      fs.mkdirSync(serverDir, { recursive: true, mode: 0o755 });
     }
 
-    // Write config file
+    // Write config file with secure permissions (not world-writable)
     fs.writeFileSync(configPath, JSON.stringify(serverConfig, null, 2), "utf-8");
+    fs.chmodSync(configPath, 0o644);
+    
+    logger.debug(`Saved server config for ${serverConfig.id} with secure permissions`);
   }
 
   loadConfig(serverId: string): ServerConfig | null {
@@ -79,7 +97,7 @@ export class ConfigManager {
   ensureServerDirectory(serverId: string): string {
     const serverDir = this.getServerDir(serverId);
     if (!fs.existsSync(serverDir)) {
-      fs.mkdirSync(serverDir, { recursive: true });
+      fs.mkdirSync(serverDir, { recursive: true, mode: 0o755 });
     }
     return serverDir;
   }

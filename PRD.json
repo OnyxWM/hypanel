@@ -195,6 +195,6 @@
       "No world-writable permissions are introduced",
       "Attempting to escape server root via config/server id fails safely"
     ],
-    "passes": false
+    "passes": true
   }
 ]

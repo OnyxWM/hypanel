@@ -9,14 +9,70 @@ import { createStatsRoutes } from "./api/routes/stats.js";
 import { errorHandler } from "./api/middleware/validation.js";
 import { WebSocketServerManager } from "./websocket/WebSocketServer.js";
 import { logger } from "./logger/Logger.js";
+import os from "os";
 
 let serverManager: ServerManager;
 let wsServer: WebSocketServerManager;
 let httpServer: any;
 
+function verifyRuntimePermissions(): void {
+  // In production, ensure we're not running as root for security
+  if (process.env.NODE_ENV === "production") {
+    if (process.getuid && process.getuid() === 0) {
+      logger.error("Security violation: Hypanel daemon should not run as root in production");
+      logger.error("Please run as the 'hypanel' user or configure systemd service properly");
+      process.exit(1);
+    }
+    
+    // Verify we're running as the hypanel user
+    const currentUser = os.userInfo().username;
+    if (currentUser !== "hypanel") {
+      logger.warn(`Running as user '${currentUser}' instead of 'hypanel'. This may cause permission issues.`);
+      logger.warn("For optimal security, run as the 'hypanel' user.");
+    } else {
+      logger.info("Running as hypanel user - security model verified");
+    }
+    
+    // Verify critical directories exist and are writable
+    const criticalDirs = [
+      process.env.HYPANEL_SERVERS_DIR || "/home/hypanel/hytale",
+      process.env.HYPANEL_LOG_DIR || "/var/log/hypanel"
+    ];
+    
+    for (const dir of criticalDirs) {
+      try {
+        const fs = require("fs");
+        if (!fs.existsSync(dir)) {
+          logger.error(`Critical directory missing: ${dir}`);
+          logger.error("Please run install.sh to set up the required directories");
+          process.exit(1);
+        }
+        
+        // Test write permissions
+        const testFile = `${dir}/.hypanel-write-test`;
+        fs.writeFileSync(testFile, "test");
+        fs.unlinkSync(testFile);
+        
+        logger.debug(`Directory ${dir} is writable`);
+      } catch (error) {
+        logger.error(`Cannot write to critical directory ${dir}: ${error}`);
+        logger.error("Please check directory permissions and ownership");
+        process.exit(1);
+      }
+    }
+    
+    logger.info("Runtime permissions model verification passed");
+  } else {
+    logger.info("Development mode detected - skipping permissions verification");
+  }
+}
+
 async function initialize(): Promise<void> {
   try {
     logger.info("Initializing Hypanel daemon...");
+
+    // Verify runtime permissions model
+    verifyRuntimePermissions();
 
     // Initialize database
     logger.info("Initializing database...");
