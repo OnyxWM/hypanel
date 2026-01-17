@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import { EventEmitter } from "events";
 import { logger } from "../logger/Logger.js";
-import { updateServerInstallState, getServer } from "../database/db.js";
+import { updateServerInstallState, getServer, tryStartInstallation, getAllServers } from "../database/db.js";
 import { InstallState } from "../types/index.js";
 import path from "path";
 import fs from "fs/promises";
@@ -21,9 +21,10 @@ export class Installer extends EventEmitter {
   }
 
   async installServer(serverId: string): Promise<void> {
-    // Prevent concurrent installations
-    if (this.activeInstallations.get(serverId)) {
-      throw new Error(`Installation already in progress for server ${serverId}`);
+    // Use database-based locking to prevent concurrent installations
+    const lockResult = tryStartInstallation(serverId);
+    if (!lockResult.success) {
+      throw new Error(lockResult.reason || `Failed to start installation for server ${serverId}`);
     }
 
     this.activeInstallations.set(serverId, true);
@@ -36,6 +37,17 @@ export class Installer extends EventEmitter {
 
       if (!server.serverRoot) {
         throw new Error(`Server ${serverId} has no server root path`);
+      }
+
+      // If this is a retry (from FAILED state), clean up any partial installation
+      const originalState = server.installState;
+      if (originalState === "FAILED") {
+        await this.cleanupInstallation(serverId, server.serverRoot);
+        this.emitProgress(serverId, {
+          stage: "queued",
+          progress: 0,
+          message: "Cleaning up previous installation attempt..."
+        });
       }
 
       // Update state to INSTALLING
@@ -329,5 +341,80 @@ export class Installer extends EventEmitter {
 
   getActiveInstallations(): string[] {
     return Array.from(this.activeInstallations.keys());
+  }
+
+  async recoverInterruptedInstallations(): Promise<void> {
+    // This should be called during daemon startup to handle crashed installations
+    logger.info("Checking for interrupted installations...");
+    
+    try {
+      const servers = getAllServers();
+      const interruptedServers = servers.filter(server => server.installState === "INSTALLING");
+      
+      if (interruptedServers.length > 0) {
+        logger.warn(`Found ${interruptedServers.length} interrupted installations, marking as FAILED`);
+        
+        for (const server of interruptedServers) {
+          await this.updateInstallState(
+            server.id,
+            "FAILED",
+            "Installation was interrupted due to daemon restart. Please retry the installation.",
+            null,
+            null
+          );
+          
+          this.emitProgress(server.id, {
+            stage: "failed",
+            progress: 0,
+            message: "Installation interrupted - daemon restarted",
+            details: { 
+              error: "Installation was interrupted due to daemon restart. Please retry the installation.",
+              recoverable: true
+            }
+          });
+        }
+      } else {
+        logger.info("No interrupted installations found");
+      }
+    } catch (error) {
+      logger.error(`Error during installation recovery: ${error}`);
+    }
+  }
+
+  private async cleanupInstallation(serverId: string, serverRoot: string): Promise<void> {
+    // Clean up any partial installation artifacts to ensure a clean reinstallation
+    logger.info(`Cleaning up installation artifacts for server ${serverId}`);
+    
+    try {
+      // List of files/directories that might exist from a partial installation
+      const cleanupTargets = [
+        "HytaleServer.jar",
+        "Assets.zip",
+        "temp", // Temporary download directory
+        ".download" // Download metadata
+      ];
+      
+      for (const target of cleanupTargets) {
+        const targetPath = path.join(serverRoot, target);
+        try {
+          const stats = await fs.stat(targetPath);
+          if (stats.isDirectory()) {
+            await fs.rm(targetPath, { recursive: true, force: true });
+            logger.debug(`Removed directory: ${targetPath}`);
+          } else {
+            await fs.unlink(targetPath);
+            logger.debug(`Removed file: ${targetPath}`);
+          }
+        } catch (error) {
+          // Ignore errors if file/directory doesn't exist
+          if ((error as any).code !== 'ENOENT') {
+            logger.warn(`Failed to remove ${targetPath}: ${error}`);
+          }
+        }
+      }
+    } catch (error) {
+      logger.error(`Error during cleanup for server ${serverId}: ${error}`);
+      // Don't throw error here, as cleanup failures shouldn't prevent retry
+    }
   }
 }

@@ -201,6 +201,49 @@ export function updateServerInstallState(id: string, installState: any, lastErro
   stmt.run(installState, lastError || null, jarPath || null, assetsPath || null, Date.now(), id);
 }
 
+export function tryStartInstallation(id: string): { success: boolean; reason?: string } {
+  const database = getDatabase();
+  
+  // First, check current state
+  const checkStmt = database.prepare(`
+    SELECT install_state FROM servers WHERE id = ?
+  `);
+  const result = checkStmt.get(id) as any;
+  
+  if (!result) {
+    return { success: false, reason: "Server not found" };
+  }
+  
+  const currentState = result.install_state;
+  
+  // Can only start installation from NOT_INSTALLED or FAILED states
+  if (currentState !== "NOT_INSTALLED" && currentState !== "FAILED") {
+    const stateMessages: Record<string, string> = {
+      "INSTALLING": "Installation already in progress",
+      "INSTALLED": "Server is already installed"
+    };
+    return { 
+      success: false, 
+      reason: stateMessages[currentState] || `Cannot install from state: ${currentState}` 
+    };
+  }
+  
+  // Atomically update to INSTALLING state
+  const updateStmt = database.prepare(`
+    UPDATE servers 
+    SET install_state = 'INSTALLING', last_error = NULL, updated_at = ?
+    WHERE id = ? AND install_state IN ('NOT_INSTALLED', 'FAILED')
+  `);
+  
+  const updateResult = updateStmt.run(Date.now(), id);
+  
+  if (updateResult.changes === 0) {
+    return { success: false, reason: "Installation state changed concurrently" };
+  }
+  
+  return { success: true };
+}
+
 export function updateServerPaths(id: string, serverRoot: string): void {
   const database = getDatabase();
   const stmt = database.prepare(`

@@ -29,6 +29,10 @@ export class ServerManager extends EventEmitter {
     this.configManager = new ConfigManager();
     this.installer = new Installer();
     this.setupInstallerListeners();
+    
+    // Recover any interrupted installations before restoring servers
+    this.installer.recoverInterruptedInstallations();
+    
     this.restoreServers();
   }
 
@@ -262,21 +266,6 @@ export class ServerManager extends EventEmitter {
   }
 
   async installServer(id: string): Promise<void> {
-    const server = this.getServer(id);
-    if (!server) {
-      throw new Error(`Server ${id} not found`);
-    }
-
-    // Check if already installed
-    if (server.installState === "INSTALLED") {
-      throw new Error(`Server ${id} is already installed`);
-    }
-
-    // Check if installation is in progress
-    if (this.installer.isInstalling(id)) {
-      throw new Error(`Installation already in progress for server ${id}`);
-    }
-
     logger.info(`Starting installation for server ${id}`);
     await this.installer.installServer(id);
   }
