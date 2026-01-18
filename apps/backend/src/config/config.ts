@@ -43,11 +43,27 @@ const rawConfig = {
 
   // Resolve relative paths to absolute paths
   const config = result.data;
+  
+  // Resolve database path first
+  const resolvedDatabasePath = path.isAbsolute(config.databasePath)
+    ? config.databasePath
+    : path.resolve(__dirname, "..", "..", "..", config.databasePath);
+  
+  // Derive credentials path from database directory to ensure they're in the same location
+  const resolveCredentialsPath = (): string => {
+    if (config.downloaderCredentialsPath) {
+      return path.isAbsolute(config.downloaderCredentialsPath)
+        ? config.downloaderCredentialsPath
+        : path.resolve(__dirname, "..", "..", "..", config.downloaderCredentialsPath);
+    }
+    // Use the same directory as the database file
+    const databaseDir = path.dirname(resolvedDatabasePath);
+    return path.join(databaseDir, ".hytale-downloader-credentials.json");
+  };
+  
   return {
     ...config,
-    databasePath: path.isAbsolute(config.databasePath)
-      ? config.databasePath
-      : path.resolve(__dirname, "..", "..", "..", config.databasePath),
+    databasePath: resolvedDatabasePath,
     serversDir: path.isAbsolute(config.serversDir)
       ? config.serversDir
       : path.resolve(__dirname, "..", "..", "..", config.serversDir),
@@ -57,11 +73,7 @@ const rawConfig = {
     backupDir: path.isAbsolute(config.backupDir)
       ? config.backupDir
       : path.resolve(__dirname, "..", "..", "..", config.backupDir),
-    downloaderCredentialsPath: config.downloaderCredentialsPath
-      ? path.isAbsolute(config.downloaderCredentialsPath)
-        ? config.downloaderCredentialsPath
-        : path.resolve(__dirname, "..", "..", "..", config.downloaderCredentialsPath)
-      : path.resolve(__dirname, "..", "..", "..", "data", ".hytale-downloader-credentials.json"),
+    downloaderCredentialsPath: resolveCredentialsPath(),
   };
 }
 
