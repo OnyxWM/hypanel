@@ -266,6 +266,7 @@ create_directories() {
         "$HYPANEL_LOG_DIR"
         "$HYPANEL_SERVERS_DIR"
         "$HYPANEL_INSTALL_DIR/data"
+        "$HYPANEL_INSTALL_DIR/apps/backend/data"
         "$HYPANEL_HOME/backup"
     )
 
@@ -287,6 +288,9 @@ create_directories() {
 
     chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_INSTALL_DIR/data"
     chmod 755 "$HYPANEL_INSTALL_DIR/data"
+
+    chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_INSTALL_DIR/apps/backend/data"
+    chmod 755 "$HYPANEL_INSTALL_DIR/apps/backend/data"
 
     chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_HOME/backup"
     chmod 755 "$HYPANEL_HOME/backup"
