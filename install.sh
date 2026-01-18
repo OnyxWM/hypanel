@@ -84,9 +84,10 @@ create_user() {
 
     if [[ ! -d "$HYPANEL_HOME" ]]; then
         mkdir -p "$HYPANEL_HOME"
-        chown "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_HOME"
-        chmod 755 "$HYPANEL_HOME"
     fi
+    # Always ensure correct ownership and permissions for home directory
+    chown "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_HOME"
+    chmod 755 "$HYPANEL_HOME"
 }
 
 prompt_password() {
