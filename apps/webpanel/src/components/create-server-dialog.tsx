@@ -14,37 +14,27 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface CreateServerDialogProps {
   onCreateServer: (data: {
     name: string
-    jarFile?: string
-    assetsPath?: string
-    maxPlayers: number
     maxMemory: number
-    version?: string
     port?: number
-    sessionToken?: string
-    identityToken?: string
+    backupEnabled?: boolean
+    aotCacheEnabled?: boolean
   }) => Promise<void>
 }
 
 export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
-  const [jarFile, setJarFile] = useState("HytaleServer.jar")
-  const [maxPlayers, setMaxPlayers] = useState(20)
   const [maxMemory, setMaxMemory] = useState(4)
   const [port, setPort] = useState(5520)
-  const [version, setVersion] = useState("1.0.0-beta")
-  const [sessionToken, setSessionToken] = useState("")
-  const [identityToken, setIdentityToken] = useState("")
+  const [backupEnabled, setBackupEnabled] = useState(true)
+  const [aotCacheEnabled, setAotCacheEnabled] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
-
-  const serverPath = `~/hytale/${name.toLowerCase().replace(/\s+/g, "-")}`
-  const assetsPath = `${serverPath}/Assets.zip`
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -52,24 +42,17 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
     try {
       await onCreateServer({
         name,
-        jarFile,
-        assetsPath,
-        maxPlayers,
         maxMemory,
-        version,
         port,
-        sessionToken: sessionToken || undefined,
-        identityToken: identityToken || undefined,
+        backupEnabled,
+        aotCacheEnabled,
       })
       setOpen(false)
       setName("")
-      setJarFile("HytaleServer.jar")
-      setMaxPlayers(20)
       setMaxMemory(4)
       setPort(5520)
-      setVersion("1.0.0-beta")
-      setSessionToken("")
-      setIdentityToken("")
+      setBackupEnabled(true)
+      setAotCacheEnabled(true)
     } finally {
       setIsLoading(false)
     }
@@ -89,7 +72,7 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
             <DialogTitle>Create New Server</DialogTitle>
             <DialogDescription>Configure your new Hytale server. Click create when you&apos;re done.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto overflow-x-visible px-1">
             <div className="grid gap-2">
               <Label htmlFor="name">Server Name</Label>
               <Input
@@ -100,19 +83,6 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
                 required
                 className="bg-secondary/50 backdrop-blur-sm border-border/50"
               />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="jarFile">JAR File</Label>
-              <Input
-                id="jarFile"
-                placeholder="HytaleServer.jar"
-                value={jarFile}
-                onChange={(e) => setJarFile(e.target.value)}
-                className="bg-secondary/50 backdrop-blur-sm border-border/50"
-              />
-            </div>
-            <div className="text-xs text-muted-foreground px-1">
-              Server will be created at: {serverPath || "~/hytale/..."}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="port">Port</Label>
@@ -128,59 +98,31 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="version">Version</Label>
-              <Select value={version} onValueChange={setVersion}>
-                <SelectTrigger className="bg-secondary/50 backdrop-blur-sm border-border/50">
-                  <SelectValue placeholder="Select version" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover/80 backdrop-blur-xl border-border/50">
-                  <SelectItem value="1.0.0-beta">1.0.0-beta (Latest)</SelectItem>
-                  <SelectItem value="0.9.0-beta">0.9.0-beta</SelectItem>
-                  <SelectItem value="0.8.0-beta">0.8.0-beta</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between">
-                <Label>Max Players</Label>
-                <span className="text-sm text-muted-foreground">{maxPlayers}</span>
-              </div>
-              <Slider
-                value={[maxPlayers]}
-                onValueChange={([value]) => setMaxPlayers(value)}
-                min={5}
-                max={100}
-                step={5}
-              />
-            </div>
-            <div className="grid gap-2">
               <div className="flex items-center justify-between">
                 <Label>Memory (GB)</Label>
                 <span className="text-sm text-muted-foreground">{maxMemory}GB</span>
               </div>
-              <Slider value={[maxMemory]} onValueChange={([value]) => setMaxMemory(value)} min={1} max={16} step={1} />
+              <Slider value={[maxMemory]} onValueChange={([value]) => setMaxMemory(value)} min={4} max={12} step={1} />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="sessionToken">Session Token (Optional)</Label>
-              <Input
-                id="sessionToken"
-                type="password"
-                placeholder="Leave empty for interactive auth"
-                value={sessionToken}
-                onChange={(e) => setSessionToken(e.target.value)}
-                className="bg-secondary/50 backdrop-blur-sm border-border/50"
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="backupEnabled"
+                checked={backupEnabled}
+                onCheckedChange={(checked: boolean | "indeterminate") => setBackupEnabled(checked === true)}
               />
+              <Label htmlFor="backupEnabled" className="text-sm font-normal cursor-pointer">
+                Enable Backups
+              </Label>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="identityToken">Identity Token (Optional)</Label>
-              <Input
-                id="identityToken"
-                type="password"
-                placeholder="Leave empty for interactive auth"
-                value={identityToken}
-                onChange={(e) => setIdentityToken(e.target.value)}
-                className="bg-secondary/50 backdrop-blur-sm border-border/50"
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="aotCacheEnabled"
+                checked={aotCacheEnabled}
+                onCheckedChange={(checked: boolean | "indeterminate") => setAotCacheEnabled(checked === true)}
               />
+              <Label htmlFor="aotCacheEnabled" className="text-sm font-normal cursor-pointer">
+                Enable Ahead-of-Time (AOT) caching
+              </Label>
             </div>
           </div>
           <DialogFooter>

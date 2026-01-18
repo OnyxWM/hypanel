@@ -37,12 +37,14 @@ export class ConfigManager {
   }
 
   private getConfigPath(serverId: string): string {
-    return path.join(this.getServerDir(serverId), "config.json");
+    return path.join(this.getServerDir(serverId), "server.json");
   }
 
   saveConfig(serverConfig: ServerConfig): void {
-    const serverDir = this.getServerDir(serverConfig.id);
-    const configPath = this.getConfigPath(serverConfig.id);
+    // Use the path from serverConfig if available (supports name-based directories)
+    // Otherwise fall back to constructing from serverId (backward compatibility)
+    const serverDir = serverConfig.path || this.getServerDir(serverConfig.id);
+    const configPath = path.join(serverDir, "server.json");
 
     // Ensure server directory exists with secure permissions
     if (!fs.existsSync(serverDir)) {
@@ -56,16 +58,62 @@ export class ConfigManager {
     logger.debug(`Saved server config for ${serverConfig.id} with secure permissions`);
   }
 
-  loadConfig(serverId: string): ServerConfig | null {
-    const configPath = this.getConfigPath(serverId);
+  loadConfig(serverId: string, serverPath?: string): ServerConfig | null {
+    // Use UUID-based directory: serversDir/serverId/server.json
+    // If serverPath is provided, use it (for backward compatibility), otherwise construct from serverId
+    const configPath = serverPath && typeof serverPath === "string" && serverPath.trim() !== ""
+      ? path.join(serverPath, "server.json")
+      : this.getConfigPath(serverId);
     
+    logger.debug(`Loading config for server ${serverId}: configPath=${configPath}`);
+    
+    // Migration: If server.json doesn't exist but config.json does, migrate it
     if (!fs.existsSync(configPath)) {
+      const oldConfigPath = serverPath && typeof serverPath === "string" && serverPath.trim() !== ""
+        ? path.join(serverPath, "config.json")
+        : path.join(this.getServerDir(serverId), "config.json");
+      
+      if (fs.existsSync(oldConfigPath)) {
+        logger.info(`Migrating server config from config.json to server.json for server ${serverId}`);
+        try {
+          // Read the old config
+          const content = fs.readFileSync(oldConfigPath, "utf-8");
+          const config = JSON.parse(content) as ServerConfig;
+          
+          // Validate it's actually a hypanel config (has id, name, maxMemory, etc.)
+          // Hytale's config.json has Version, ServerName, etc. - different structure
+          if (config.id && config.name && (config.maxMemory !== undefined || config.executable)) {
+            // This is a hypanel config, migrate it
+            // Ensure server directory exists
+            const serverDir = serverPath || this.getServerDir(serverId);
+            if (!fs.existsSync(serverDir)) {
+              fs.mkdirSync(serverDir, { recursive: true, mode: 0o755 });
+            }
+            
+            // Write to new location
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+            fs.chmodSync(configPath, 0o644);
+            
+            logger.info(`Successfully migrated server config from config.json to server.json for server ${serverId}`);
+            return config;
+          } else {
+            // This looks like a Hytale config, don't migrate
+            logger.debug(`Old config.json exists but appears to be Hytale server config, not migrating`);
+          }
+        } catch (error) {
+          logger.warn(`Failed to migrate config.json to server.json for server ${serverId}: ${error}`);
+        }
+      }
+      
+      logger.debug(`Config file not found at: ${configPath}`);
       return null;
     }
 
     try {
       const content = fs.readFileSync(configPath, "utf-8");
-      return JSON.parse(content) as ServerConfig;
+      const config = JSON.parse(content) as ServerConfig;
+      logger.debug(`Successfully loaded config for server ${serverId} from ${configPath}`);
+      return config;
     } catch (error) {
       throw new Error(`Failed to load config for server ${serverId}: ${error}`);
     }

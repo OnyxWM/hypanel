@@ -1,11 +1,95 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { ServerManager } from "../../server/ServerManager.js";
-import { getConsoleLogs } from "../../database/db.js";
+import { getConsoleLogs, getServerStats, getServer as getServerFromDb } from "../../database/db.js";
 import { validateBody, validateParams } from "../middleware/validation.js";
 import fs from "fs";
 import path from "path";
 import { HypanelError } from "../../errors/index.js";
+import { logger } from "../../logger/Logger.js";
+import { getPlayerTracker } from "../../server/PlayerTracker.js";
+import { config } from "../../config/config.js";
+import multer from "multer";
+
+const MOD_UPLOAD_MAX_BYTES = 200 * 1024 * 1024; // 200MB
+const ALLOWED_MOD_EXTENSIONS = new Set([".jar", ".zip"]);
+
+function sanitizeModFilename(originalName: string): string {
+  let name = path.basename(originalName || "");
+
+  // Remove null bytes and obvious path traversal sequences
+  name = name.replace(/\0/g, "");
+  name = name.replace(/\.\./g, "_");
+
+  // Replace path separators and reserved characters
+  name = name.replace(/[\/\\]/g, "_");
+  name = name.replace(/[:*?"<>|]/g, "_");
+
+  // Normalize whitespace
+  name = name.replace(/\s+/g, " ").trim();
+
+  if (!name) {
+    return "mod.jar";
+  }
+
+  // Keep names within common filesystem limits
+  const ext = path.extname(name);
+  const base = ext ? name.slice(0, -ext.length) : name;
+  const maxLength = 200;
+  const clippedBase = base.length > maxLength ? base.slice(0, maxLength) : base;
+  return `${clippedBase}${ext}`;
+}
+
+const modUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const modsDir = (req as any).hypanel?.modsDir as string | undefined;
+      if (!modsDir) {
+        return cb(new Error("MISSING_SERVER_CONTEXT"), "");
+      }
+      return cb(null, modsDir);
+    },
+    filename: (req, file, cb) => {
+      try {
+        const modsDir = (req as any).hypanel?.modsDir as string | undefined;
+        const resolvedModsDir = (req as any).hypanel?.resolvedModsDir as string | undefined;
+        if (!modsDir || !resolvedModsDir) {
+          return cb(new Error("MISSING_SERVER_CONTEXT"), "");
+        }
+
+        const safeName = sanitizeModFilename(file.originalname);
+        const ext = path.extname(safeName).toLowerCase();
+        if (!ALLOWED_MOD_EXTENSIONS.has(ext)) {
+          return cb(new Error("INVALID_MOD_EXTENSION"), "");
+        }
+
+        const targetPath = path.resolve(modsDir, safeName);
+        if (!targetPath.startsWith(resolvedModsDir)) {
+          return cb(new Error("PATH_TRAVERSAL_DETECTED"), "");
+        }
+
+        if (fs.existsSync(targetPath)) {
+          return cb(new Error("FILE_ALREADY_EXISTS"), "");
+        }
+
+        return cb(null, safeName);
+      } catch (e) {
+        return cb(e as Error, "");
+      }
+    },
+  }),
+  limits: {
+    files: 1,
+    fileSize: MOD_UPLOAD_MAX_BYTES,
+  },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_MOD_EXTENSIONS.has(ext)) {
+      return cb(new Error("INVALID_MOD_EXTENSION"));
+    }
+    return cb(null, true);
+  },
+});
 
 const createServerSchema = z.object({
   name: z.string().min(1).max(100),
@@ -30,10 +114,13 @@ const createServerSchema = z.object({
   sessionToken: z.string().optional(),
   identityToken: z.string().optional(),
   bindAddress: z.string().default("0.0.0.0"),
+  autostart: z.boolean().default(false),
+  backupEnabled: z.boolean().default(true),
+  aotCacheEnabled: z.boolean().default(false),
 });
 
 const serverIdSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
 });
 
 const commandSchema = z.object({
@@ -43,26 +130,79 @@ const commandSchema = z.object({
 const updateServerSchema = createServerSchema.partial();
 
 const hytaleConfigSchema = z.object({
+  Version: z.number().int().optional(),
   ServerName: z.string().min(1).max(100),
   MOTD: z.string().optional(),
   Password: z.string().optional(),
   MaxPlayers: z.number().int().positive().max(1000).default(20),
   MaxViewRadius: z.number().int().positive().max(32).default(10),
   LocalCompressionEnabled: z.boolean().default(true),
+  DisplayTmpTagsInStrings: z.boolean().optional(),
   Defaults: z.object({
     World: z.string().optional(),
-    GameMode: z.enum(["survival", "creative", "adventure", "spectator"]).default("survival"),
+    GameMode: z.enum(["Adventure", "Creative"]).optional(),
+  }).optional(),
+  ConnectionTimeouts: z.object({
+    JoinTimeouts: z.record(z.any()).optional(),
+  }).optional(),
+  RateLimit: z.record(z.any()).optional(),
+  Modules: z.record(z.any()).optional(),
+  LogLevels: z.record(z.any()).optional(),
+  Mods: z.record(z.any()).optional(),
+  PlayerStorage: z.object({
+    Type: z.string(),
+    Path: z.string().optional(),
+  }).optional(),
+  AuthCredentialStore: z.object({
+    Type: z.string(),
+    Path: z.string().optional(),
   }).optional(),
 }).partial();
 
 const worldConfigSchema = z.object({
+  Version: z.number().int().optional(),
+  IsTicking: z.boolean().optional(),
+  IsBlockTicking: z.boolean().optional(),
   IsPvpEnabled: z.boolean().optional(),
   IsFallDamageEnabled: z.boolean().optional(),
   IsGameTimePaused: z.boolean().optional(),
+  GameTime: z.string().optional(),
   IsSpawningNPC: z.boolean().optional(),
   Seed: z.number().int().optional(),
   SaveNewChunks: z.boolean().optional(),
   IsUnloadingChunks: z.boolean().optional(),
+  GameplayConfig: z.string().optional(),
+  ClientEffects: z.object({
+    SunHeightPercent: z.number().optional(),
+    SunAngleDegrees: z.number().optional(),
+    BloomIntensity: z.number().optional(),
+    BloomPower: z.number().optional(),
+    SunIntensity: z.number().optional(),
+    SunshaftIntensity: z.number().optional(),
+    SunshaftScaleFactor: z.number().optional(),
+  }).optional(),
+  IsSavingPlayers: z.boolean().optional(),
+  IsSavingChunks: z.boolean().optional(),
+  IsSpawnMarkersEnabled: z.boolean().optional(),
+  IsAllNPCFrozen: z.boolean().optional(),
+  IsCompassUpdating: z.boolean().optional(),
+  IsObjectiveMarkersEnabled: z.boolean().optional(),
+  DeleteOnUniverseStart: z.boolean().optional(),
+  DeleteOnRemove: z.boolean().optional(),
+  ResourceStorage: z.object({
+    Type: z.string(),
+  }).optional(),
+  WorldGen: z.object({
+    Type: z.string(),
+    Name: z.string().optional(),
+  }).optional(),
+  WorldMap: z.object({
+    Type: z.string(),
+  }).optional(),
+  ChunkStorage: z.object({
+    Type: z.string(),
+  }).optional(),
+  ChunkConfig: z.record(z.any()).optional(),
 }).partial();
 
 const worldNameSchema = z.object({
@@ -89,31 +229,6 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     }
   });
 
-  // GET /api/servers/:id - Get server details
-  router.get(
-    "/:id",
-    validateParams(serverIdSchema),
-    (req: Request, res: Response) => {
-      try {
-        const { id } = req.params as { id: string };
-        const server = serverManager.getServer(id);
-        if (!server) {
-          return res.status(404).json({ error: "Server not found" });
-        }
-        res.json(server);
-      } catch (error) {
-        if (error instanceof HypanelError) {
-          return res.status(error.statusCode).json(error.toJSON());
-        }
-        res.status(500).json({ 
-          code: "INTERNAL_ERROR", 
-          message: "Failed to get server",
-          suggestedAction: "Check server logs for details"
-        });
-      }
-    }
-  );
-
   // POST /api/servers - Create new server
   router.post(
     "/",
@@ -123,10 +238,13 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         const server = await serverManager.createServer(req.body);
         res.status(201).json(server);
       } catch (error) {
+        console.error("CREATE SERVER ERROR:", error);
+        logger.error(`Failed to create server: ${error instanceof Error ? error.stack || error.message : String(error)}`);
         if (error instanceof HypanelError) {
           return res.status(error.statusCode).json(error.toJSON());
         }
-        res.status(500).json({
+        res.status(500);
+        res.json({
           code: "INTERNAL_ERROR",
           message: "Failed to create server",
           details: error instanceof Error ? error.message : "Unknown error",
@@ -136,72 +254,13 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     }
   );
 
-  // PUT /api/servers/:id - Update server configuration
-  router.put(
-    "/:id",
-    validateParams(serverIdSchema),
-    validateBody(updateServerSchema),
-    async (req: Request, res: Response) => {
-      try {
-        const { id } = req.params as { id: string };
-        const server = await serverManager.updateServerConfig(id, req.body);
-        res.json(server);
-      } catch (error) {
-        if (error instanceof HypanelError) {
-          return res.status(error.statusCode).json(error.toJSON());
-        }
-        if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ 
-            code: "SERVER_NOT_FOUND",
-            message: error.message,
-            suggestedAction: "Verify the server ID is correct"
-          });
-        }
-        res.status(500).json({
-          code: "INTERNAL_ERROR",
-          message: "Failed to update server",
-          details: error instanceof Error ? error.message : "Unknown error",
-          suggestedAction: "Check server logs for details"
-        });
-      }
-    }
-  );
-
-  // DELETE /api/servers/:id - Delete server
-  router.delete(
-    "/:id",
-    validateParams(serverIdSchema),
-    async (req: Request, res: Response) => {
-      try {
-        const { id } = req.params as { id: string };
-        await serverManager.deleteServer(id);
-        res.status(204).send();
-      } catch (error) {
-        if (error instanceof HypanelError) {
-          return res.status(error.statusCode).json(error.toJSON());
-        }
-        if (error instanceof Error && error.message.includes("not found")) {
-          return res.status(404).json({ 
-            code: "SERVER_NOT_FOUND",
-            message: error.message,
-            suggestedAction: "Verify the server ID is correct"
-          });
-        }
-        res.status(500).json({ 
-          code: "INTERNAL_ERROR",
-          message: "Failed to delete server",
-          details: error instanceof Error ? error.message : "Unknown error",
-          suggestedAction: "Check server logs for details"
-        });
-      }
-    }
-  );
-
+  // All specific /:id/... routes must come BEFORE the generic /:id route
   // POST /api/servers/:id/start - Start server
   router.post(
     "/:id/start",
     validateParams(serverIdSchema),
     async (req: Request, res: Response) => {
+      logger.info(`POST /api/servers/:id/start called with id: ${req.params.id}`);
       try {
         const { id } = req.params as { id: string };
         await serverManager.startServer(id);
@@ -313,6 +372,22 @@ export function createServerRoutes(serverManager: ServerManager): Router {
             suggestedAction: "Verify the server ID is correct"
           });
         }
+        // Check for server status errors (offline, starting, etc.)
+        if (error instanceof Error && error.message.includes("Cannot send command")) {
+          return res.status(400).json({
+            code: "SERVER_NOT_READY",
+            message: error.message,
+            suggestedAction: "Ensure the server is online before sending commands"
+          });
+        }
+        // Check for stdin availability errors
+        if (error instanceof Error && error.message.includes("stdin is not available")) {
+          return res.status(500).json({
+            code: "PROCESS_ERROR",
+            message: error.message,
+            suggestedAction: "Try restarting the server"
+          });
+        }
         res.status(500).json({
           code: "INTERNAL_ERROR",
           message: "Failed to send command",
@@ -348,21 +423,11 @@ export function createServerRoutes(serverManager: ServerManager): Router {
             suggestedAction: "Verify the server ID is correct"
           });
         }
-        if (error instanceof Error && (
-          error.message.includes("already installed") ||
-          error.message.includes("already in progress")
-        )) {
-          return res.status(409).json({
-            code: "INSTALL_ALREADY_RUNNING",
-            message: error.message,
-            suggestedAction: "Wait for the current installation to complete or check the server status"
-          });
-        }
         res.status(500).json({
           code: "INTERNAL_ERROR",
           message: "Failed to start installation",
           details: error instanceof Error ? error.message : "Unknown error",
-          suggestedAction: "Check server logs for installation details"
+          suggestedAction: "Check server logs for details"
         });
       }
     }
@@ -375,20 +440,14 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     (req: Request, res: Response) => {
       try {
         const { id } = req.params as { id: string };
-        const limit = req.query.limit
-          ? parseInt(req.query.limit as string, 10)
-          : 1000;
+        const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 1000;
         const logs = getConsoleLogs(id, limit);
         res.json(logs);
       } catch (error) {
-        if (error instanceof HypanelError) {
-          return res.status(error.statusCode).json(error.toJSON());
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
         }
-        res.status(500).json({ 
-          code: "INTERNAL_ERROR",
-          message: "Failed to get logs",
-          suggestedAction: "Check server logs for details"
-        });
+        res.status(500).json({ error: "Failed to get logs" });
       }
     }
   );
@@ -400,54 +459,18 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     (req: Request, res: Response) => {
       try {
         const { id } = req.params as { id: string };
-        const server = serverManager.getServer(id);
-        if (!server) {
-          return res.status(404).json({ error: "Server not found" });
-        }
-
-        // Get the server root directory
-        const serverRoot = server.serverRoot;
-        if (!serverRoot) {
-          return res.status(400).json({ 
-            error: "Server root not configured",
-            message: "Server must be installed before accessing config"
-          });
-        }
-
-        const configPath = path.join(serverRoot, "config.json");
-        
-        // Check if config file exists
-        if (!fs.existsSync(configPath)) {
-          return res.status(404).json({ 
-            code: "FILE_NOT_FOUND",
-            message: "Config file not found",
-            details: "config.json does not exist in server directory",
-            suggestedAction: "Install the server or create a config.json file"
-          });
-        }
-
-        // Read and parse config file
-        try {
-          const configContent = fs.readFileSync(configPath, "utf-8");
-          const config = JSON.parse(configContent);
-          res.json(config);
-        } catch (parseError) {
-          return res.status(500).json({ 
-            code: "CONFIG_INVALID_JSON",
-            message: "Failed to parse config file",
-            details: parseError instanceof Error ? parseError.message : "Unknown parse error",
-            suggestedAction: "Check the config.json file for valid JSON syntax"
-          });
-        }
+        const serverConfig = serverManager.getServerConfig(id);
+        res.json(serverConfig);
       } catch (error) {
+        logger.error(`Failed to get server config for ${req.params.id}: ${error instanceof Error ? error.stack || error.message : String(error)}`);
         if (error instanceof HypanelError) {
           return res.status(error.statusCode).json(error.toJSON());
         }
-        res.status(500).json({ 
-          code: "INTERNAL_ERROR",
-          message: "Failed to get server config",
-          suggestedAction: "Check server logs for details"
-        });
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        res.status(500).json({ error: `Failed to get server config: ${errorMessage}` });
       }
     }
   );
@@ -460,84 +483,35 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     (req: Request, res: Response) => {
       try {
         const { id } = req.params as { id: string };
-        const server = serverManager.getServer(id);
-        if (!server) {
-          return res.status(404).json({ error: "Server not found" });
-        }
-
-        // Prevent config changes while server is running
-        if (server.status === "online" || server.status === "starting") {
-          return res.status(409).json({ 
-            code: "CONFIG_SERVER_RUNNING",
-            message: "Server must be stopped",
-            details: "Cannot modify config while server is running",
-            suggestedAction: "Stop the server first before modifying configuration"
-          });
-        }
-
-        // Get the server root directory
-        const serverRoot = server.serverRoot;
-        if (!serverRoot) {
-          return res.status(400).json({ 
-            code: "INSTALL_NOT_INSTALLED",
-            message: "Server root not configured",
-            details: "Server must be installed before updating config",
-            suggestedAction: "Install the server first"
-          });
-        }
-
-        const configPath = path.join(serverRoot, "config.json");
-        
-        // Load existing config to merge with updates
-        let existingConfig: any = {};
-        if (fs.existsSync(configPath)) {
-          try {
-            const existingContent = fs.readFileSync(configPath, "utf-8");
-            existingConfig = JSON.parse(existingContent);
-          } catch (parseError) {
-            return res.status(500).json({ 
-              code: "CONFIG_INVALID_JSON",
-              message: "Failed to parse existing config",
-              details: "Existing config.json is invalid or corrupted",
-              suggestedAction: "Check the existing config.json file for valid JSON syntax"
-            });
-          }
-        }
-
-        // Merge updates with existing config
-        const updatedConfig = { ...existingConfig, ...req.body };
-
-        // Validate the merged config is valid JSON
-        try {
-          const configContent = JSON.stringify(updatedConfig, null, 2);
-          
-          // Write to temporary file first, then rename to prevent corruption
-          const tempPath = configPath + ".tmp";
-          fs.writeFileSync(tempPath, configContent, "utf-8");
-          fs.renameSync(tempPath, configPath);
-          
-          res.json({ 
-            success: true, 
-            message: "Config updated successfully",
-            config: updatedConfig 
-          });
-        } catch (writeError) {
-          res.status(500).json({ 
-            code: "CONFIG_SAVE_FAILED",
-            message: "Failed to write config file",
-            details: writeError instanceof Error ? writeError.message : "Unknown write error",
-            suggestedAction: "Check file permissions and disk space"
-          });
-        }
-      } catch (error) {
-        if (error instanceof HypanelError) {
-          return res.status(error.statusCode).json(error.toJSON());
-        }
-        res.status(500).json({ 
-          code: "INTERNAL_ERROR",
-          message: "Failed to update server config",
-          suggestedAction: "Check server logs for details"
+        const updatedConfig = serverManager.updateHytaleServerConfig(id, req.body);
+        res.json({ 
+          success: true, 
+          message: "Server config updated successfully",
+          config: updatedConfig 
         });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Failed to update server config" });
+      }
+    }
+  );
+
+  // GET /api/servers/:id/stats - Get server resource stats
+  router.get(
+    "/:id/stats",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const limit = req.query.limit
+          ? parseInt(req.query.limit as string, 10)
+          : 100;
+        const stats = getServerStats(id, limit);
+        res.json(stats);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to get stats" });
       }
     }
   );
@@ -549,18 +523,18 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     (req: Request, res: Response) => {
       try {
         const { id } = req.params as { id: string };
-        const server = serverManager.getServer(id);
-        if (!server) {
-          return res.status(404).json({ error: "Server not found" });
-        }
-
         const worlds = serverManager.getWorlds(id);
         res.json(worlds);
       } catch (error) {
+        logger.error(`Failed to get worlds for ${req.params.id}: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
         if (error instanceof Error && error.message.includes("not found")) {
           return res.status(404).json({ error: error.message });
         }
-        res.status(500).json({ error: "Failed to get worlds" });
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        res.status(500).json({ error: `Failed to get worlds: ${errorMessage}` });
       }
     }
   );
@@ -568,20 +542,12 @@ export function createServerRoutes(serverManager: ServerManager): Router {
   // GET /api/servers/:id/worlds/:world/config - Get world config.json
   router.get(
     "/:id/worlds/:world/config",
+    validateParams(serverIdSchema.merge(worldNameSchema)),
     (req: Request, res: Response) => {
       try {
-        // Validate params manually since we have conflicting schemas
-        const idSchema = serverIdSchema.parse({ id: req.params.id });
-        const worldSchema = worldNameSchema.parse({ world: req.params.world });
-        const { id, world } = { ...idSchema, ...worldSchema };
-        
-        const server = serverManager.getServer(id);
-        if (!server) {
-          return res.status(404).json({ error: "Server not found" });
-        }
-
-        const config = serverManager.getWorldConfig(id, world);
-        res.json(config);
+        const { id, world } = req.params as { id: string; world: string };
+        const worldConfig = serverManager.getWorldConfig(id, world);
+        res.json(worldConfig);
       } catch (error) {
         if (error instanceof Error && error.message.includes("not found")) {
           return res.status(404).json({ error: error.message });
@@ -594,27 +560,11 @@ export function createServerRoutes(serverManager: ServerManager): Router {
   // PUT /api/servers/:id/worlds/:world/config - Update world config.json
   router.put(
     "/:id/worlds/:world/config",
+    validateParams(serverIdSchema.merge(worldNameSchema)),
     validateBody(worldConfigSchema),
     (req: Request, res: Response) => {
       try {
-        // Validate params manually since we have conflicting schemas
-        const idSchema = serverIdSchema.parse({ id: req.params.id });
-        const worldSchema = worldNameSchema.parse({ world: req.params.world });
-        const { id, world } = { ...idSchema, ...worldSchema };
-        
-        const server = serverManager.getServer(id);
-        if (!server) {
-          return res.status(404).json({ error: "Server not found" });
-        }
-
-        // Prevent config changes while server is running
-        if (server.status === "online" || server.status === "starting") {
-          return res.status(409).json({ 
-            error: "Server must be stopped",
-            message: "Cannot modify world config while server is running. Stop the server first."
-          });
-        }
-
+        const { id, world } = req.params as { id: string; world: string };
         const updatedConfig = serverManager.updateWorldConfig(id, world, req.body);
         res.json({ 
           success: true, 
@@ -626,6 +576,687 @@ export function createServerRoutes(serverManager: ServerManager): Router {
           return res.status(404).json({ error: error.message });
         }
         res.status(500).json({ error: "Failed to update world config" });
+      }
+    }
+  );
+
+  // GET /api/servers/backups - List all backups
+  router.get("/backups", (req: Request, res: Response) => {
+    try {
+      const backups = serverManager.getBackups();
+      res.json(backups);
+    } catch (error) {
+      if (error instanceof HypanelError) {
+        return res.status(error.statusCode).json(error.toJSON());
+      }
+      res.status(500).json({
+        code: "INTERNAL_ERROR",
+        message: "Failed to get backups",
+        suggestedAction: "Check server logs for details"
+      });
+    }
+  });
+
+  // GET /api/servers/:id/players - Get players for a specific server
+  router.get(
+    "/:id/players",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const playerTracker = getPlayerTracker();
+        
+        // Verify server exists
+        const dbServer = getServerFromDb(id);
+        if (!dbServer) {
+          return res.status(404).json({
+            code: "SERVER_NOT_FOUND",
+            message: `Server ${id} not found`,
+            suggestedAction: "Verify the server ID is correct",
+          });
+        }
+
+        const players = playerTracker.getPlayers(id);
+        
+        // Enrich with server name
+        const enrichedPlayers = players.map((player) => ({
+          playerName: player.playerName,
+          serverId: player.serverId,
+          serverName: dbServer.name,
+          joinTime: player.joinTime.toISOString(),
+          lastSeen: player.lastSeen.toISOString(),
+        }));
+
+        res.json(enrichedPlayers);
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to get server players",
+          suggestedAction: "Check server logs for details",
+        });
+      }
+    }
+  );
+
+  // POST /api/servers/:id/refresh-players - Manually refresh player list via /who command
+  router.post(
+    "/:id/refresh-players",
+    validateParams(serverIdSchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const instance = serverManager.getServerInstance(id);
+        if (!instance) {
+          return res.status(404).json({
+            code: "SERVER_NOT_FOUND",
+            message: `Server ${id} not found`,
+            suggestedAction: "Verify the server ID is correct"
+          });
+        }
+
+        if (instance.getStatus() !== "online") {
+          return res.status(400).json({
+            code: "SERVER_NOT_ONLINE",
+            message: "Server must be online to refresh player list",
+            suggestedAction: "Start the server first"
+          });
+        }
+
+        // Send /who command
+        const commandSentTime = Date.now();
+        instance.sendCommand("who");
+        
+        // Wait a bit for response (Hytale servers may take a moment)
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Get recent logs and parse
+        const { getConsoleLogs } = await import("../../database/db.js");
+        const { getPlayerTracker } = await import("../../server/PlayerTracker.js");
+        const recentLogs = getConsoleLogs(id, 100); // Get more logs to ensure we find the response
+        const playerTracker = getPlayerTracker();
+
+        // Find the command execution log first, then look for the response after it
+        // Hytale format: "default (1): : Onyxhunter (Onyxhunter)"
+        let listOutput = "";
+        let foundCommand = false;
+        
+        for (let i = recentLogs.length - 1; i >= 0; i--) {
+          const log = recentLogs[i];
+          if (!log) continue;
+          
+          // Check if this is the command execution log
+          if (!foundCommand && log.message.toLowerCase().includes("console executed command: who")) {
+            foundCommand = true;
+            // Now look for the response that comes after this command
+            continue;
+          }
+          
+          // If we found the command, look for the response
+          if (foundCommand) {
+            const lowerMessage = log.message.toLowerCase();
+            
+            // Skip the command echo line if present
+            if (log.message.trim() === "> who" || log.message.trim() === "who") {
+              continue;
+            }
+            
+            // Check if this log looks like a /who response
+            // Hytale format: "default (1): : Onyxhunter (Onyxhunter)"
+            // Look for patterns like "(X): :" or "(X): : " where X is a number
+            const isWhoOutput = /\(\d+\):\s*:\s*.+/.test(log.message) ||
+              (lowerMessage.includes("players") && (lowerMessage.includes("online") || log.message.includes("("))) ||
+              (log.message.includes(",") && log.message.length > 10 && log.message.includes("(")) ||
+              // Also check for patterns with parentheses indicating player count
+              (log.message.includes(")") && log.message.includes(":") && log.message.includes("(") && /\(\d+\)/.test(log.message));
+
+            if (isWhoOutput) {
+              // Check if this log is after the command was sent
+              const logTime = log.timestamp.getTime();
+              const logAge = commandSentTime - logTime;
+              if (logAge < 10000 && logAge > -5000) { // Within 10 seconds after command, but not too far in the past
+                listOutput = log.message;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Fallback: if we didn't find the command log, just look for recent /who-like responses
+        if (!listOutput) {
+          for (let i = recentLogs.length - 1; i >= 0; i--) {
+            const log = recentLogs[i];
+            if (!log) continue;
+            
+            const lowerMessage = log.message.toLowerCase();
+            const isWhoOutput = /\(\d+\):\s*:\s*.+/.test(log.message) ||
+              (lowerMessage.includes("players") && log.message.includes("(")) ||
+              (log.message.includes(")") && log.message.includes(":") && log.message.includes("(") && /\(\d+\)/.test(log.message));
+            
+            if (isWhoOutput) {
+              const logAge = Date.now() - log.timestamp.getTime();
+              if (logAge < 15000) {
+                listOutput = log.message;
+                break;
+              }
+            }
+          }
+        }
+
+        if (listOutput) {
+          const playerNames = playerTracker.parseListCommand(listOutput);
+          playerTracker.updatePlayersFromList(id, playerNames);
+          res.json({
+            success: true,
+            message: "Player list refreshed",
+            players: playerNames.length,
+            playerNames
+          });
+        } else {
+          res.json({
+            success: false,
+            message: "Could not find player list in server response",
+            players: 0,
+            playerNames: []
+          });
+        }
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to refresh player list",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
+        });
+      }
+    }
+  );
+
+  // DELETE /api/servers/backups/:serverId/:backupName - Delete a backup
+  router.delete("/backups/:serverId/:backupName", async (req: Request, res: Response) => {
+    try {
+      const { serverId, backupName } = req.params as { serverId: string; backupName: string };
+      if (!serverId || !backupName) {
+        return res.status(400).json({
+          code: "INVALID_PARAMS",
+          message: "Server ID and backup name are required"
+        });
+      }
+      // Decode the backup name (may contain encoded characters)
+      const decodedBackupName = decodeURIComponent(backupName);
+      await serverManager.deleteBackup(serverId, decodedBackupName);
+      res.status(204).send();
+    } catch (error) {
+      if (error instanceof HypanelError) {
+        return res.status(error.statusCode).json(error.toJSON());
+      }
+      res.status(500).json({
+        code: "INTERNAL_ERROR",
+        message: "Failed to delete backup",
+        details: error instanceof Error ? error.message : "Unknown error",
+        suggestedAction: "Check server logs for details"
+      });
+    }
+  });
+
+  // GET /api/servers/backups/:serverId/:backupName/download - Download a backup
+  router.get("/backups/:serverId/:backupName/download", (req: Request, res: Response) => {
+    try {
+      const { serverId, backupName } = req.params as { serverId: string; backupName: string };
+      if (!serverId || !backupName) {
+        return res.status(400).json({
+          code: "INVALID_PARAMS",
+          message: "Server ID and backup name are required"
+        });
+      }
+      // Decode the backup name (may contain encoded characters)
+      const decodedBackupName = decodeURIComponent(backupName);
+      const backupPath = serverManager.getBackupPath(serverId, decodedBackupName);
+      
+      const stats = fs.statSync(backupPath);
+      
+      if (stats.isDirectory()) {
+        // For directories, return an error - client should handle zipping if needed
+        res.status(400).json({
+          code: "DIRECTORY_DOWNLOAD_NOT_SUPPORTED",
+          message: "Directory downloads are not supported. Please download individual files.",
+          suggestedAction: "Use a file manager or SSH to access directory backups"
+        });
+      } else {
+        // For files, stream directly
+        res.download(backupPath, decodedBackupName);
+      }
+    } catch (error) {
+      if (error instanceof HypanelError) {
+        return res.status(error.statusCode).json(error.toJSON());
+      }
+      res.status(500).json({
+        code: "INTERNAL_ERROR",
+        message: "Failed to download backup",
+        details: error instanceof Error ? error.message : "Unknown error",
+        suggestedAction: "Check server logs for details"
+      });
+    }
+  });
+
+  // GET /api/servers/:id/mods - List mods in serverRoot/mods
+  router.get(
+    "/:id/mods",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const dbServer = getServerFromDb(id);
+        if (!dbServer) {
+          return res.status(404).json({
+            code: "SERVER_NOT_FOUND",
+            message: `Server ${id} not found`,
+            suggestedAction: "Verify the server ID is correct",
+          });
+        }
+
+        const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+        const modsDir = path.join(serverRoot, "mods");
+
+        const resolvedRoot = path.resolve(serverRoot);
+        const resolvedModsDir = path.resolve(modsDir);
+        if (!resolvedModsDir.startsWith(resolvedRoot)) {
+          return res.status(400).json({
+            code: "PATH_TRAVERSAL_DETECTED",
+            message: "Path traversal attempt detected",
+            suggestedAction: "Verify the server configuration is valid",
+          });
+        }
+
+        if (!fs.existsSync(modsDir)) {
+          fs.mkdirSync(modsDir, { recursive: true, mode: 0o755 });
+        }
+
+        const entries = fs.readdirSync(modsDir, { withFileTypes: true });
+        const mods = entries
+          .filter((e) => e.isFile())
+          .map((e) => {
+            const filePath = path.join(modsDir, e.name);
+            const resolvedFilePath = path.resolve(filePath);
+            if (!resolvedFilePath.startsWith(resolvedModsDir)) {
+              return null;
+            }
+
+            const lstats = fs.lstatSync(filePath);
+            if (!lstats.isFile()) {
+              return null;
+            }
+
+            return {
+              name: e.name,
+              size: lstats.size,
+              modified: lstats.mtime.toISOString(),
+            };
+          })
+          .filter(Boolean)
+          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+
+        res.json(mods);
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to list mods",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details",
+        });
+      }
+    }
+  );
+
+  // POST /api/servers/:id/mods/upload - Upload a .jar or .zip into serverRoot/mods
+  router.post(
+    "/:id/mods/upload",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const dbServer = getServerFromDb(id);
+        if (!dbServer) {
+          return res.status(404).json({
+            code: "SERVER_NOT_FOUND",
+            message: `Server ${id} not found`,
+            suggestedAction: "Verify the server ID is correct",
+          });
+        }
+
+        const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+        const modsDir = path.join(serverRoot, "mods");
+
+        const resolvedRoot = path.resolve(serverRoot);
+        const resolvedModsDir = path.resolve(modsDir);
+        if (!resolvedModsDir.startsWith(resolvedRoot)) {
+          return res.status(400).json({
+            code: "PATH_TRAVERSAL_DETECTED",
+            message: "Path traversal attempt detected",
+            suggestedAction: "Verify the server configuration is valid",
+          });
+        }
+
+        if (!fs.existsSync(modsDir)) {
+          fs.mkdirSync(modsDir, { recursive: true, mode: 0o755 });
+        }
+
+        ;(req as any).hypanel = { serverRoot, modsDir, resolvedModsDir };
+
+        modUpload.single("file")(req, res, (err: any) => {
+          if (err) {
+            if (err instanceof multer.MulterError) {
+              if (err.code === "LIMIT_FILE_SIZE") {
+                return res.status(413).json({
+                  code: "FILE_TOO_LARGE",
+                  message: `Mod file is too large (max ${Math.floor(MOD_UPLOAD_MAX_BYTES / (1024 * 1024))}MB)`,
+                  suggestedAction: "Upload a smaller file",
+                });
+              }
+              return res.status(400).json({
+                code: "UPLOAD_ERROR",
+                message: "Failed to upload mod",
+                details: err.message,
+                suggestedAction: "Try again or check server logs",
+              });
+            }
+
+            const code = err instanceof Error ? err.message : String(err);
+            if (code === "INVALID_MOD_EXTENSION") {
+              return res.status(400).json({
+                code: "INVALID_MOD_EXTENSION",
+                message: "Only .jar and .zip files are supported",
+                suggestedAction: "Upload a .jar or .zip mod file",
+              });
+            }
+            if (code === "FILE_ALREADY_EXISTS") {
+              return res.status(409).json({
+                code: "FILE_ALREADY_EXISTS",
+                message: "A mod with that filename already exists",
+                suggestedAction: "Rename the file and try again",
+              });
+            }
+            if (code === "PATH_TRAVERSAL_DETECTED") {
+              return res.status(400).json({
+                code: "PATH_TRAVERSAL_DETECTED",
+                message: "Invalid filename",
+                suggestedAction: "Rename the file and try again",
+              });
+            }
+            if (code === "MISSING_SERVER_CONTEXT") {
+              return res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Upload context missing",
+                suggestedAction: "Try again or check server logs",
+              });
+            }
+
+            return res.status(500).json({
+              code: "INTERNAL_ERROR",
+              message: "Failed to upload mod",
+              details: err instanceof Error ? err.message : "Unknown error",
+              suggestedAction: "Check server logs for details",
+            });
+          }
+
+          const uploaded = (req as any).file as Express.Multer.File | undefined;
+          if (!uploaded) {
+            return res.status(400).json({
+              code: "NO_FILE",
+              message: "No file uploaded",
+              suggestedAction: "Attach a .jar or .zip file and try again",
+            });
+          }
+
+          try {
+            const entries = fs.readdirSync(modsDir, { withFileTypes: true });
+            const mods = entries
+              .filter((e) => e.isFile())
+              .map((e) => {
+                const filePath = path.join(modsDir, e.name);
+                const resolvedFilePath = path.resolve(filePath);
+                if (!resolvedFilePath.startsWith(resolvedModsDir)) {
+                  return null;
+                }
+                const lstats = fs.lstatSync(filePath);
+                if (!lstats.isFile()) {
+                  return null;
+                }
+                return {
+                  name: e.name,
+                  size: lstats.size,
+                  modified: lstats.mtime.toISOString(),
+                };
+              })
+              .filter(Boolean)
+              .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+
+            return res.json(mods);
+          } catch (listErr) {
+            return res.status(500).json({
+              code: "INTERNAL_ERROR",
+              message: "Mod uploaded, but failed to refresh mod list",
+              details: listErr instanceof Error ? listErr.message : "Unknown error",
+              suggestedAction: "Refresh the page or try again",
+            });
+          }
+        });
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to upload mod",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details",
+        });
+      }
+    }
+  );
+
+  // DELETE /api/servers/:id/mods/:filename - Delete a mod file from serverRoot/mods
+  router.delete(
+    "/:id/mods/:filename",
+    validateParams(serverIdSchema.extend({ filename: z.string().min(1) })),
+    (req: Request, res: Response) => {
+      try {
+        const { id, filename } = req.params as { id: string; filename: string };
+        const dbServer = getServerFromDb(id);
+        if (!dbServer) {
+          return res.status(404).json({
+            code: "SERVER_NOT_FOUND",
+            message: `Server ${id} not found`,
+            suggestedAction: "Verify the server ID is correct",
+          });
+        }
+
+        const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+        const modsDir = path.join(serverRoot, "mods");
+
+        const resolvedRoot = path.resolve(serverRoot);
+        const resolvedModsDir = path.resolve(modsDir);
+        if (!resolvedModsDir.startsWith(resolvedRoot)) {
+          return res.status(400).json({
+            code: "PATH_TRAVERSAL_DETECTED",
+            message: "Path traversal attempt detected",
+            suggestedAction: "Verify the server configuration is valid",
+          });
+        }
+
+        if (!fs.existsSync(modsDir)) {
+          fs.mkdirSync(modsDir, { recursive: true, mode: 0o755 });
+        }
+
+        const decoded = decodeURIComponent(filename);
+        const safeName = sanitizeModFilename(decoded);
+        const ext = path.extname(safeName).toLowerCase();
+        if (!ALLOWED_MOD_EXTENSIONS.has(ext)) {
+          return res.status(400).json({
+            code: "INVALID_MOD_EXTENSION",
+            message: "Only .jar and .zip files are supported",
+            suggestedAction: "Delete a .jar or .zip mod file",
+          });
+        }
+
+        const targetPath = path.resolve(modsDir, safeName);
+        if (!targetPath.startsWith(resolvedModsDir)) {
+          return res.status(400).json({
+            code: "PATH_TRAVERSAL_DETECTED",
+            message: "Invalid filename",
+            suggestedAction: "Verify the filename and try again",
+          });
+        }
+
+        if (!fs.existsSync(targetPath)) {
+          return res.status(404).json({
+            code: "FILE_NOT_FOUND",
+            message: "Mod file not found",
+            suggestedAction: "Refresh the mod list and try again",
+          });
+        }
+
+        const stats = fs.lstatSync(targetPath);
+        if (!stats.isFile()) {
+          return res.status(400).json({
+            code: "NOT_A_FILE",
+            message: "Target is not a file",
+            suggestedAction: "Refresh the mod list and try again",
+          });
+        }
+
+        fs.unlinkSync(targetPath);
+
+        const entries = fs.readdirSync(modsDir, { withFileTypes: true });
+        const mods = entries
+          .filter((e) => e.isFile())
+          .map((e) => {
+            const filePath = path.join(modsDir, e.name);
+            const resolvedFilePath = path.resolve(filePath);
+            if (!resolvedFilePath.startsWith(resolvedModsDir)) {
+              return null;
+            }
+            const lstats = fs.lstatSync(filePath);
+            if (!lstats.isFile()) {
+              return null;
+            }
+            return {
+              name: e.name,
+              size: lstats.size,
+              modified: lstats.mtime.toISOString(),
+            };
+          })
+          .filter(Boolean)
+          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+
+        res.json(mods);
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to delete mod",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details",
+        });
+      }
+    }
+  );
+
+  // Generic /:id routes must come AFTER all specific /:id/... routes
+  // GET /api/servers/:id - Get server details
+  router.get(
+    "/:id",
+    validateParams(serverIdSchema),
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const server = serverManager.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: "Server not found" });
+        }
+        res.json(server);
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        res.status(500).json({ 
+          code: "INTERNAL_ERROR", 
+          message: "Failed to get server",
+          suggestedAction: "Check server logs for details"
+        });
+      }
+    }
+  );
+
+  // PUT /api/servers/:id - Update server configuration
+  router.put(
+    "/:id",
+    validateParams(serverIdSchema),
+    validateBody(updateServerSchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        const server = await serverManager.updateServerConfig(id, req.body);
+        res.json(server);
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to update server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
+        });
+      }
+    }
+  );
+
+  // DELETE /api/servers/:id - Delete server
+  router.delete(
+    "/:id",
+    validateParams(serverIdSchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        await serverManager.deleteServer(id);
+        res.status(204).send();
+      } catch (error) {
+        console.error("DELETE SERVER ERROR:", error);
+        logger.error(`Failed to delete server: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({ 
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct"
+          });
+        }
+        res.status(500);
+        res.json({ 
+          code: "INTERNAL_ERROR",
+          message: "Failed to delete server",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details"
+        });
       }
     }
   );

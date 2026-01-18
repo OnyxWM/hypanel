@@ -4,7 +4,7 @@ import { getServerStats } from "../../database/db.js";
 import { validateParams } from "../middleware/validation.js";
 
 const serverIdSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
 });
 
 export function createStatsRoutes(): Router {

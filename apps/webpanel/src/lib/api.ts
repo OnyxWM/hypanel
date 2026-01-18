@@ -1,5 +1,6 @@
 export type ServerStatus = "online" | "offline" | "starting" | "stopping" | "auth_required"
 export type InstallState = "NOT_INSTALLED" | "INSTALLING" | "INSTALLED" | "FAILED"
+export type LogLevel = "info" | "warning" | "error"
 
 export interface Server {
   id: string
@@ -10,6 +11,9 @@ export interface Server {
   cpu: number
   memory: number
   maxMemory: number
+  autostart?: boolean
+  backupEnabled?: boolean
+  aotCacheEnabled?: boolean
   uptime: number
   ip: string
   port: number
@@ -25,7 +29,7 @@ export interface Server {
 export interface ConsoleLog {
   id: string
   timestamp: Date
-  level: "info" | "warning" | "error"
+  level: LogLevel
   message: string
 }
 
@@ -34,4 +38,54 @@ export interface InstallProgress {
   progress: number // 0-100
   message: string
   details?: any
+}
+
+export interface SystemStats {
+  cpu: number
+  memory: number
+  totalMemory: number
+  freeMemory: number
+  timestamp: number
+}
+
+export interface Player {
+  playerName: string
+  serverId: string
+  serverName: string
+  joinTime: string
+  lastSeen: string
+}
+
+export interface ModFile {
+  name: string
+  size: number
+  modified: string
+}
+
+export interface Notification {
+  id: string
+  createdAt: string
+  type: string
+  title: string
+  message: string
+  serverId?: string
+  serverName?: string
+}
+
+export interface SystemActionSummary {
+  requested: string[]
+  succeeded: string[]
+  failed: Array<{ id: string; error: string }>
+}
+
+export interface JournalEntry {
+  cursor: string
+  timestamp: Date
+  level: LogLevel
+  message: string
+}
+
+export interface SystemJournalResponse {
+  entries: JournalEntry[]
+  nextCursor?: string
 }

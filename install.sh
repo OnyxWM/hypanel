@@ -24,6 +24,15 @@ warning() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [WARNING] $*"
 }
 
+run_as_hypanel() {
+    local cmd="$*"
+    if [[ $EUID -eq 0 ]]; then
+        sudo -u "$HYPANEL_USER" bash -c "$cmd"
+    else
+        bash -c "$cmd"
+    fi
+}
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         error "This script must be run as root. Please use 'sudo $0'"
@@ -34,24 +43,30 @@ detect_os() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
         OS="$ID"
-        OS_VERSION="$VERSION_ID"
+        OS_VERSION="${VERSION_ID:-}"
     else
         error "Cannot detect operating system. /etc/os-release not found."
     fi
 
     case "$OS" in
         ubuntu)
-            if [[ "${OS_VERSION%%.*}" -lt 24 ]]; then
-                error "Ubuntu 24.04 or later is required. Found: $PRETTY_NAME"
+            if [[ -z "$OS_VERSION" ]] || [[ "${OS_VERSION%%.*}" -lt 24 ]]; then
+                warning "Ubuntu 24.04 or later is recommended. Found: $PRETTY_NAME"
+            else
+                log "Detected OS: $PRETTY_NAME (fully supported)"
             fi
             ;;
         debian)
-            if [[ "${OS_VERSION%%.*}" -lt 12 ]]; then
-                error "Debian 12 or later is required. Found: $PRETTY_NAME"
+            if [[ -z "$OS_VERSION" ]] || [[ "${OS_VERSION%%.*}" -lt 12 ]]; then
+                warning "Debian 12 or later is recommended. Found: $PRETTY_NAME"
+            else
+                log "Detected OS: $PRETTY_NAME (fully supported)"
             fi
             ;;
         *)
-            error "Unsupported operating system: $OS. Only Ubuntu 24.04+ and Debian 12+ are supported."
+            warning "Detected OS: $PRETTY_NAME"
+            warning "hypanel is recommended for Debian 12+ or Ubuntu 24.04+"
+            warning "Core functionality should work, but some features may require manual setup"
             ;;
     esac
 
@@ -88,6 +103,19 @@ prompt_password() {
 }
 
 install_packages() {
+    log "Checking required packages"
+
+    case "$OS" in
+        ubuntu|debian)
+            ;;
+        *)
+            warning "Package installation skipped on $OS"
+            warning "Please install the following packages manually:"
+            warning "  curl ca-certificates unzip tar jq"
+            return 0
+            ;;
+    esac
+
     log "Updating package lists"
     apt-get update -qq
 
@@ -129,12 +157,30 @@ install_java() {
     fi
 
     log "Installing Java 25 (OpenJDK)"
+    
     case "$OS" in
-        ubuntu)
+        ubuntu|debian)
             apt-get install -y openjdk-25-jdk
             ;;
-        debian)
-            apt-get install -y openjdk-25-jdk
+        *)
+            # Build Java from source for non-Debian systems
+            local java_dir="/opt/jdk-25"
+            local temp_java="/tmp/jdk-25.tar.gz"
+            
+            log "Downloading OpenJDK 25 from Adoptium"
+            curl -fsSL "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.1%2B5/OpenJDK25U-jdk_x64_linux_hotspot_25.0.1_5.tar.gz" -o "$temp_java"
+            
+            log "Extracting Java to $java_dir"
+            mkdir -p "$java_dir"
+            tar -xzf "$temp_java" -C "$java_dir" --strip-components=1
+            
+            rm -f "$temp_java"
+            
+            # Create symlinks
+            ln -sf "$java_dir/bin/java" /usr/local/bin/java
+            ln -sf "$java_dir/bin/javac" /usr/local/bin/javac
+            
+            log "Java 25 installed to $java_dir"
             ;;
     esac
 
@@ -147,32 +193,62 @@ install_java() {
 
 install_nodejs() {
     log "Checking Node.js installation"
-    
-    if command -v node &> /dev/null; then
-        local node_version
-        node_version=$(node --version | sed 's/v//' | cut -d'.' -f1)
-        if [[ "$node_version" -ge 20 ]]; then
-            log "Node.js $(node --version) is already installed"
-            return
+
+    # Find Node.js 24+ (current LTS is 24)
+    find_node_for_build() {
+        # Prefer Node.js 24 from /opt
+        if [[ -f "/opt/nodejs-24/bin/node" ]]; then
+            echo "/opt/nodejs-24/bin/node"
+        # Check nvm for Node.js 24
+        elif [[ -f "/home/${SUDO_USER:-$(whoami)}/.nvm/versions/node/v24.13.0/bin/node" ]]; then
+            echo "/home/${SUDO_USER:-$(whoami)}/.nvm/versions/node/v24.13.0/bin/node"
+        # Check system Node.js for version 24+
+        elif command -v node &> /dev/null; then
+            local version=$(node --version 2>/dev/null | sed 's/v//' | cut -d'.' -f1)
+            if [[ "$version" -ge 24 ]]; then
+                echo "$(command -v node)"
+            else
+                echo ""
+            fi
         else
-            warning "Node.js $(node --version) found, but Node.js 20+ is required"
+            echo ""
         fi
-    fi
+    }
 
-    log "Installing Node.js 20 LTS from NodeSource repository"
-    
-    local nodescript="/tmp/setup_nodejs.sh"
-    curl -fsSL https://deb.nodesource.com/setup_20.x -o "$nodescript"
-    chmod +x "$nodescript"
-    bash "$nodescript"
-    rm -f "$nodescript"
+    local node_path=$(find_node_for_build)
 
-    apt-get install -y nodejs
-
-    if node --version | grep -q "v20"; then
-        log "Node.js $(node --version) installed successfully"
+    if [[ -n "$node_path" ]]; then
+        log "Node.js $( "$node_path" --version ) found (compatible version)"
     else
-        error "Node.js 20 installation failed"
+        log "Installing Node.js 24 LTS"
+
+        local node_dir="/opt/nodejs-24"
+        local temp_node="/tmp/nodejs-24.tar.xz"
+        local node_arch="x64"
+
+        # Detect architecture
+        case "$(uname -m)" in
+            x86_64) node_arch="x64" ;;
+            aarch64|arm64) node_arch="arm64" ;;
+        esac
+
+        log "Downloading Node.js 24 LTS for $node_arch"
+
+        # Download Node.js 24 LTS binary from official source
+        curl -fsSL "https://nodejs.org/dist/v24.13.0/node-v24.13.0-linux-${node_arch}.tar.xz" -o "$temp_node"
+
+        log "Extracting Node.js to $node_dir"
+        mkdir -p "$node_dir"
+        tar -xJf "$temp_node" -C "$node_dir" --strip-components=1
+
+        rm -f "$temp_node"
+
+        # Create symlinks
+        ln -sf "$node_dir/bin/node" /usr/local/bin/node
+        ln -sf "$node_dir/bin/npm" /usr/local/bin/npm
+        ln -sf "$node_dir/bin/npx" /usr/local/bin/npx
+
+        log "Node.js 24 LTS installed successfully"
     fi
 }
 
@@ -184,6 +260,8 @@ create_directories() {
         "$HYPANEL_CONFIG_DIR"
         "$HYPANEL_LOG_DIR"
         "$HYPANEL_SERVERS_DIR"
+        "$HYPANEL_INSTALL_DIR/data"
+        "$HYPANEL_HOME/backup"
     )
 
     for dir in "${directories[@]}"; do
@@ -195,93 +273,196 @@ create_directories() {
         fi
     done
 
+    # Set ownership for writable directories
     chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_SERVERS_DIR"
     chmod 755 "$HYPANEL_SERVERS_DIR"
 
     chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_LOG_DIR"
     chmod 755 "$HYPANEL_LOG_DIR"
 
+    chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_INSTALL_DIR/data"
+    chmod 755 "$HYPANEL_INSTALL_DIR/data"
+
+    chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_HOME/backup"
+    chmod 755 "$HYPANEL_HOME/backup"
+
+    # Set ownership for config directory (root-owned, readable by hypanel)
     chmod 755 "$HYPANEL_CONFIG_DIR"
     chown root:root "$HYPANEL_CONFIG_DIR"
 
+    # Set ownership for install directory (root-owned, readable)
     chmod 755 "$HYPANEL_INSTALL_DIR"
     chown root:root "$HYPANEL_INSTALL_DIR"
 }
 
 download_and_install_hypanel() {
-    log "Downloading and installing hypanel $HYPANEL_VERSION"
-    
-    local temp_download="/tmp/hypanel-${HYPANEL_VERSION}.tar.gz"
-    
+    log "Installing hypanel $HYPANEL_VERSION"
+
     if [[ "$HYPANEL_VERSION" == "latest" ]]; then
         local download_url
         download_url=$(curl -s https://api.github.com/repos/hypanel/hypanel/releases/latest | grep "tarball_url" | cut -d '"' -f4)
         if [[ -z "$download_url" ]]; then
-            error "Failed to fetch latest release URL from GitHub API"
+            error "Failed to fetch latest release URL from GitHub API. Repository may not be published yet."
         fi
         log "Downloading latest release from: $download_url"
+
+        local temp_download="/tmp/hypanel-${HYPANEL_VERSION}.tar.gz"
+        curl -fsSL "$download_url" -o "$temp_download"
+
+        if [[ ! -f "$temp_download" ]]; then
+            error "Failed to download hypanel"
+        fi
+
+        local temp_extract="/tmp/hypanel-extract"
+        rm -rf "$temp_extract"
+        mkdir -p "$temp_extract"
+
+        tar -xzf "$temp_download" -C "$temp_extract" --strip-components=1
+
+        rsync -a "$temp_extract/" "$HYPANEL_INSTALL_DIR/"
+
+        rm -rf "$temp_extract"
+        rm -f "$temp_download"
     else
         local download_url="https://github.com/hypanel/hypanel/archive/refs/tags/v${HYPANEL_VERSION}.tar.gz"
         log "Downloading version $HYPANEL_VERSION from: $download_url"
-    fi
 
-    curl -fsSL "$download_url" -o "$temp_download"
-    
-    if [[ ! -f "$temp_download" ]]; then
-        error "Failed to download hypanel"
-    fi
+        local temp_download="/tmp/hypanel-${HYPANEL_VERSION}.tar.gz"
+        curl -fsSL "$download_url" -o "$temp_download"
 
-    local temp_extract="/tmp/hypanel-extract"
-    rm -rf "$temp_extract"
-    mkdir -p "$temp_extract"
-    
-    tar -xzf "$temp_download" -C "$temp_extract" --strip-components=1
-    
-    rsync -a "$temp_extract/" "$HYPANEL_INSTALL_DIR/"
-    
-    rm -rf "$temp_extract"
-    rm -f "$temp_download"
+        if [[ ! -f "$temp_download" ]]; then
+            error "Failed to download hypanel"
+        fi
+
+        local temp_extract="/tmp/hypanel-extract"
+        rm -rf "$temp_extract"
+        mkdir -p "$temp_extract"
+
+        tar -xzf "$temp_download" -C "$temp_extract" --strip-components=1
+
+        rsync -a "$temp_extract/" "$HYPANEL_INSTALL_DIR/"
+
+        rm -rf "$temp_extract"
+        rm -f "$temp_download"
+    fi
 
     log "Building backend and webpanel..."
-    
+
+    # Find node and npm - prefer Node.js 24 for native module compatibility
+    find_node() {
+        # Prefer Node.js 24 from /opt
+        if [[ -f "/opt/nodejs-24/bin/node" ]]; then
+            echo "/opt/nodejs-24/bin/node"
+        # Check nvm for Node.js 24
+        elif [[ -f "/home/${SUDO_USER:-$(whoami)}/.nvm/versions/node/v24.13.0/bin/node" ]]; then
+            echo "/home/${SUDO_USER:-$(whoami)}/.nvm/versions/node/v24.13.0/bin/node"
+        # Check system Node.js for version 24+
+        elif command -v node &> /dev/null; then
+            local version=$(node --version 2>/dev/null | sed 's/v//' | cut -d'.' -f1)
+            if [[ "$version" -ge 24 ]]; then
+                echo "$(command -v node)"
+            else
+                echo ""
+            fi
+        else
+            echo ""
+        fi
+    }
+
+    find_npm() {
+        # Prefer Node.js 24 npm
+        if [[ -f "/opt/nodejs-24/bin/npm" ]]; then
+            echo "/opt/nodejs-24/bin/npm"
+        elif [[ -f "/home/${SUDO_USER:-$(whoami)}/.nvm/versions/node/v24.13.0/bin/npm" ]]; then
+            echo "/home/${SUDO_USER:-$(whoami)}/.nvm/versions/node/v24.13.0/bin/npm"
+        elif command -v npm &> /dev/null; then
+            echo "$(command -v npm)"
+        else
+            local node_path=$(find_node)
+            if [[ -n "$node_path" ]]; then
+                echo "${node_path%/node}/npm"
+            else
+                echo ""
+            fi
+        fi
+    }
+
+    local node_path=$(find_node)
+    local npm_path=$(find_npm)
+
+    if [[ -z "$node_path" ]] || [[ ! -f "$node_path" ]]; then
+        error "Node.js 24+ not found. Please install Node.js 24 LTS first."
+    fi
+
+    log "Using Node.js: $node_path"
+
     # Build backend
     cd "$HYPANEL_INSTALL_DIR/apps/backend"
-    if ! npm install --production=false; then
+
+    # Clean and reinstall dependencies to ensure native modules are built for correct Node version
+    log "Installing backend dependencies..."
+    rm -rf node_modules/.cache 2>/dev/null || true
+    if ! "$npm_path" install; then
         error "Failed to install backend dependencies"
     fi
-    
-    if ! npm run build; then
+
+    # Rebuild native modules (better-sqlite3) for the current Node.js version
+    log "Rebuilding native modules for Node.js $( "$node_path" --version )..."
+    if ! "$npm_path" rebuild better-sqlite3; then
+        warning "Failed to rebuild better-sqlite3, trying clean install..."
+        rm -rf node_modules/better-sqlite3
+        "$npm_path" install better-sqlite3 --build-from-source --force
+    fi
+
+    if ! "$npm_path" run build; then
         error "Failed to build backend"
     fi
-    
+
     # Build webpanel
     cd "$HYPANEL_INSTALL_DIR/apps/webpanel"
-    if ! npm install --production=false; then
+    log "Installing webpanel dependencies..."
+    if ! "$npm_path" install; then
         error "Failed to install webpanel dependencies"
     fi
-    
-    if ! npm run build; then
+
+    if ! "$npm_path" run build; then
         error "Failed to build webpanel"
     fi
-    
+
     cd "$HYPANEL_INSTALL_DIR"
-    
+
     # Set proper permissions
     chmod -R 644 "$HYPANEL_INSTALL_DIR"/*
     find "$HYPANEL_INSTALL_DIR" -type d -exec chmod 755 {} \;
     chmod +x "$HYPANEL_INSTALL_DIR"/apps/backend/dist/index.js 2>/dev/null || true
 
+    mkdir -p "$HYPANEL_INSTALL_DIR/data"
+
+    # Set ownership: root for install dir, hypanel for data/writable dirs
     chown -R root:root "$HYPANEL_INSTALL_DIR"
-    
+    chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_INSTALL_DIR/data"
+    chown -R "$HYPANEL_USER:$HYPANEL_USER" "$HYPANEL_INSTALL_DIR/apps/backend/dist/data" 2>/dev/null || true
+
+    # Get IP address (fallback to localhost if unavailable)
+    local ip_address="localhost"
+    if command -v hostname &> /dev/null; then
+        if hostname --all-ip-addresses &>/dev/null; then
+            ip_address=$(hostname --all-ip-addresses | awk '{print $1}')
+        elif hostname -I &>/dev/null; then
+            ip_address=$(hostname -I | awk '{print $1}')
+        fi
+    fi
+
     log "hypanel installed and built successfully to $HYPANEL_INSTALL_DIR"
-    log "Webpanel will be served by the Node daemon at http://$(hostname -I | awk '{print $1}'):3000"
+    log "Webpanel will be served at http://${ip_address}:3000"
 }
 
 install_hytale_downloader() {
     log "Installing hytale-downloader"
-    
+
     local downloader_dir="/opt/hytale-downloader"
     local downloader_bin="$downloader_dir/hytale-downloader"
+    local temp_zip="/tmp/hytale-downloader.zip"
     
     # Check if already installed
     if [[ -f "$downloader_bin" ]]; then
@@ -292,16 +473,6 @@ install_hytale_downloader() {
     # Create directory
     mkdir -p "$downloader_dir"
     
-    # Determine latest version from GitHub API
-    local downloader_version
-    downloader_version=$(curl -s https://api.github.com/repos/Hytale/hytale-downloader/releases/latest | grep '"tag_name"' | cut -d '"' -f4)
-    
-    if [[ -z "$downloader_version" ]]; then
-        error "Failed to fetch latest hytale-downloader version from GitHub API"
-    fi
-    
-    log "Downloading hytale-downloader $downloader_version"
-    
     # Detect architecture
     local arch
     case "$(uname -m)" in
@@ -310,24 +481,40 @@ install_hytale_downloader() {
         *) error "Unsupported architecture: $(uname -m). Only x86_64 and aarch64 are supported." ;;
     esac
     
-    # Determine OS
-    local os
-    case "$OS" in
-        ubuntu|debian) os="linux" ;;
-        *) error "Unsupported OS for hytale-downloader: $OS. Only Ubuntu and Debian are supported." ;;
-    esac
+    log "Downloading hytale-downloader for $arch"
     
-    local download_url="https://github.com/Hytale/hytale-downloader/releases/download/$downloader_version/hytale-downloader-$arch-$os"
-    local temp_downloader="/tmp/hytale-downloader"
+    # Download from Hytale's official downloader service (Linux agnostic)
+    local download_url="https://downloader.hytale.com/hytale-downloader.zip"
     
-    # Download the binary
-    if ! curl -fsSL "$download_url" -o "$temp_downloader"; then
+    # Download the zip file
+    if ! curl -fsSL "$download_url" -o "$temp_zip"; then
         error "Failed to download hytale-downloader from $download_url"
     fi
     
-    # Make it executable and install
-    chmod +x "$temp_downloader"
-    mv "$temp_downloader" "$downloader_bin"
+    # Extract the binary from zip
+    unzip -o "$temp_zip" -d "$downloader_dir" 2>/dev/null || {
+        error "Failed to extract hytale-downloader zip"
+    }
+    
+    # Clean up zip
+    rm -f "$temp_zip"
+
+    # Find and rename the correct binary
+    local extracted_binary=""
+    if [[ -f "$downloader_dir/hytale-downloader-linux-amd64" ]]; then
+        extracted_binary="$downloader_dir/hytale-downloader-linux-amd64"
+    elif [[ -f "$downloader_dir/hytale-downloader-linux-arm64" ]]; then
+        extracted_binary="$downloader_dir/hytale-downloader-linux-arm64"
+    fi
+
+    if [[ -z "$extracted_binary" ]]; then
+        error "Could not find hytale-downloader binary in extracted zip"
+    fi
+
+    mv "$extracted_binary" "$downloader_bin"
+
+    # Ensure binary is executable
+    chmod +x "$downloader_bin"
     
     # Create symlink in PATH
     ln -sf "$downloader_bin" "/usr/local/bin/hytale-downloader"
@@ -355,8 +542,9 @@ create_config_files() {
 # hypanel Environment Configuration
 NODE_ENV=production
 PORT=3000
-HYPANEL_LOG_DIR=$HYPANEL_LOG_DIR
-HYPANEL_SERVERS_DIR=$HYPANEL_SERVERS_DIR
+LOGS_DIR=$HYPANEL_LOG_DIR
+SERVERS_DIR=$HYPANEL_SERVERS_DIR
+DATABASE_PATH=$HYPANEL_INSTALL_DIR/data/hypanel.db
 EOF
         chmod 640 "$env_file"
         chown root:root "$env_file"
@@ -380,7 +568,7 @@ User=$HYPANEL_USER
 Group=$HYPANEL_USER
 WorkingDirectory=$HYPANEL_INSTALL_DIR
 EnvironmentFile=$HYPANEL_CONFIG_DIR/hypanel.env
-ExecStart=/usr/bin/node $HYPANEL_INSTALL_DIR/apps/backend/dist/index.js
+ExecStart=/usr/local/bin/node $HYPANEL_INSTALL_DIR/apps/backend/dist/index.js
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -392,7 +580,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$HYPANEL_SERVERS_DIR $HYPANEL_LOG_DIR
+ReadWritePaths=$HYPANEL_SERVERS_DIR $HYPANEL_LOG_DIR $HYPANEL_INSTALL_DIR/data
 
 [Install]
 WantedBy=multi-user.target
@@ -405,6 +593,58 @@ EOF
     systemctl enable hypanel
     
     log "systemd service created and enabled"
+}
+
+configure_systemd_integration_permissions() {
+    log "Configuring permissions for systemd integration"
+
+    # Allow hypanel user to read systemd journals (for Settings -> systemd logs)
+    if getent group systemd-journal >/dev/null 2>&1; then
+        usermod -aG systemd-journal "$HYPANEL_USER" || warning "Failed to add $HYPANEL_USER to systemd-journal group"
+    else
+        warning "Group 'systemd-journal' not found; journal access may require manual setup"
+    fi
+
+    # Allow hypanel daemon to restart its own systemd unit without password.
+    # This is intentionally locked down to specific commands only.
+    local sudoers_file="/etc/sudoers.d/hypanel-systemctl"
+    cat > "$sudoers_file" << EOF
+# Managed by hypanel install.sh
+# Allow the hypanel service user to restart/check the hypanel systemd unit without a password.
+${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart hypanel, /usr/bin/systemctl is-active hypanel
+EOF
+
+    chmod 440 "$sudoers_file"
+    chown root:root "$sudoers_file"
+
+    if command -v visudo >/dev/null 2>&1; then
+        if ! visudo -cf "$sudoers_file" >/dev/null 2>&1; then
+            warning "sudoers validation failed for $sudoers_file (daemon restart may not work)"
+        fi
+    fi
+
+    # Allow hypanel user to restart the hypanel systemd unit via polkit (preferred over sudo under NoNewPrivileges=true)
+    local polkit_rules_dir="/etc/polkit-1/rules.d"
+    local polkit_rule_file="$polkit_rules_dir/49-hypanel.rules"
+    if [[ -d "$polkit_rules_dir" ]]; then
+        cat > "$polkit_rule_file" << EOF
+// Managed by hypanel install.sh
+// Allow the hypanel service user to manage only hypanel.service without interactive auth.
+polkit.addRule(function(action, subject) {
+  if (subject.user === "${HYPANEL_USER}" && action.id === "org.freedesktop.systemd1.manage-units") {
+    var unit = action.lookup("unit");
+    var verb = action.lookup("verb");
+    if (unit === "hypanel.service" && (verb === "restart" || verb === "start" || verb === "stop")) {
+      return polkit.Result.YES;
+    }
+  }
+});
+EOF
+        chmod 644 "$polkit_rule_file"
+        chown root:root "$polkit_rule_file"
+    else
+        warning "polkit rules directory not found at $polkit_rules_dir; daemon restart may require manual polkit setup"
+    fi
 }
 
 start_service() {
@@ -475,6 +715,7 @@ main() {
     install_hytale_downloader
     create_config_files
     create_systemd_service
+    configure_systemd_integration_permissions
     start_service
     show_completion_info
     

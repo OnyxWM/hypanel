@@ -5,7 +5,10 @@ import { config } from "./config/config.js";
 import { initDatabase, closeDatabase } from "./database/db.js";
 import { ServerManager } from "./server/ServerManager.js";
 import { createServerRoutes } from "./api/routes/servers.js";
-import { createStatsRoutes } from "./api/routes/stats.js";
+import { createDownloaderRoutes } from "./api/routes/downloader.js";
+import { createSystemRoutes } from "./api/routes/system.js";
+import { createPlayerRoutes } from "./api/routes/players.js";
+import { createNotificationRoutes } from "./api/routes/notifications.js";
 import { errorHandler } from "./api/middleware/validation.js";
 import { WebSocketServerManager } from "./websocket/WebSocketServer.js";
 import { logger } from "./logger/Logger.js";
@@ -100,7 +103,23 @@ async function initialize(): Promise<void> {
       next();
     });
 
-    // Serve webpanel static files in production
+    // API routes - MUST be registered before static file serving
+    logger.info("Registering API routes...");
+    app.use("/api/servers", createServerRoutes(serverManager));
+    logger.info("Server routes registered");
+    app.use("/api/downloader", createDownloaderRoutes());
+    app.use("/api/system", createSystemRoutes(serverManager));
+    const playersRouter = createPlayerRoutes(serverManager);
+    app.use("/api/players", playersRouter);
+    app.use("/api/notifications", createNotificationRoutes());
+    logger.info("All API routes registered (including /api/players)");
+
+    // Health check endpoint
+    app.get("/health", (req, res) => {
+      res.json({ status: "ok", timestamp: new Date().toISOString() });
+    });
+
+    // Serve webpanel static files in production (AFTER API routes)
     logger.info(`NODE_ENV = ${process.env.NODE_ENV}`);
     if (process.env.NODE_ENV === "production") {
       logger.info("In production mode, setting up webpanel static files");
@@ -130,9 +149,11 @@ async function initialize(): Promise<void> {
         app.use(express.static(webpanelDistPath));
         
         // Serve index.html for all non-API routes (SPA support)
-        app.get("*", (req, res) => {
+        app.get("*", (req, res, next) => {
           if (!req.path.startsWith("/api")) {
             res.sendFile(path.join(webpanelDistPath, "index.html"));
+          } else {
+            next();
           }
         });
         
@@ -143,15 +164,6 @@ async function initialize(): Promise<void> {
     } else {
       logger.info("Not in production mode, skipping webpanel static files");
     }
-
-    // API routes
-    app.use("/api/servers", createServerRoutes(serverManager));
-    app.use("/api/servers", createStatsRoutes());
-
-    // Health check endpoint
-    app.get("/health", (req, res) => {
-      res.json({ status: "ok", timestamp: new Date().toISOString() });
-    });
 
     // Error handler
     app.use(errorHandler);

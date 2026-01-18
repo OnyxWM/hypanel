@@ -32,7 +32,8 @@ export function initDatabase(): Database.Database {
       last_error TEXT,
       jar_path TEXT,
       assets_path TEXT,
-      server_root TEXT
+      server_root TEXT,
+      autostart INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS server_stats (
@@ -55,11 +56,45 @@ export function initDatabase(): Database.Database {
       FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS players (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      player_name TEXT NOT NULL,
+      join_time INTEGER NOT NULL,
+      last_seen INTEGER NOT NULL,
+      FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      server_id TEXT,
+      server_name TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_server_stats_server_id ON server_stats(server_id);
     CREATE INDEX IF NOT EXISTS idx_server_stats_timestamp ON server_stats(timestamp);
     CREATE INDEX IF NOT EXISTS idx_console_logs_server_id ON console_logs(server_id);
     CREATE INDEX IF NOT EXISTS idx_console_logs_timestamp ON console_logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_players_server_id ON players(server_id);
+    CREATE INDEX IF NOT EXISTS idx_players_name ON players(player_name);
+    CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
   `);
+
+  // Best-effort migration for older installs: add servers.autostart if missing.
+  // (CREATE TABLE IF NOT EXISTS won't alter existing tables.)
+  try {
+    const cols = db.prepare(`PRAGMA table_info(servers)`).all() as Array<{ name: string }>;
+    const hasAutostart = Array.isArray(cols) && cols.some((c) => c?.name === "autostart");
+    if (!hasAutostart) {
+      db.exec(`ALTER TABLE servers ADD COLUMN autostart INTEGER NOT NULL DEFAULT 0;`);
+    }
+  } catch {
+    // Ignore migration errors; absence will be handled as default false in reads.
+  }
 
   return db;
 }
@@ -82,8 +117,8 @@ export function closeDatabase(): void {
 export function createServer(server: Omit<Server, "players" | "cpu" | "memory" | "uptime">): void {
   const database = getDatabase();
   const stmt = database.prepare(`
-    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const now = Date.now();
   stmt.run(
@@ -100,7 +135,8 @@ export function createServer(server: Omit<Server, "players" | "cpu" | "memory" |
     server.lastError || null,
     server.jarPath || null,
     server.assetsPath || null,
-    server.serverRoot || null
+    server.serverRoot || null,
+    server.autostart ? 1 : 0
   );
 }
 
@@ -108,14 +144,19 @@ export function getServer(id: string): Server | null {
   const database = getDatabase();
   const stmt = database.prepare(`
     SELECT s.*,
-           COALESCE(MAX(ss.players), 0) as players,
-           COALESCE(MAX(ss.max_players), 0) as max_players,
-           COALESCE(MAX(ss.cpu), 0) as cpu,
-           COALESCE(MAX(ss.memory), 0) as memory
+           COALESCE(ss.players, 0) as players,
+           COALESCE(ss.max_players, 0) as max_players,
+           COALESCE(ss.cpu, 0) as cpu,
+           COALESCE(ss.memory, 0) as memory
     FROM servers s
-    LEFT JOIN server_stats ss ON s.id = ss.server_id
+    LEFT JOIN server_stats ss ON ss.id = (
+      SELECT id
+      FROM server_stats
+      WHERE server_id = s.id
+      ORDER BY timestamp DESC, id DESC
+      LIMIT 1
+    )
     WHERE s.id = ?
-    GROUP BY s.id
   `);
   const row = stmt.get(id) as any;
   if (!row) return null;
@@ -139,6 +180,7 @@ export function getServer(id: string): Server | null {
     jarPath: row.jar_path,
     assetsPath: row.assets_path,
     serverRoot: row.server_root,
+    autostart: Boolean(row.autostart),
   };
 }
 
@@ -146,13 +188,18 @@ export function getAllServers(): Server[] {
   const database = getDatabase();
   const stmt = database.prepare(`
     SELECT s.*,
-           COALESCE(MAX(ss.players), 0) as players,
-           COALESCE(MAX(ss.max_players), 0) as max_players,
-           COALESCE(MAX(ss.cpu), 0) as cpu,
-           COALESCE(MAX(ss.memory), 0) as memory
+           COALESCE(ss.players, 0) as players,
+           COALESCE(ss.max_players, 0) as max_players,
+           COALESCE(ss.cpu, 0) as cpu,
+           COALESCE(ss.memory, 0) as memory
     FROM servers s
-    LEFT JOIN server_stats ss ON s.id = ss.server_id
-    GROUP BY s.id
+    LEFT JOIN server_stats ss ON ss.id = (
+      SELECT id
+      FROM server_stats
+      WHERE server_id = s.id
+      ORDER BY timestamp DESC, id DESC
+      LIMIT 1
+    )
     ORDER BY s.created_at DESC
   `);
   const rows = stmt.all() as any[];
@@ -177,6 +224,7 @@ export function getAllServers(): Server[] {
       jarPath: row.jar_path,
       assetsPath: row.assets_path,
       serverRoot: row.server_root,
+      autostart: Boolean(row.autostart),
     };
   });
 }
@@ -266,6 +314,7 @@ export function updateServerConfig(id: string, config: Partial<{
   sessionToken?: string;
   identityToken?: string;
   bindAddress?: string;
+  autostart?: boolean;
 }>): void {
   const database = getDatabase();
   
@@ -291,6 +340,11 @@ export function updateServerConfig(id: string, config: Partial<{
   if (config.version !== undefined) {
     updates.push("version = ?");
     values.push(config.version);
+  }
+
+  if (config.autostart !== undefined) {
+    updates.push("autostart = ?");
+    values.push(config.autostart ? 1 : 0);
   }
   
   if (updates.length === 0) {
@@ -379,4 +433,87 @@ export function getConsoleLogs(serverId: string, limit: number = 1000): ConsoleL
     level: row.level as "info" | "warning" | "error",
     message: row.message,
   })).reverse(); // Reverse to get chronological order
+}
+
+// Notification operations
+export type NotificationRow = {
+  id: string;
+  createdAt: string; // ISO
+  type: string;
+  title: string;
+  message: string;
+  serverId?: string;
+  serverName?: string;
+};
+
+export function insertNotification(input: Omit<NotificationRow, "createdAt"> & { createdAt?: string }): NotificationRow {
+  const database = getDatabase();
+  const createdAtMs = input.createdAt ? new Date(input.createdAt).getTime() : Date.now();
+
+  const stmt = database.prepare(`
+    INSERT INTO notifications (id, created_at, type, title, message, server_id, server_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  stmt.run(
+    input.id,
+    createdAtMs,
+    input.type,
+    input.title,
+    input.message,
+    input.serverId || null,
+    input.serverName || null
+  );
+
+  return {
+    id: input.id,
+    createdAt: new Date(createdAtMs).toISOString(),
+    type: input.type,
+    title: input.title,
+    message: input.message,
+    serverId: input.serverId,
+    serverName: input.serverName,
+  };
+}
+
+export function getNotifications(limit: number = 50): NotificationRow[] {
+  const database = getDatabase();
+  const safeLimit = Math.max(1, Math.min(200, Math.floor(limit || 50)));
+  const stmt = database.prepare(`
+    SELECT id, created_at, type, title, message, server_id, server_name
+    FROM notifications
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+
+  const rows = stmt.all(safeLimit) as any[];
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: new Date(row.created_at).toISOString(),
+    type: row.type,
+    title: row.title,
+    message: row.message,
+    serverId: row.server_id || undefined,
+    serverName: row.server_name || undefined,
+  }));
+}
+
+export function pruneNotifications(maxRows: number = 1000): void {
+  const database = getDatabase();
+  const safeMax = Math.max(100, Math.min(10000, Math.floor(maxRows || 1000)));
+  // Delete everything except the newest `safeMax`
+  const stmt = database.prepare(`
+    DELETE FROM notifications
+    WHERE id NOT IN (
+      SELECT id FROM notifications
+      ORDER BY created_at DESC
+      LIMIT ?
+    )
+  `);
+  stmt.run(safeMax);
+}
+
+export function clearNotifications(): void {
+  const database = getDatabase();
+  database.prepare(`DELETE FROM notifications`).run();
 }

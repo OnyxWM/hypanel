@@ -1,4 +1,12 @@
-import type { Server, ConsoleLog } from "./api"
+import type {
+  Server,
+  ConsoleLog,
+  SystemStats,
+  ModFile,
+  Notification,
+  SystemActionSummary,
+  SystemJournalResponse,
+} from "./api"
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000"
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3001"
@@ -16,10 +24,11 @@ export class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
+    const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData
     const response = await fetch(url, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
         ...options.headers,
       },
     })
@@ -69,6 +78,8 @@ export class ApiClient {
     sessionToken?: string
     identityToken?: string
     bindAddress?: string
+    backupEnabled?: boolean
+    aotCacheEnabled?: boolean
   }): Promise<Server> {
     return this.request<Server>("/api/servers", {
       method: "POST",
@@ -79,6 +90,31 @@ export class ApiClient {
   async deleteServer(id: string): Promise<void> {
     await this.request(`/api/servers/${id}`, {
       method: "DELETE",
+    })
+  }
+
+  async updateServer(
+    id: string,
+    data: Partial<{
+      name: string
+      ip: string
+      port: number
+      maxMemory: number
+      maxPlayers: number
+      autostart?: boolean
+      version?: string
+      args: string[]
+      env: Record<string, string>
+      sessionToken?: string
+      identityToken?: string
+      bindAddress?: string
+      backupEnabled?: boolean
+      aotCacheEnabled?: boolean
+    }>
+  ): Promise<Server> {
+    return this.request<Server>(`/api/servers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     })
   }
 
@@ -140,6 +176,28 @@ export class ApiClient {
     return this.request<string[]>(`/api/servers/${id}/worlds`)
   }
 
+  async getServerMods(serverId: string): Promise<ModFile[]> {
+    return this.request<ModFile[]>(`/api/servers/${serverId}/mods`)
+  }
+
+  async uploadServerMod(serverId: string, file: File): Promise<ModFile[]> {
+    const form = new FormData()
+    form.append("file", file)
+    return this.request<ModFile[]>(`/api/servers/${serverId}/mods/upload`, {
+      method: "POST",
+      body: form,
+    })
+  }
+
+  async deleteServerMod(serverId: string, filename: string): Promise<ModFile[]> {
+    return this.request<ModFile[]>(
+      `/api/servers/${serverId}/mods/${encodeURIComponent(filename)}`,
+      {
+        method: "DELETE",
+      }
+    )
+  }
+
   async getWorldConfig(id: string, world: string): Promise<any> {
     return this.request<any>(`/api/servers/${id}/worlds/${world}/config`)
   }
@@ -148,6 +206,115 @@ export class ApiClient {
     return this.request<any>(`/api/servers/${id}/worlds/${world}/config`, {
       method: "PUT",
       body: JSON.stringify(config),
+    })
+  }
+
+  async startDownloaderAuth(): Promise<{ url: string; code: string }> {
+    return this.request<{ url: string; code: string }>("/api/downloader/auth/start", {
+      method: "POST",
+    })
+  }
+
+  async getDownloaderAuthStatus(): Promise<{ authenticated: boolean; status: string; code?: string; stdout?: string; stderr?: string }> {
+    return this.request<{ authenticated: boolean; status: string; code?: string; stdout?: string; stderr?: string }>("/api/downloader/auth/status")
+  }
+
+  async completeDownloaderAuth(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>("/api/downloader/auth/complete", {
+      method: "POST",
+    })
+  }
+
+  async cancelDownloaderAuth(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>("/api/downloader/auth/cancel", {
+      method: "POST",
+    })
+  }
+
+  async getSystemStats(): Promise<SystemStats> {
+    return this.request<SystemStats>("/api/system/stats")
+  }
+
+  async stopAllServers(force: boolean = false): Promise<SystemActionSummary> {
+    return this.request<SystemActionSummary>(`/api/system/servers/stop-all?force=${force}`, {
+      method: "POST",
+    })
+  }
+
+  async restartOnlineServers(): Promise<SystemActionSummary> {
+    return this.request<SystemActionSummary>("/api/system/servers/restart-online", {
+      method: "POST",
+    })
+  }
+
+  async restartDaemon(): Promise<{ queued: boolean; service?: string }> {
+    return this.request<{ queued: boolean; service?: string }>("/api/system/daemon/restart", {
+      method: "POST",
+    })
+  }
+
+  async getSystemJournal(input: { limit?: number; cursor?: string } = {}): Promise<SystemJournalResponse> {
+    const limit = typeof input.limit === "number" ? input.limit : 200
+    const cursor = input.cursor
+    const qs = new URLSearchParams()
+    qs.set("limit", String(limit))
+    if (cursor) qs.set("cursor", cursor)
+    const res = await this.request<SystemJournalResponse>(`/api/system/journal?${qs.toString()}`)
+    return {
+      ...res,
+      entries: (res.entries || []).map((e: any) => ({
+        ...e,
+        timestamp:
+          typeof e.timestamp === "string"
+            ? new Date(e.timestamp)
+            : typeof e.timestamp === "number"
+              ? new Date(e.timestamp)
+              : e.timestamp instanceof Date
+                ? e.timestamp
+                : new Date(e.timestamp),
+      })),
+    }
+  }
+
+  async getNotifications(limit: number = 50): Promise<Notification[]> {
+    return this.request<Notification[]>(`/api/notifications?limit=${limit}`)
+  }
+
+  async clearNotifications(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>(`/api/notifications`, {
+      method: "DELETE",
+    })
+  }
+
+  async getBackups(): Promise<Array<{ 
+    serverId: string
+    serverName: string
+    backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean }>
+  }>> {
+    return this.request<Array<{ 
+      serverId: string
+      serverName: string
+      backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean }>
+    }>>("/api/servers/backups")
+  }
+
+  async deleteBackup(serverId: string, backupName: string): Promise<void> {
+    await this.request(`/api/servers/backups/${encodeURIComponent(serverId)}/${encodeURIComponent(backupName)}`, {
+      method: "DELETE",
+    })
+  }
+
+  async getAllPlayers(): Promise<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>> {
+    return this.request<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>>("/api/players")
+  }
+
+  async getServerPlayers(serverId: string): Promise<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>> {
+    return this.request<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>>(`/api/servers/${serverId}/players`)
+  }
+
+  async refreshServerPlayers(serverId: string): Promise<{ success: boolean; message: string; players: number; playerNames: string[] }> {
+    return this.request<{ success: boolean; message: string; players: number; playerNames: string[] }>(`/api/servers/${serverId}/refresh-players`, {
+      method: "POST",
     })
   }
 }
@@ -195,8 +362,8 @@ export class WebSocketClient {
       }
 
       this.ws.onerror = (error) => {
-        // Only log errors if we're not intentionally disconnecting
-        if (!this.isIntentionallyDisconnecting) {
+        // Only log errors if we're not intentionally disconnecting and not in rapid reconnection
+        if (!this.isIntentionallyDisconnecting && this.reconnectAttempts === 0) {
           console.error("WebSocket error:", error)
         }
       }

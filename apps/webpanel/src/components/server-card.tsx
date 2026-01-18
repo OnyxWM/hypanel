@@ -37,6 +37,11 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
   const [isLoading, setIsLoading] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
+  const clampPercent = (value: number) => {
+    if (!Number.isFinite(value)) return 0
+    return Math.max(0, Math.min(100, value))
+  }
+
   const handleDelete = async () => {
     if (!onDelete) {
       return
@@ -115,10 +120,10 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
                 <Link to={`/servers/${server.id}`}>View Details</Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link to={`/servers/${server.id}`}>Console</Link>
+                <Link to={`/console?serverId=${server.id}`}>Console</Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link to={`/servers/${server.id}`}>Settings</Link>
+                <Link to={`/servers/${server.id}?settings=1`}>Settings</Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem 
@@ -157,7 +162,7 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
               <Cpu className="h-4 w-4 text-muted-foreground" />
             </div>
             <div>
-              <p className="text-sm font-medium">{server.cpu}%</p>
+              <p className="text-sm font-medium">{(server.cpu || 0).toFixed(2)}%</p>
               <p className="text-xs text-muted-foreground">CPU</p>
             </div>
           </div>
@@ -167,7 +172,7 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
             </div>
             <div>
               <p className="text-sm font-medium">
-                {server.memory.toFixed(1)}/{server.maxMemory}GB
+                {(server.memory / 1024).toFixed(1)}/{(server.maxMemory / 1024).toFixed(1)}GB
               </p>
               <p className="text-xs text-muted-foreground">Memory</p>
             </div>
@@ -188,12 +193,12 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">CPU Usage</span>
-              <span className="text-foreground">{server.cpu}%</span>
+              <span className="text-foreground">{clampPercent(server.cpu || 0).toFixed(1)}%</span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary/30 backdrop-blur-sm">
               <div
                 className="h-full bg-chart-1 transition-all shadow-sm shadow-chart-1/50"
-                style={{ width: `${server.cpu}%` }}
+                style={{ width: `${clampPercent(server.cpu || 0)}%` }}
               />
             </div>
           </div>
@@ -201,13 +206,17 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
             <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">Memory</span>
               <span className="text-foreground">
-                {server.memory.toFixed(1)}GB / {server.maxMemory}GB
+                {(server.memory / 1024).toFixed(1)}GB / {(server.maxMemory / 1024).toFixed(1)}GB
               </span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary/30 backdrop-blur-sm">
               <div
                 className="h-full bg-chart-2 transition-all shadow-sm shadow-chart-2/50"
-                style={{ width: `${(server.memory / server.maxMemory) * 100}%` }}
+                style={{
+                  width: `${clampPercent(
+                    server.maxMemory > 0 ? (server.memory / server.maxMemory) * 100 : 0
+                  )}%`,
+                }}
               />
             </div>
           </div>

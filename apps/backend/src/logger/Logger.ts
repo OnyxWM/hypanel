@@ -61,6 +61,14 @@ export const logger = winston.createLogger({
 const serverLoggers = new Map<string, winston.Logger>();
 
 export function getServerLogger(serverId: string): winston.Logger {
+  if (!serverId || typeof serverId !== 'string') {
+    throw new Error(`getServerLogger: serverId must be a non-empty string, received: ${serverId} (type: ${typeof serverId})`);
+  }
+  
+  if (!logsDir || typeof logsDir !== 'string') {
+    throw new Error(`getServerLogger: logsDir must be a non-empty string, received: ${logsDir} (type: ${typeof logsDir})`);
+  }
+  
   if (serverLoggers.has(serverId)) {
     return serverLoggers.get(serverId)!;
   }

@@ -3,9 +3,14 @@ import { EventEmitter } from "events";
 import { logger, logInstallationPhase, logError } from "../logger/Logger.js";
 import { updateServerInstallState, getServer, tryStartInstallation, getAllServers } from "../database/db.js";
 import { InstallState } from "../types/index.js";
+import { config } from "../config/config.js";
 import path from "path";
 import fs from "fs/promises";
 import { createInstallationError, createFilesystemError, HypanelError } from "../errors/index.js";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 export type InstallProgress = {
   stage: "queued" | "downloading" | "extracting" | "verifying" | "ready" | "failed";
@@ -72,50 +77,81 @@ export class Installer extends EventEmitter {
         message: "Installation queued"
       });
 
-      // Check if hytale-downloader exists
-      const downloaderPath = await this.findDownloader();
-      if (!downloaderPath) {
-        const error = createInstallationError(
-          "downloader_check",
-          "hytale-downloader not found",
-          serverId,
-          "Run the install.sh script to install hytale-downloader, or install it manually and ensure it's in PATH"
-        );
-        logError(error, "install", serverId);
-        throw error;
-      }
-
-      logInstallationPhase(serverId, "downloader_check", `Using downloader: ${downloaderPath}`, {
-        downloaderPath
-      });
+       // Check if hytale-downloader exists (skip in development mode)
+       if (process.env.NODE_ENV === "production") {
+         const downloaderPath = await this.findDownloader();
+         if (!downloaderPath) {
+           const error = createInstallationError(
+             "downloader_check",
+             "hytale-downloader not found",
+             serverId,
+             "Run the install.sh script to install hytale-downloader, or install it manually and ensure it's in PATH"
+           );
+           logError(error, "install", serverId);
+           throw error;
+         }
+         logInstallationPhase(serverId, "downloader_check", `Using downloader: ${downloaderPath}`, {
+           downloaderPath
+         });
+       } else {
+         logInstallationPhase(serverId, "downloader_check", "Skipping downloader check in development mode");
+       }
 
       // Start download stage
       this.emitProgress(serverId, {
         stage: "downloading",
         progress: 10,
         message: "Downloading Hytale server files..."
-      });
+       });
 
-      // Execute hytale-downloader
-      const downloadResult = await this.executeDownloader(
-        downloaderPath,
-        server.serverRoot,
-        serverId
-      );
+       // Execute hytale-downloader (or mock in development)
+       const isDev = process.env.NODE_ENV !== "production";
+       let downloadResult: { success: boolean; error?: string; stdout?: string; stderr?: string };
 
-      if (!downloadResult.success) {
-        const error = createInstallationError(
-          "downloading",
-          downloadResult.error || "Unknown download error",
-          serverId,
-          "Check network connectivity and disk space, then retry installation"
-        );
-        logError(error, "install", serverId);
-        throw error;
+       if (isDev) {
+         // In development, create mock server files for testing UI
+         await this.mockInstallation(server.serverRoot, serverId);
+         downloadResult = { success: true };
+        } else {
+          const downloaderPath = await this.findDownloader();
+          if (!downloaderPath) {
+            downloadResult = { success: false, error: "hytale-downloader not found" };
+          } else {
+            downloadResult = await this.executeDownloader(
+              downloaderPath,
+              server.serverRoot,
+              serverId
+            );
+          }
+        }
+
+       if (!downloadResult.success) {
+         const error = createInstallationError(
+           "downloading",
+           downloadResult.error || "Unknown download error",
+           serverId,
+           "Check network connectivity and disk space, then retry installation"
+         );
+         logError(error, "install", serverId);
+         throw error;
+       }
+
+      // Extract ZIP file if downloader created one
+      if (!isDev) {
+        await this.extractDownloadedZip(server.serverRoot, serverId);
       }
 
       // Verify and fix file permissions for security
       await this.verifyAndFixPermissions(server.serverRoot, serverId);
+
+      // Log directory contents after downloader completes (for debugging)
+      try {
+        const entries = await fs.readdir(server.serverRoot, { withFileTypes: true });
+        const fileList = entries.map(e => `${e.isDirectory() ? '[DIR]' : '[FILE]'} ${e.name}`).join(', ');
+        logger.info(`Directory contents after download for server ${serverId}: ${fileList || '(empty)'}`);
+      } catch (listError) {
+        logger.warn(`Could not list directory contents for server ${serverId}: ${listError}`);
+      }
 
       // Start verification stage
       this.emitProgress(serverId, {
@@ -127,9 +163,15 @@ export class Installer extends EventEmitter {
       // Verify required files exist
       const verification = await this.verifyInstallation(server.serverRoot);
       if (!verification.valid) {
+        // Include downloader output in error context for debugging
+        const downloaderOutput = !isDev && downloadResult.stdout ? 
+          `\n\nDownloader stdout:\n${downloadResult.stdout}` : '';
+        const downloaderErrors = !isDev && downloadResult.stderr ? 
+          `\n\nDownloader stderr:\n${downloadResult.stderr}` : '';
+        
         const error = createInstallationError(
           "verification",
-          verification.error || "Required files not found",
+          `${verification.error || "Required files not found"}${downloaderOutput}${downloaderErrors}`,
           serverId,
           "Reinstall server to ensure all required files are downloaded"
         );
@@ -188,6 +230,46 @@ export class Installer extends EventEmitter {
     } finally {
       this.activeInstallations.delete(serverId);
     }
+  }
+
+  private async mockInstallation(serverRoot: string, serverId: string): Promise<void> {
+    logger.info(`[DEV] Creating mock installation for ${serverId} at ${serverRoot}`);
+
+    // Create mock Hytale server structure
+    await fs.mkdir(serverRoot, { recursive: true });
+
+    // Create mock HytaleServer.jar
+    const jarPath = path.join(serverRoot, "HytaleServer.jar");
+    await fs.writeFile(jarPath, "# Mock Hytale Server JAR - Development Only\n");
+
+    // Create mock Assets.zip
+    const assetsPath = path.join(serverRoot, "Assets.zip");
+    await fs.writeFile(assetsPath, "# Mock Assets.zip - Development Only\n");
+
+    // Create mock config.json
+    const configPath = path.join(serverRoot, "config.json");
+    const configContent = {
+      ServerName: "Development Server",
+      MOTD: "Welcome to the dev server!",
+      MaxPlayers: 20,
+      MaxViewRadius: 10,
+      LocalCompressionEnabled: true,
+      Defaults: {
+        World: "world",
+        GameMode: "survival"
+      }
+    };
+    await fs.writeFile(configPath, JSON.stringify(configContent, null, 2));
+
+    // Create mock world directory
+    const worldPath = path.join(serverRoot, "worlds", "world");
+    await fs.mkdir(worldPath, { recursive: true });
+
+    // Create mock level.dat
+    const levelDatPath = path.join(worldPath, "level.dat");
+    await fs.writeFile(levelDatPath, "# Mock level.dat - Development Only\n");
+
+    logger.info(`[DEV] Mock installation complete for ${serverId}`);
   }
 
   private async findDownloader(): Promise<string | null> {
@@ -272,12 +354,16 @@ export class Installer extends EventEmitter {
     downloaderPath: string,
     serverRoot: string,
     serverId: string
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; stdout?: string; stderr?: string }> {
     return new Promise((resolve) => {
       const args = [
-        "--output", serverRoot,
-        "--server-only" // Only download server files
+        "-download-path", serverRoot
       ];
+
+      // Add credentials path if configured
+      if (config.downloaderCredentialsPath) {
+        args.push("-credentials-path", config.downloaderCredentialsPath);
+      }
 
       logger.info(`Executing: ${downloaderPath} ${args.join(" ")}`);
 
@@ -291,7 +377,7 @@ export class Installer extends EventEmitter {
 
       process.stdout?.on("data", (data) => {
         stdout += data.toString();
-        logger.debug(`[hytale-downloader][${serverId}] ${data.toString().trim()}`);
+        logger.info(`[hytale-downloader][${serverId}] ${data.toString().trim()}`);
         
         // Try to parse progress from output
         this.parseProgressFromOutput(serverId, data.toString());
@@ -299,25 +385,88 @@ export class Installer extends EventEmitter {
 
       process.stderr?.on("data", (data) => {
         stderr += data.toString();
-        logger.debug(`[hytale-downloader][${serverId}][ERROR] ${data.toString().trim()}`);
+        logger.info(`[hytale-downloader][${serverId}][ERROR] ${data.toString().trim()}`);
       });
 
       process.on("close", (code) => {
         if (code === 0) {
           logger.info(`hytale-downloader completed successfully for server ${serverId}`);
-          resolve({ success: true });
+          // Log full output if verbose logging is enabled
+          if (stdout.trim()) {
+            logger.debug(`[hytale-downloader][${serverId}] Full stdout:\n${stdout}`);
+          }
+          if (stderr.trim()) {
+            logger.debug(`[hytale-downloader][${serverId}] Full stderr:\n${stderr}`);
+          }
+          resolve({ success: true, stdout, stderr });
         } else {
           const error = stderr || stdout || `Process exited with code ${code}`;
           logger.error(`hytale-downloader failed for server ${serverId}: ${error}`);
-          resolve({ success: false, error });
+          if (stdout.trim()) {
+            logger.error(`[hytale-downloader][${serverId}] stdout:\n${stdout}`);
+          }
+          if (stderr.trim()) {
+            logger.error(`[hytale-downloader][${serverId}] stderr:\n${stderr}`);
+          }
+          resolve({ success: false, error, stdout, stderr });
         }
       });
 
       process.on("error", (error) => {
         logger.error(`Failed to execute hytale-downloader for server ${serverId}: ${error.message}`);
-        resolve({ success: false, error: error.message });
+        resolve({ success: false, error: error.message, stdout, stderr });
       });
     });
+  }
+
+  private async extractDownloadedZip(serverRoot: string, serverId: string): Promise<void> {
+    logInstallationPhase(serverId, "extracting", "Extracting downloaded ZIP file");
+    
+    // The downloader creates a ZIP file at <serverRoot>.zip
+    const zipPath = `${serverRoot}.zip`;
+    
+    try {
+      // Check if ZIP file exists
+      await fs.access(zipPath, fs.constants.F_OK);
+      logger.info(`Found ZIP file at: ${zipPath}`);
+      
+      // Emit progress update
+      this.emitProgress(serverId, {
+        stage: "extracting",
+        progress: 75,
+        message: "Extracting server files..."
+      });
+      
+      // Extract ZIP file to server root
+      // Use unzip command to extract, preserving directory structure
+      try {
+        await execAsync(`unzip -o "${zipPath}" -d "${serverRoot}"`);
+        logger.info(`Successfully extracted ZIP file for server ${serverId}`);
+        
+        // Remove the ZIP file after extraction
+        await fs.unlink(zipPath);
+        logger.debug(`Removed ZIP file: ${zipPath}`);
+      } catch (extractError) {
+        const errorMessage = extractError instanceof Error ? extractError.message : "Unknown extraction error";
+        logger.error(`Failed to extract ZIP file for server ${serverId}: ${errorMessage}`);
+        throw createInstallationError(
+          "extraction",
+          `Failed to extract downloaded ZIP file: ${errorMessage}`,
+          serverId,
+          "Check disk space and permissions, then retry installation"
+        );
+      }
+      
+      logInstallationPhase(serverId, "extraction_complete", "ZIP file extracted successfully");
+    } catch (error) {
+      // If ZIP file doesn't exist, check if files are already extracted
+      if ((error as any).code === 'ENOENT') {
+        logger.debug(`No ZIP file found at ${zipPath}, checking if files are already extracted`);
+        // Continue - files might already be extracted or in a different location
+        return;
+      }
+      throw error;
+    }
   }
 
   private parseProgressFromOutput(serverId: string, output: string): void {
@@ -361,6 +510,44 @@ export class Installer extends EventEmitter {
     }
   }
 
+  private async findFileRecursively(
+    rootDir: string,
+    filename: string,
+    maxDepth: number = 3
+  ): Promise<string | null> {
+    async function search(currentDir: string, depth: number): Promise<string | null> {
+      if (depth > maxDepth) {
+        return null;
+      }
+
+      try {
+        const entries = await fs.readdir(currentDir, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          const fullPath = path.join(currentDir, entry.name);
+          
+          if (entry.isFile() && entry.name === filename) {
+            return fullPath;
+          }
+          
+          if (entry.isDirectory() && !entry.name.startsWith('.')) {
+            const found = await search(fullPath, depth + 1);
+            if (found) {
+              return found;
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore permission errors or other filesystem errors
+        logger.debug(`Error searching in ${currentDir}: ${error}`);
+      }
+      
+      return null;
+    }
+
+    return search(rootDir, 0);
+  }
+
   private async verifyInstallation(serverRoot: string): Promise<{
     valid: boolean;
     jarPath?: string;
@@ -368,35 +555,72 @@ export class Installer extends EventEmitter {
     error?: string;
   }> {
     try {
-      const expectedJar = path.join(serverRoot, "HytaleServer.jar");
-      const expectedAssets = path.join(serverRoot, "Assets.zip");
+      // First check expected location (root directory)
+      let jarPath = path.join(serverRoot, "HytaleServer.jar");
+      let assetsPath = path.join(serverRoot, "Assets.zip");
 
-      // Check for jar file
+      let jarFound = false;
+      let assetsFound = false;
+
+      // Check for jar file in root
       try {
-        await fs.access(expectedJar, fs.constants.F_OK);
-        logger.debug(`Found server JAR: ${expectedJar}`);
+        await fs.access(jarPath, fs.constants.F_OK);
+        jarFound = true;
+        logger.debug(`Found server JAR at expected location: ${jarPath}`);
       } catch {
+        // Search recursively if not found in root
+        logger.debug(`HytaleServer.jar not found in root, searching recursively...`);
+        const foundJar = await this.findFileRecursively(serverRoot, "HytaleServer.jar");
+        if (foundJar) {
+          jarPath = foundJar;
+          jarFound = true;
+          logger.info(`Found server JAR at: ${jarPath}`);
+        }
+      }
+
+      if (!jarFound) {
+        // List directory contents for debugging
+        try {
+          const entries = await fs.readdir(serverRoot, { withFileTypes: true });
+          const fileList = entries.map(e => `${e.isDirectory() ? '[DIR]' : '[FILE]'} ${e.name}`).join(', ');
+          logger.warn(`Directory contents of ${serverRoot}: ${fileList || '(empty)'}`);
+        } catch (listError) {
+          logger.warn(`Could not list directory contents: ${listError}`);
+        }
+        
         return {
           valid: false,
-          error: `HytaleServer.jar not found at ${expectedJar}`
+          error: `HytaleServer.jar not found in ${serverRoot} or subdirectories (searched up to 3 levels deep)`
         };
       }
 
-      // Check for assets file
+      // Check for assets file in root
       try {
-        await fs.access(expectedAssets, fs.constants.F_OK);
-        logger.debug(`Found assets ZIP: ${expectedAssets}`);
+        await fs.access(assetsPath, fs.constants.F_OK);
+        assetsFound = true;
+        logger.debug(`Found assets ZIP at expected location: ${assetsPath}`);
       } catch {
+        // Search recursively if not found in root
+        logger.debug(`Assets.zip not found in root, searching recursively...`);
+        const foundAssets = await this.findFileRecursively(serverRoot, "Assets.zip");
+        if (foundAssets) {
+          assetsPath = foundAssets;
+          assetsFound = true;
+          logger.info(`Found assets ZIP at: ${assetsPath}`);
+        }
+      }
+
+      if (!assetsFound) {
         return {
           valid: false,
-          error: `Assets.zip not found at ${expectedAssets}`
+          error: `Assets.zip not found in ${serverRoot} or subdirectories (searched up to 3 levels deep)`
         };
       }
 
       return {
         valid: true,
-        jarPath: expectedJar,
-        assetsPath: expectedAssets
+        jarPath: jarPath,
+        assetsPath: assetsPath
       };
 
     } catch (error) {

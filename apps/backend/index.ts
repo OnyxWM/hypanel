@@ -6,6 +6,10 @@ import { initDatabase, closeDatabase } from "./src/database/db.js";
 import { ServerManager } from "./src/server/ServerManager.js";
 import { createServerRoutes } from "./src/api/routes/servers.js";
 import { createStatsRoutes } from "./src/api/routes/stats.js";
+import { createDownloaderRoutes } from "./src/api/routes/downloader.js";
+import { createSystemRoutes } from "./src/api/routes/system.js";
+import { createPlayerRoutes } from "./src/api/routes/players.js";
+import { createNotificationRoutes } from "./src/api/routes/notifications.js";
 import { errorHandler } from "./src/api/middleware/validation.js";
 import { WebSocketServerManager } from "./src/websocket/WebSocketServer.js";
 import { logger } from "./src/logger/Logger.js";
@@ -47,6 +51,10 @@ async function initialize(): Promise<void> {
     // API routes
     app.use("/api/servers", createServerRoutes(serverManager));
     app.use("/api/servers", createStatsRoutes());
+    app.use("/api/downloader", createDownloaderRoutes());
+    app.use("/api/system", createSystemRoutes(serverManager));
+    app.use("/api/players", createPlayerRoutes(serverManager));
+    app.use("/api/notifications", createNotificationRoutes());
 
     // Health check endpoint
     app.get("/health", (req, res) => {

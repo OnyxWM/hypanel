@@ -15,20 +15,26 @@ const configSchema = z.object({
   databasePath: z.string().default("./data/hypanel.db"),
   serversDir: z.string().default("./servers"),
   logsDir: z.string().default("./logs"),
+  backupDir: z.string().default("./backup"),
   nodeEnv: z.enum(["development", "production"]).default("development"),
+  downloaderCredentialsPath: z.string().optional(),
 });
 
 type Config = z.infer<typeof configSchema>;
 
+export type { Config };
+
 function loadConfig(): Config {
-  const rawConfig = {
-    port: process.env.PORT ? parseInt(process.env.PORT, 10) : 3000,
-    wsPort: process.env.WS_PORT ? parseInt(process.env.WS_PORT, 10) : 3001,
-    databasePath: process.env.DATABASE_PATH || "./data/hypanel.db",
-    serversDir: process.env.SERVERS_DIR || "./servers",
-    logsDir: process.env.LOGS_DIR || "./logs",
-    nodeEnv: (process.env.NODE_ENV || "development") as "development" | "production",
-  };
+const rawConfig = {
+  port: process.env.PORT ? parseInt(process.env.PORT, 10) : 3000,
+  wsPort: process.env.WS_PORT ? parseInt(process.env.WS_PORT, 10) : 3001,
+  databasePath: process.env.DATABASE_PATH || process.env.HYPANEL_DATABASE_PATH || "./data/hypanel.db",
+  serversDir: process.env.SERVERS_DIR || process.env.HYPANEL_SERVERS_DIR || "./servers",
+  logsDir: process.env.LOGS_DIR || process.env.HYPANEL_LOG_DIR || "./logs",
+  backupDir: process.env.BACKUP_DIR || process.env.HYPANEL_BACKUP_DIR || (process.env.NODE_ENV === "production" ? "/home/hypanel/backup" : "./backup"),
+  nodeEnv: (process.env.NODE_ENV || "development") as "development" | "production",
+  downloaderCredentialsPath: process.env.HYPANEL_DOWNLOADER_CREDENTIALS_PATH,
+};
 
   const result = configSchema.safeParse(rawConfig);
   if (!result.success) {
@@ -41,13 +47,21 @@ function loadConfig(): Config {
     ...config,
     databasePath: path.isAbsolute(config.databasePath)
       ? config.databasePath
-      : path.resolve(__dirname, "..", "..", config.databasePath),
+      : path.resolve(__dirname, "..", "..", "..", config.databasePath),
     serversDir: path.isAbsolute(config.serversDir)
       ? config.serversDir
-      : path.resolve(__dirname, "..", "..", config.serversDir),
+      : path.resolve(__dirname, "..", "..", "..", config.serversDir),
     logsDir: path.isAbsolute(config.logsDir)
       ? config.logsDir
-      : path.resolve(__dirname, "..", "..", config.logsDir),
+      : path.resolve(__dirname, "..", "..", "..", config.logsDir),
+    backupDir: path.isAbsolute(config.backupDir)
+      ? config.backupDir
+      : path.resolve(__dirname, "..", "..", "..", config.backupDir),
+    downloaderCredentialsPath: config.downloaderCredentialsPath
+      ? path.isAbsolute(config.downloaderCredentialsPath)
+        ? config.downloaderCredentialsPath
+        : path.resolve(__dirname, "..", "..", "..", config.downloaderCredentialsPath)
+      : path.resolve(__dirname, "..", "..", "..", "data", ".hytale-downloader-credentials.json"),
   };
 }
 

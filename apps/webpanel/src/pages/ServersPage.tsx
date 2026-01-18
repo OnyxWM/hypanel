@@ -145,31 +145,25 @@ export default function ServersPage() {
 
   const handleCreateServer = async (data: {
     name: string
-    jarFile?: string
-    assetsPath?: string
-    maxPlayers: number
     maxMemory: number
-    version?: string
     port?: number
-    sessionToken?: string
-    identityToken?: string
+    backupEnabled?: boolean
+    aotCacheEnabled?: boolean
   }) => {
-    const serverPath = `~/hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
+    const serverPath = `hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
     try {
       const newServer = await apiClient.createServer({
         name: data.name,
         path: serverPath,
         executable: "java",
-        jarFile: data.jarFile || "HytaleServer.jar",
-        assetsPath: `${serverPath}/Assets.zip`,
+        assetsPath: `hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}/Assets.zip`,
         port: data.port || 5520,
-        maxPlayers: data.maxPlayers,
+        maxPlayers: 20,
         maxMemory: data.maxMemory * 1024,
-        version: data.version,
-        sessionToken: data.sessionToken,
-        identityToken: data.identityToken,
         bindAddress: "0.0.0.0",
         ip: "0.0.0.0",
+        backupEnabled: data.backupEnabled,
+        aotCacheEnabled: data.aotCacheEnabled,
       })
       setServers((prev) => [...prev, newServer])
     } catch (err) {

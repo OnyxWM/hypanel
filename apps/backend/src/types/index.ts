@@ -10,6 +10,9 @@ export interface Server {
   cpu: number;
   memory: number;
   maxMemory: number;
+  autostart?: boolean;
+  backupEnabled?: boolean;
+  aotCacheEnabled?: boolean;
   uptime: number;
   ip: string;
   port: number;
@@ -48,6 +51,8 @@ export interface ServerConfig {
   sessionToken?: string;
   identityToken?: string;
   bindAddress?: string; // Default: "0.0.0.0"
+  backupEnabled?: boolean; // Default: true
+  aotCacheEnabled?: boolean; // Default: false
 }
 
 export interface ServerStats {
@@ -63,4 +68,15 @@ export interface ServerProcess {
   pid: number | null;
   startTime: number | null;
   process: import("child_process").ChildProcess | null;
+}
+
+export interface PlayerInfo {
+  playerName: string;
+  serverId: string;
+  joinTime: Date;
+  lastSeen: Date;
+}
+
+export interface Player extends PlayerInfo {
+  serverName: string;
 }

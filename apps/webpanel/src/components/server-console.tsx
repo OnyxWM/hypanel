@@ -19,8 +19,14 @@ export function ServerConsole({ logs, onSendCommand, isLoading }: ServerConsoleP
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    // Auto-scroll to bottom when new logs arrive
+    // ScrollArea creates a viewport element we need to target
+    if (scrollRef.current && logs.length > 0) {
+      // Find the ScrollArea viewport
+      const viewport = scrollRef.current.closest('[data-radix-scroll-area-viewport]') as HTMLElement
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight
+      }
     }
   }, [logs])
 
@@ -32,8 +38,20 @@ export function ServerConsole({ logs, onSendCommand, isLoading }: ServerConsoleP
     }
   }
 
-  const formatTime = (timestamp: Date) => {
-    return timestamp.toLocaleTimeString("en-US", {
+  const formatTime = (timestamp: Date | string | number) => {
+    // Handle different timestamp formats (Date, string, or number)
+    const date = timestamp instanceof Date 
+      ? timestamp 
+      : typeof timestamp === "string" 
+        ? new Date(timestamp) 
+        : new Date(timestamp)
+    
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      return "Invalid Date"
+    }
+    
+    return date.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -42,33 +60,35 @@ export function ServerConsole({ logs, onSendCommand, isLoading }: ServerConsoleP
 
   return (
     <div className="flex h-full flex-col rounded-lg border border-border/50 bg-card backdrop-blur-xl overflow-hidden">
-      {/* Console Output */}
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-1 font-mono text-sm" ref={scrollRef}>
-          {logs.map((log) => (
-            <div key={log.id} className="flex gap-2">
-              <span className="text-muted-foreground">[{formatTime(log.timestamp)}]</span>
-              <span
-                className={cn(
-                  log.level === "info" && "text-foreground",
-                  log.level === "warning" && "text-warning",
-                  log.level === "error" && "text-destructive",
-                )}
-              >
-                {log.message}
-              </span>
-            </div>
-          ))}
-          {logs.length === 0 && (
-            <p className="text-muted-foreground">No logs available. Start the server to see output.</p>
-          )}
-        </div>
-      </ScrollArea>
+      {/* Console Output - Scrollable area */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="space-y-1 font-mono text-sm p-4" ref={scrollRef}>
+            {logs.map((log) => (
+              <div key={log.id} className="flex gap-2">
+                <span className="text-muted-foreground whitespace-nowrap">[{formatTime(log.timestamp)}]</span>
+                <span
+                  className={cn(
+                    log.level === "info" && "text-foreground",
+                    log.level === "warning" && "text-warning",
+                    log.level === "error" && "text-destructive",
+                  )}
+                >
+                  {log.message}
+                </span>
+              </div>
+            ))}
+            {logs.length === 0 && (
+              <p className="text-muted-foreground">No logs available. Start the server to see output.</p>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
 
-      {/* Command Input */}
+      {/* Command Input - Fixed at bottom */}
       <form
         onSubmit={handleSubmit}
-        className="flex gap-2 border-t border-border/50 p-4 bg-secondary/20 backdrop-blur-sm"
+        className="flex-shrink-0 flex gap-2 border-t border-border/50 p-4 bg-secondary/20 backdrop-blur-sm"
       >
         <Input
           placeholder="Enter command..."

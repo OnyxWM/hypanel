@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Server, Users, Cpu, HardDrive, Activity, Zap } from "lucide-react"
+import { Server, Users, Cpu, HardDrive } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { ServerCard } from "@/components/server-card"
@@ -7,17 +7,25 @@ import { StatsCard } from "@/components/stats-card"
 import { ResourceChart } from "@/components/resource-chart"
 import { CreateServerDialog } from "@/components/create-server-dialog"
 import { apiClient, wsClient } from "@/lib/api-client"
-import type { Server as ServerType } from "@/lib/api"
-import { mockStats } from "@/lib/mock-data"
+import type { Server as ServerType, SystemStats } from "@/lib/api"
+
+interface HistoricalStat {
+  timestamp: number
+  cpu: number
+  memory: number
+}
 
 export default function DashboardPage() {
   const [servers, setServers] = useState<ServerType[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [installProgress, setInstallProgress] = useState<Record<string, any>>({})
+  const [systemStats, setSystemStats] = useState<SystemStats | null>(null)
+  const [historicalStats, setHistoricalStats] = useState<HistoricalStat[]>([])
 
   useEffect(() => {
     loadServers()
+    loadSystemStats()
     
     // Set up WebSocket for real-time updates
     wsClient.connect()
@@ -32,9 +40,10 @@ export default function DashboardPage() {
           if (s.id === data.serverId) {
             return {
               ...s,
-              cpu: data.stats.cpu || s.cpu,
-              memory: data.stats.memory || s.memory,
-              uptime: data.stats.uptime || s.uptime,
+              cpu: data?.stats?.cpu ?? s.cpu,
+              memory: data?.stats?.memory ?? s.memory,
+              uptime: data?.stats?.uptime ?? s.uptime,
+              players: data?.stats?.players ?? s.players,
             }
           }
           return s
@@ -61,8 +70,14 @@ export default function DashboardPage() {
       )
     })
 
+    // Set up polling for system stats (every 5 seconds)
+    const systemStatsInterval = setInterval(() => {
+      loadSystemStats()
+    }, 5000)
+
     return () => {
       wsClient.disconnect()
+      clearInterval(systemStatsInterval)
     }
   }, [])
 
@@ -80,12 +95,32 @@ export default function DashboardPage() {
     }
   }
 
+  const loadSystemStats = async () => {
+    try {
+      const stats = await apiClient.getSystemStats()
+      setSystemStats(stats)
+      
+      // Add to historical stats
+      setHistoricalStats((prev) => {
+        const newStats = [...prev, {
+          timestamp: stats.timestamp,
+          cpu: stats.cpu,
+          memory: stats.memory,
+        }]
+        
+        // Keep only last 100 data points (approximately 8+ hours at 5 second intervals)
+        // Or keep last 12 hours of data
+        const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000
+        return newStats.filter((stat) => stat.timestamp >= twelveHoursAgo).slice(-100)
+      })
+    } catch (err) {
+      console.error("Failed to load system stats:", err)
+      // Don't set error state for system stats failures, just log
+    }
+  }
+
   const totalPlayers = servers.reduce((sum, s) => sum + s.players, 0)
   const onlineServers = servers.filter((s) => s.status === "online").length
-  const avgCpu = Math.round(
-    servers.filter((s) => s.status === "online").reduce((sum, s) => sum + s.cpu, 0) / onlineServers || 0,
-  )
-  const totalMemory = servers.reduce((sum, s) => sum + s.memory, 0)
 
   const handleStartServer = async (id: string) => {
     try {
@@ -146,31 +181,25 @@ export default function DashboardPage() {
 
   const handleCreateServer = async (data: {
     name: string
-    jarFile?: string
-    assetsPath?: string
-    maxPlayers: number
     maxMemory: number
-    version?: string
     port?: number
-    sessionToken?: string
-    identityToken?: string
+    backupEnabled?: boolean
+    aotCacheEnabled?: boolean
   }) => {
-    const serverPath = `~/hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
+    const serverPath = `hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
     try {
       const newServer = await apiClient.createServer({
         name: data.name,
         path: serverPath,
         executable: "java",
-        jarFile: data.jarFile || "HytaleServer.jar",
-        assetsPath: `${serverPath}/Assets.zip`,
+        assetsPath: `hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}/Assets.zip`,
         port: data.port || 5520,
-        maxPlayers: data.maxPlayers,
+        maxPlayers: 20,
         maxMemory: data.maxMemory * 1024,
-        version: data.version,
-        sessionToken: data.sessionToken,
-        identityToken: data.identityToken,
         bindAddress: "0.0.0.0",
         ip: "0.0.0.0",
+        backupEnabled: data.backupEnabled,
+        aotCacheEnabled: data.aotCacheEnabled,
       })
       setServers((prev) => [...prev, newServer])
     } catch (err) {
@@ -179,15 +208,34 @@ export default function DashboardPage() {
     }
   }
 
-  const cpuChartData = mockStats.timestamps.map((t, i) => ({
-    time: new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-    value: mockStats.cpu[i],
-  }))
+  // Generate chart data from historical stats
+  const cpuChartData = historicalStats.length > 0
+    ? historicalStats.map((stat) => ({
+        time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        value: Math.round(stat.cpu * 10) / 10, // Round to 1 decimal
+      }))
+    : systemStats
+    ? [
+        {
+          time: new Date(systemStats.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+          value: Math.round(systemStats.cpu * 10) / 10,
+        },
+      ]
+    : []
 
-  const memoryChartData = mockStats.timestamps.map((t, i) => ({
-    time: new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-    value: mockStats.memory[i],
-  }))
+  const memoryChartData = historicalStats.length > 0
+    ? historicalStats.map((stat) => ({
+        time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        value: Math.round(stat.memory * 100) / 100, // Round to 2 decimals
+      }))
+    : systemStats
+    ? [
+        {
+          time: new Date(systemStats.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+          value: Math.round(systemStats.memory * 100) / 100,
+        },
+      ]
+    : []
 
   return (
     <div className="min-h-screen bg-background">
@@ -222,11 +270,16 @@ export default function DashboardPage() {
               icon={Users}
               trend={{ value: 8, isPositive: true }}
             />
-            <StatsCard title="Average CPU" value={`${avgCpu}%`} subtitle="Active servers" icon={Cpu} />
+            <StatsCard 
+              title="System CPU" 
+              value={systemStats ? `${systemStats.cpu.toFixed(1)}%` : "—"} 
+              subtitle="Total server usage" 
+              icon={Cpu} 
+            />
             <StatsCard
-              title="Memory Used"
-              value={`${totalMemory.toFixed(1)}GB`}
-              subtitle="Total allocation"
+              title="System Memory"
+              value={systemStats ? `${systemStats.memory.toFixed(2)}GB` : "—"}
+              subtitle={systemStats ? `of ${systemStats.totalMemory.toFixed(2)}GB` : "Loading..."}
               icon={HardDrive}
             />
           </div>
@@ -244,7 +297,7 @@ export default function DashboardPage() {
               data={memoryChartData}
               color="var(--chart-2)"
               unit="GB"
-              maxValue={8}
+              maxValue={systemStats ? systemStats.totalMemory : 8}
             />
           </div>
 
@@ -270,49 +323,6 @@ export default function DashboardPage() {
                   installProgress={installProgress[server.id]}
                 />
               ))}
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="mt-6 rounded-lg border border-border bg-card p-6">
-            <h3 className="mb-4 font-semibold">Quick Actions</h3>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <button className="flex items-center gap-3 rounded-lg border border-border bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Activity className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium">View Logs</p>
-                  <p className="text-xs text-muted-foreground">Check server activity</p>
-                </div>
-              </button>
-              <button className="flex items-center gap-3 rounded-lg border border-border bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Zap className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium">Start All</p>
-                  <p className="text-xs text-muted-foreground">Boot all offline servers</p>
-                </div>
-              </button>
-              <button className="flex items-center gap-3 rounded-lg border border-border bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Users className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium">Player List</p>
-                  <p className="text-xs text-muted-foreground">View all online players</p>
-                </div>
-              </button>
-              <button className="flex items-center gap-3 rounded-lg border border-border bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <HardDrive className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium">Backup</p>
-                  <p className="text-xs text-muted-foreground">Create server backups</p>
-                </div>
-              </button>
             </div>
           </div>
             </>

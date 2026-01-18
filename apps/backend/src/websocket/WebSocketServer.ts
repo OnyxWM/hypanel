@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { ServerManager } from "../server/ServerManager.js";
 import { logger } from "../logger/Logger.js";
 import { ServerStatus, ConsoleLog } from "../types/index.js";
+import { getPlayerTracker } from "../server/PlayerTracker.js";
 
 interface Client {
   ws: WebSocket;
@@ -20,6 +21,7 @@ export class WebSocketServerManager {
 
     this.setupServer();
     this.setupServerManagerListeners();
+    this.setupPlayerTrackerListeners();
   }
 
   private setupServer(): void {
@@ -69,6 +71,14 @@ export class WebSocketServerManager {
       });
     });
 
+    // Listen for global notifications (server lifecycle, etc.)
+    this.serverManager.on("notification", (notification: any) => {
+      this.broadcastToAll({
+        type: "notification",
+        notification,
+      });
+    });
+
     // Listen for server logs
     this.serverManager.on("serverLog", (serverId: string, log: ConsoleLog) => {
       this.broadcastToServer(serverId, {
@@ -93,6 +103,46 @@ export class WebSocketServerManager {
         type: "server:install:progress",
         serverId,
         progress,
+      });
+    });
+  }
+
+  private setupPlayerTrackerListeners(): void {
+    const playerTracker = getPlayerTracker();
+
+    // Listen for player join events
+    playerTracker.on("player:join", (data: { serverId: string; playerName: string; joinTime: Date }) => {
+      // Broadcast to clients subscribed to this server
+      this.broadcastToServer(data.serverId, {
+        type: "player:join",
+        serverId: data.serverId,
+        playerName: data.playerName,
+        joinTime: data.joinTime.toISOString(),
+      });
+
+      // Also broadcast to all clients (for global players view)
+      this.broadcastToAll({
+        type: "player:join",
+        serverId: data.serverId,
+        playerName: data.playerName,
+        joinTime: data.joinTime.toISOString(),
+      });
+    });
+
+    // Listen for player leave events
+    playerTracker.on("player:leave", (data: { serverId: string; playerName: string }) => {
+      // Broadcast to clients subscribed to this server
+      this.broadcastToServer(data.serverId, {
+        type: "player:leave",
+        serverId: data.serverId,
+        playerName: data.playerName,
+      });
+
+      // Also broadcast to all clients (for global players view)
+      this.broadcastToAll({
+        type: "player:leave",
+        serverId: data.serverId,
+        playerName: data.playerName,
       });
     });
   }
@@ -204,6 +254,26 @@ export class WebSocketServerManager {
 
     if (count > 0) {
       logger.debug(`Broadcasted to ${count} client(s) for server ${serverId}`);
+    }
+  }
+
+  private broadcastToAll(data: any): void {
+    const message = JSON.stringify(data);
+    let count = 0;
+
+    for (const client of this.clients) {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        try {
+          client.ws.send(message);
+          count++;
+        } catch (error) {
+          logger.error(`Failed to broadcast to client: ${error}`);
+        }
+      }
+    }
+
+    if (count > 0) {
+      logger.debug(`Broadcasted to ${count} client(s)`);
     }
   }
 

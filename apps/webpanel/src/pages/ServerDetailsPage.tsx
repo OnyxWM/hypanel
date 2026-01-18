@@ -1,31 +1,62 @@
-import { useState, useEffect } from "react"
-import { useParams, Link } from "react-router-dom"
-import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { useLocation, useNavigate, useParams, useSearchParams, Link } from "react-router-dom"
+import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key, RefreshCw, Upload, Trash2, Users, Cpu, HardDrive, Clock } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { StatsCard } from "@/components/stats-card"
 import { ResourceChart } from "@/components/resource-chart"
 import { ServerConsole } from "@/components/server-console"
 import { ServerConfig } from "@/components/server-config"
+import { ServerSettings } from "@/components/server-settings"
 import { WorldList } from "@/components/world-list"
 import { WorldConfig } from "@/components/world-config"
 import { AuthGuidance } from "@/components/auth-guidance"
+import { PlayerList } from "@/components/player-list"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { apiClient, wsClient } from "@/lib/api-client"
-import type { Server, ConsoleLog } from "@/lib/api"
-import { Users, Cpu, HardDrive, Clock } from "lucide-react"
+import type { Server, ConsoleLog, Player, ModFile } from "@/lib/api"
 
 export default function ServerDetailsPage() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [server, setServer] = useState<Server | null>(null)
   const [logs, setLogs] = useState<ConsoleLog[]>([])
   const [stats, setStats] = useState<any[]>([])
+  const [players, setPlayers] = useState<Player[]>([])
+  const [mods, setMods] = useState<ModFile[]>([])
+  const [modsError, setModsError] = useState<string | null>(null)
+  const [isModsLoading, setIsModsLoading] = useState(false)
+  const [isUploadingMod, setIsUploadingMod] = useState(false)
+  const [deletingModName, setDeletingModName] = useState<string | null>(null)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isAutostartSaving, setIsAutostartSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null)
+  const modFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const shouldAutoOpenSettings = searchParams.get("settings") === "1"
+
+  const handleSettingsOpenChange = (open: boolean) => {
+    setIsSettingsOpen(open)
+
+    // If opened via `?settings=1`, remove it on close so refresh/back doesn’t keep reopening.
+    if (!open && shouldAutoOpenSettings) {
+      const next = new URLSearchParams(searchParams)
+      next.delete("settings")
+      const nextSearch = next.toString()
+      navigate(
+        { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" },
+        { replace: true },
+      )
+    }
+  }
 
   useEffect(() => {
     if (!id) return
@@ -33,6 +64,8 @@ export default function ServerDetailsPage() {
     loadServer()
     loadLogs()
     loadStats()
+    loadPlayers()
+    loadMods()
 
     // Set up WebSocket for real-time updates
     wsClient.connect()
@@ -52,15 +85,42 @@ export default function ServerDetailsPage() {
 
     wsClient.on("server:stats", (data: any) => {
       if (data.serverId === id && data.stats) {
+        // Append to chart series (keep ~8 minutes: 100 points @ 5s interval).
+        setStats((prev) => {
+          const next = [
+            ...prev,
+            {
+              timestamp: Date.now(),
+              cpu: data.stats.cpu ?? 0,
+              memory: data.stats.memory ?? 0,
+              players: data.stats.players ?? 0,
+            },
+          ]
+          return next.slice(-100)
+        })
+
         setServer((prev) => {
           if (!prev) return prev
           return {
             ...prev,
-            cpu: data.stats.cpu || prev.cpu,
-            memory: data.stats.memory || prev.memory,
-            uptime: data.stats.uptime || prev.uptime,
+            cpu: data.stats.cpu ?? prev.cpu,
+            memory: data.stats.memory ?? prev.memory,
+            uptime: data.stats.uptime ?? prev.uptime,
+            players: data.stats.players ?? prev.players,
           }
         })
+      }
+    })
+
+    wsClient.on("player:join", (data: any) => {
+      if (data.serverId === id) {
+        loadPlayers()
+      }
+    })
+
+    wsClient.on("player:leave", (data: any) => {
+      if (data.serverId === id) {
+        loadPlayers()
       }
     })
 
@@ -68,6 +128,12 @@ export default function ServerDetailsPage() {
       wsClient.unsubscribe()
     }
   }, [id])
+
+  useEffect(() => {
+    if (shouldAutoOpenSettings) {
+      setIsSettingsOpen(true)
+    }
+  }, [shouldAutoOpenSettings])
 
   const loadServer = async () => {
     if (!id) return
@@ -98,9 +164,34 @@ export default function ServerDetailsPage() {
     if (!id) return
     try {
       const data = await apiClient.getStats(id, 100)
-      setStats(data)
+      // Backend returns newest-first; store chronological for charting (oldest -> newest).
+      setStats(Array.isArray(data) ? [...data].reverse() : [])
     } catch (err) {
       console.error("Failed to load stats:", err)
+    }
+  }
+
+  const loadPlayers = async () => {
+    if (!id) return
+    try {
+      const data = await apiClient.getServerPlayers(id)
+      setPlayers(data)
+    } catch (err) {
+      console.error("Failed to load players:", err)
+    }
+  }
+
+  const loadMods = async () => {
+    if (!id) return
+    try {
+      setIsModsLoading(true)
+      setModsError(null)
+      const data = await apiClient.getServerMods(id)
+      setMods(data)
+    } catch (err) {
+      setModsError(err instanceof Error ? err.message : "Failed to load mods")
+    } finally {
+      setIsModsLoading(false)
     }
   }
 
@@ -140,6 +231,37 @@ export default function ServerDetailsPage() {
     }
   }
 
+  const handleToggleAutostart = async () => {
+    if (!id || !server) return
+    const nextAutostart = !(server.autostart === true)
+    const wasOffline = server.status === "offline"
+    try {
+      setIsAutostartSaving(true)
+      setError(null)
+
+      // Optimistic update
+      setServer((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          autostart: nextAutostart,
+          status: nextAutostart && wasOffline ? ("starting" as const) : prev.status,
+        }
+      })
+
+      let updated = await apiClient.updateServer(id, { autostart: nextAutostart })
+      if (nextAutostart && wasOffline) {
+        updated = await apiClient.startServer(id)
+      }
+      setServer(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update autostart")
+      await loadServer()
+    } finally {
+      setIsAutostartSaving(false)
+    }
+  }
+
   const handleSendCommand = async (command: string) => {
     if (!id) return
     try {
@@ -160,27 +282,47 @@ export default function ServerDetailsPage() {
     return `${mins}m`
   }
 
-  // Prepare chart data from stats
-  const cpuChartData = stats
-    .slice(-12)
-    .map((stat) => ({
-      time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-      value: stat.cpu || 0,
-    }))
+  const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+    const units = ["B", "KB", "MB", "GB", "TB"]
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    const value = bytes / Math.pow(1024, i)
+    return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+  }
 
-  const memoryChartData = stats
-    .slice(-12)
-    .map((stat) => ({
-      time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-      value: (stat.memory || 0) / 1024, // Convert MB to GB
-    }))
+  const formatChartTime = (ts: any) => {
+    const ms = typeof ts === "number" ? ts : Number(ts)
+    const date = Number.isFinite(ms) ? new Date(ms) : new Date()
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+  }
 
-  const playersChartData = stats
-    .slice(-12)
-    .map((stat) => ({
-      time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-      value: stat.players || 0,
-    }))
+  const toFiniteNumber = (value: any, fallback: number = 0) => {
+    const n = typeof value === "number" ? value : Number(value)
+    return Number.isFinite(n) ? n : fallback
+  }
+
+  // Prepare chart data from stats (~8 minutes: 100 points @ 5s interval).
+  // `stats` is stored chronological (oldest -> newest).
+  const chartStats = stats.slice(-100)
+
+  const cpuChartData = chartStats.map((stat) => ({
+    time: formatChartTime(stat.timestamp),
+    value: toFiniteNumber(stat.cpu, 0),
+  }))
+
+  const memoryChartData = chartStats.map((stat) => ({
+    time: formatChartTime(stat.timestamp),
+    value: toFiniteNumber(stat.memory, 0) / 1024, // Convert MB to GB
+  }))
+
+  const playersChartData = chartStats.map((stat) => ({
+    time: formatChartTime(stat.timestamp),
+    value: toFiniteNumber(stat.players, 0),
+  }))
 
   if (isLoading) {
     return (
@@ -283,14 +425,36 @@ export default function ServerDetailsPage() {
               ) : (
                 <Button disabled>{server.status === "starting" ? "Starting..." : "Stopping..."}</Button>
               )}
-              <Button variant="outline" asChild>
-                <Link to={`/servers/${server.id}`}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </Link>
+              <Button
+                variant="outline"
+                onClick={handleToggleAutostart}
+                disabled={isAutostartSaving}
+              >
+                {isAutostartSaving
+                  ? "Saving..."
+                  : server.autostart === true
+                    ? "Disable Autostart"
+                    : "Enable Autostart"}
+              </Button>
+              <Button variant="outline" onClick={() => setIsSettingsOpen(true)}>
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
               </Button>
             </div>
           </div>
+
+          <Dialog open={isSettingsOpen} onOpenChange={handleSettingsOpenChange}>
+            <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Server Settings</DialogTitle>
+              </DialogHeader>
+              <ServerSettings
+                serverId={server.id}
+                serverStatus={server.status}
+                onUpdated={(updated) => setServer(updated)}
+              />
+            </DialogContent>
+          </Dialog>
 
           {/* Stats Cards */}
           <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -312,7 +476,7 @@ export default function ServerDetailsPage() {
               <TabsTrigger value="players">Players</TabsTrigger>
               <TabsTrigger value="config">Config</TabsTrigger>
               <TabsTrigger value="worlds">Worlds</TabsTrigger>
-              <TabsTrigger value="files">Files</TabsTrigger>
+                <TabsTrigger value="mods">Mods</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">
@@ -390,18 +554,39 @@ export default function ServerDetailsPage() {
             </TabsContent>
 
             <TabsContent value="players">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Online Players</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {server.players > 0 ? (
-                    <p className="text-center text-muted-foreground">{server.players} player(s) online</p>
-                  ) : (
-                    <p className="text-center text-muted-foreground">No players online</p>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-medium">Online Players</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {players.length} player{players.length !== 1 ? "s" : ""} online
+                    </p>
+                  </div>
+                  {server.status === "online" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (!id) return
+                        try {
+                          await apiClient.refreshServerPlayers(id)
+                          await loadPlayers()
+                        } catch (err) {
+                          console.error("Failed to refresh players:", err)
+                        }
+                      }}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Refresh
+                    </Button>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+                <PlayerList 
+                  players={players} 
+                  showServerName={false}
+                  emptyMessage="No players online on this server"
+                />
+              </div>
             </TabsContent>
 
             <TabsContent value="config">
@@ -440,13 +625,109 @@ export default function ServerDetailsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="files">
+            <TabsContent value="mods">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Server Files</CardTitle>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <CardTitle className="text-base">Mods</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={loadMods}
+                        disabled={isModsLoading || isUploadingMod}
+                      >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Refresh
+                      </Button>
+                      <input
+                        ref={modFileInputRef}
+                        type="file"
+                        accept=".jar,.zip"
+                        className="hidden"
+                        onChange={async (e) => {
+                          if (!id) return
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          try {
+                            setIsUploadingMod(true)
+                            setModsError(null)
+                            const updated = await apiClient.uploadServerMod(id, file)
+                            setMods(updated)
+                          } catch (err) {
+                            setModsError(err instanceof Error ? err.message : "Failed to upload mod")
+                          } finally {
+                            setIsUploadingMod(false)
+                            e.target.value = ""
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => modFileInputRef.current?.click()}
+                        disabled={isUploadingMod || isModsLoading}
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        Upload Mod
+                      </Button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-center text-muted-foreground">File manager coming soon</p>
+                  {modsError && (
+                    <div className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+                      {modsError}
+                    </div>
+                  )}
+
+                  {isModsLoading ? (
+                    <p className="text-center text-muted-foreground">Loading mods...</p>
+                  ) : mods.length === 0 ? (
+                    <p className="text-center text-muted-foreground">No mods found in the server mods folder</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {mods.map((m) => (
+                        <div
+                          key={m.name}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-mono text-sm">{m.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatBytes(m.size)} • {new Date(m.modified).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={
+                                isModsLoading ||
+                                isUploadingMod ||
+                                (deletingModName !== null && deletingModName !== m.name)
+                              }
+                              onClick={async () => {
+                                if (!id) return
+                                try {
+                                  setDeletingModName(m.name)
+                                  setModsError(null)
+                                  const updated = await apiClient.deleteServerMod(id, m.name)
+                                  setMods(updated)
+                                } catch (err) {
+                                  setModsError(err instanceof Error ? err.message : "Failed to delete mod")
+                                } finally {
+                                  setDeletingModName(null)
+                                }
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

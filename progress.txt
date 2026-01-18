@@ -206,3 +206,16 @@
 - TypeScript compilation successful with all bundling functionality working
 - Addresses PRD requirement #2: Automate Hytale server installation using bundled official hytale-downloader
 - Addresses PRD requirement #16: Bundle and install the official hytale-downloader with hypanel and validate it works at runtime
+
+2026-01-17: Implemented comprehensive runtime permissions model for security
+- Added verifyRuntimePermissions() function to prevent running as root in production
+- Enhanced ConfigManager with secure file permissions (no world-writable directories or files)
+- Updated ServerManager to create server directories with proper 755 permissions and hypanel ownership
+- Added verifyAndFixPermissions() method in Installer for post-download security verification
+- Implemented permission checks for critical directories during daemon startup
+- Ensured all configuration files are created with secure 644 permissions
+- Fixed directory permissions to prevent world-writable access across the application
+- Added systemd service compatibility verification for proper user isolation
+- Maintained existing path traversal protection and security boundaries
+- TypeScript compilation successful with all security measures in place
+- Addresses PRD requirement #17: Define and enforce runtime permissions model: no root required after install; servers live under ~hypanel/hytale/<id>

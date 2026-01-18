@@ -5,7 +5,10 @@ import { getServerLogger, logServerStart, logServerStop, logError } from "../log
 import pidusage from "pidusage";
 import { EventEmitter } from "events";
 import path from "path";
+import os from "os";
 import { createServerError, createFilesystemError, HypanelError } from "../errors/index.js";
+import { config as appConfig } from "../config/config.js";
+import { getPlayerTracker } from "./PlayerTracker.js";
 
 export class ServerInstance extends EventEmitter {
   public readonly id: string;
@@ -15,6 +18,7 @@ export class ServerInstance extends EventEmitter {
   private statsInterval: NodeJS.Timeout | null = null;
   private logger: ReturnType<typeof getServerLogger>;
   private playerCount: number = 0;
+  private playerTracker = getPlayerTracker();
 
   constructor(config: ServerConfig) {
     super();
@@ -136,16 +140,65 @@ export class ServerInstance extends EventEmitter {
       }
       
       // Build command args using official Hytale launch requirements
+      // Calculate max memory in GB
+      const maxMemoryGB = Math.max(1, Math.round(this.config.maxMemory / 1024)); // Ensure at least 1GB
+      // Initial heap size: use 4GB if maxMemory > 4GB, otherwise use maxMemory-1GB (but at least 1GB) to ensure Xms < Xmx
+      // If maxMemory is exactly 4GB, use 3GB for initial to ensure Xms < Xmx
+      let initialHeapGB: number;
+      if (maxMemoryGB >= 5) {
+        initialHeapGB = 4; // Use 4GB for initial if max is 5GB or more
+      } else if (maxMemoryGB === 4) {
+        initialHeapGB = 3; // Use 3GB for initial if max is exactly 4GB
+      } else {
+        initialHeapGB = Math.max(1, maxMemoryGB - 1); // Use max-1GB, but at least 1GB
+      }
+      
+      // Ensure initialHeapGB is never greater than or equal to maxMemoryGB
+      if (initialHeapGB >= maxMemoryGB) {
+        initialHeapGB = Math.max(1, maxMemoryGB - 1);
+      }
+      
+      this.logger.info(`Memory settings: maxMemory=${this.config.maxMemory}MB, maxMemoryGB=${maxMemoryGB}G, initialHeapGB=${initialHeapGB}G`);
+      
       const args: string[] = [
+        `-Xms${initialHeapGB}G`, // Initial heap size (always < Xmx)
+        `-Xmx${maxMemoryGB}G`, // Max memory from config (MB to GB)
+      ];
+
+      if (this.config.aotCacheEnabled === true) {
+        // Ahead-of-time caching (writes/uses cache file in working directory)
+        args.push("-XX:AOTCache=HytaleServer.aot");
+      }
+
+      args.push(
         "-jar",
         jarPath,
         "--assets",
         assetsPath
-      ];
+      );
       
       // Add bind address (default to 0.0.0.0:port if not specified)
       const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";
       args.push("--bind", `${bindAddress}:${this.config.port}`);
+      
+      // Always add backup directory argument
+      const backupDir = appConfig.backupDir;
+      const serverBackupDir = path.join(backupDir, `${this.id}-back`);
+
+      // Ensure the backup directory exists even if backups are disabled.
+      // (We still pass --backup-dir to the server process.)
+      try {
+        await fs.mkdir(serverBackupDir, { recursive: true, mode: 0o755 });
+      } catch (e) {
+        this.logger.warn(`Failed to ensure backup directory exists (${serverBackupDir}): ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      args.push("--backup-dir", serverBackupDir);
+      
+      // Add --backup flag only if backups are enabled
+      if (this.config.backupEnabled === true) {
+        args.push("--backup");
+      }
       
       // Add optional session tokens
       if (this.config.sessionToken) {
@@ -357,7 +410,8 @@ export class ServerInstance extends EventEmitter {
   }
 
   sendCommand(command: string): void {
-    if (!this.process.process || this.status !== "online") {
+    // Allow commands when server is online or auth_required (needed for authentication)
+    if (!this.process.process || (this.status !== "online" && this.status !== "auth_required")) {
       throw new Error(`Cannot send command: server is ${this.status}`);
     }
 
@@ -368,13 +422,18 @@ export class ServerInstance extends EventEmitter {
     this.logger.info(`Sending command: ${command}`);
     this.process.process.stdin.write(command + "\n");
 
-    // Log the command
-    insertConsoleLog({
-      serverId: this.id,
-      timestamp: new Date(),
-      level: "info",
-      message: `> ${command}`,
-    });
+    // Log the command (don't let database errors prevent command from being sent)
+    try {
+      insertConsoleLog({
+        serverId: this.id,
+        timestamp: new Date(),
+        level: "info",
+        message: `> ${command}`,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to log command to database: ${error instanceof Error ? error.message : "Unknown error"}`);
+      // Continue execution - command was already sent
+    }
 
     this.emit("command", command);
   }
@@ -404,23 +463,8 @@ export class ServerInstance extends EventEmitter {
       // Check for authentication requirements
       this.checkAuthRequirements(lowerLine);
 
-      // Parse player count from Hytale logs
-      // Common patterns: "joined", "connected", "left", "disconnected", "logged in", "logged out"
-      if (lowerLine.includes("joined") || lowerLine.includes("connected") || 
-          lowerLine.includes("logged in") || lowerLine.match(/\bjoined\b/i)) {
-        this.playerCount = Math.min(this.playerCount + 1, this.config.maxPlayers);
-      } else if (lowerLine.includes("left") || lowerLine.includes("disconnected") || 
-                 lowerLine.includes("logged out") || lowerLine.match(/\bleft\b/i)) {
-        this.playerCount = Math.max(this.playerCount - 1, 0);
-      }
-      
-      // Try to parse player count from status messages (e.g., "Players: 5/20")
-      const playerCountMatch = line.match(/(?:players?|online):\s*(\d+)\s*(?:\/|\s+of\s+)\s*(\d+)/i);
-      if (playerCountMatch) {
-        const current = parseInt(playerCountMatch[1] || "0", 10);
-        const max = parseInt(playerCountMatch[2] || String(this.config.maxPlayers), 10);
-        this.playerCount = Math.min(current, max);
-      }
+      // Player tracking is now done exclusively via /who command polling
+      // No longer parsing player join/leave events from logs to avoid false positives
 
       // Log to file
       if (level === "error") {
@@ -446,6 +490,87 @@ export class ServerInstance extends EventEmitter {
         level,
         message: line,
       });
+    }
+  }
+
+  /**
+   * Strip ANSI escape codes from a string
+   */
+  private stripAnsiCodes(str: string): string {
+    // Remove ANSI escape codes: \x1b[...m or \u001b[...m
+    return str.replace(/\u001b\[[0-9;]*m/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+  }
+
+  /**
+   * Parse player join/leave events from log lines
+   * Extracts player names from various log formats
+   */
+  private parsePlayerEvents(line: string, lowerLine: string): void {
+    // Player join patterns - Hytale-specific format: Player 'PLAYERNAME' joined world 'WORLDNAME'
+    const joinPatterns = [
+      /player\s+['"]([^'"]+)['"]\s+joined\s+world/i,  // Player 'Onyxhunter' joined world 'default'
+      /\[.*?\]\s*(\w+(?:\s+\w+)*)\s+joined/i,  // [timestamp] PlayerName joined
+      /(\w+(?:\s+\w+)*)\s+joined\s+the\s+game/i,
+      /(\w+(?:\s+\w+)*)\s+joined/i,
+      /(\w+(?:\s+\w+)*)\s+connected/i,
+      /(\w+(?:\s+\w+)*)\s+logged\s+in/i,
+      /player\s+(\w+(?:\s+\w+)*)\s+joined/i,
+      /(\w+(?:\s+\w+)*)\s+has\s+joined/i,
+      /(\w+(?:\s+\w+)*)\s+entered/i,
+      /(\w+(?:\s+\w+)*)\s+connected\s+to\s+the\s+server/i,
+      // Hytale-specific patterns
+      /(\w+(?:\s+\w+)*)\s+has\s+connected/i,
+      /connection\s+from\s+(\w+(?:\s+\w+)*)/i,
+    ];
+
+    // Player leave patterns - Hytale may use similar format with 'left world'
+    const leavePatterns = [
+      /player\s+['"]([^'"]+)['"]\s+left\s+world/i,  // Player 'Onyxhunter' left world 'default'
+      /\[.*?\]\s*(\w+(?:\s+\w+)*)\s+left/i,  // [timestamp] PlayerName left
+      /(\w+(?:\s+\w+)*)\s+left\s+the\s+game/i,
+      /(\w+(?:\s+\w+)*)\s+left/i,
+      /(\w+(?:\s+\w+)*)\s+disconnected/i,
+      /(\w+(?:\s+\w+)*)\s+logged\s+out/i,
+      /player\s+(\w+(?:\s+\w+)*)\s+left/i,
+      /(\w+(?:\s+\w+)*)\s+has\s+left/i,
+      /(\w+(?:\s+\w+)*)\s+quit/i,
+      /(\w+(?:\s+\w+)*)\s+disconnected\s+from\s+the\s+server/i,
+      // Hytale-specific patterns
+      /(\w+(?:\s+\w+)*)\s+has\s+disconnected/i,
+      /lost\s+connection\s+to\s+(\w+(?:\s+\w+)*)/i,
+    ];
+
+    // Check for join events
+    for (const pattern of joinPatterns) {
+      const match = line.match(pattern);
+      if (match && match[1]) {
+        let playerName = match[1].trim();
+        // Strip ANSI escape codes from player name
+        playerName = this.stripAnsiCodes(playerName).trim();
+        // Validate player name (reasonable length, no special chars except common ones)
+        // Hytale player names can be any characters except quotes, but we'll validate more strictly
+        if (playerName.length > 0 && playerName.length <= 32 && /^[a-zA-Z0-9_\- ]+$/.test(playerName)) {
+          this.logger.info(`Detected player join: ${playerName} on server ${this.id}`);
+          this.playerTracker.addPlayer(this.id, playerName);
+          return;
+        }
+      }
+    }
+
+    // Check for leave events
+    for (const pattern of leavePatterns) {
+      const match = line.match(pattern);
+      if (match && match[1]) {
+        let playerName = match[1].trim();
+        // Strip ANSI escape codes from player name
+        playerName = this.stripAnsiCodes(playerName).trim();
+        // Validate player name
+        if (playerName.length > 0 && playerName.length <= 32 && /^[a-zA-Z0-9_\- ]+$/.test(playerName)) {
+          this.logger.info(`Detected player leave: ${playerName} on server ${this.id}`);
+          this.playerTracker.removePlayer(this.id, playerName);
+          return;
+        }
+      }
     }
   }
 
@@ -502,6 +627,8 @@ export class ServerInstance extends EventEmitter {
     this.stopResourceMonitoring();
       this.status = "offline";
       this.playerCount = 0; // Reset player count on exit
+      // Clear all players when server stops
+      this.playerTracker.clearServerPlayers(this.id);
       this.emit("statusChange", this.status);
       updateServerStatus(this.id, this.status, null);
 
@@ -518,6 +645,8 @@ export class ServerInstance extends EventEmitter {
     this.stopResourceMonitoring();
       this.status = "offline";
       this.playerCount = 0; // Reset player count on error
+      // Clear all players when server errors
+      this.playerTracker.clearServerPlayers(this.id);
       this.emit("statusChange", this.status);
       updateServerStatus(this.id, this.status, null);
       this.emit("error", error);
@@ -540,20 +669,28 @@ export class ServerInstance extends EventEmitter {
           : 0;
 
         // Store stats in database
+        // Get accurate player count from PlayerTracker instead of internal counter
+        const actualPlayerCount = this.playerTracker.getPlayerCount(this.id);
+        const totalCores = Math.max(1, os.cpus()?.length || 1);
+        // pidusage cpu can exceed 100% on multi-core; normalize to 0–100% of total host capacity
+        const normalizedCpu = Math.max(0, Math.min(100, stats.cpu / totalCores));
+        const memoryMB = stats.memory / 1024 / 1024; // RSS bytes -> MB
+        
         insertServerStats({
           serverId: this.id,
           timestamp: Date.now(),
-          cpu: stats.cpu,
-          memory: stats.memory / 1024 / 1024, // Convert to MB
-          players: this.playerCount,
+          cpu: normalizedCpu,
+          memory: memoryMB,
+          players: actualPlayerCount,
           maxPlayers: this.config.maxPlayers,
         });
 
         // Emit stats event
         this.emit("stats", {
-          cpu: stats.cpu,
-          memory: stats.memory / 1024 / 1024,
+          cpu: normalizedCpu,
+          memory: memoryMB,
           uptime,
+          players: actualPlayerCount,
         });
       } catch (error) {
         // Process might have exited

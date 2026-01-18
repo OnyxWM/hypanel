@@ -8,15 +8,32 @@ import { Loader2, Save, RefreshCw } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
 interface HytaleConfig {
+  Version?: number
   ServerName?: string
   MOTD?: string
   Password?: string
   MaxPlayers?: number
   MaxViewRadius?: number
   LocalCompressionEnabled?: boolean
+  DisplayTmpTagsInStrings?: boolean
   Defaults?: {
     World?: string
-    GameMode?: "survival" | "creative" | "adventure" | "spectator"
+    GameMode?: "Adventure" | "Creative"
+  }
+  ConnectionTimeouts?: {
+    JoinTimeouts?: Record<string, any>
+  }
+  RateLimit?: Record<string, any>
+  Modules?: Record<string, any>
+  LogLevels?: Record<string, any>
+  Mods?: Record<string, any>
+  PlayerStorage?: {
+    Type?: string
+    Path?: string
+  }
+  AuthCredentialStore?: {
+    Type?: string
+    Path?: string
   }
 }
 
@@ -205,6 +222,30 @@ export function ServerConfig({ serverId, serverStatus }: ServerConfigProps) {
                 placeholder="Leave empty for no password"
               />
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="version">Version</Label>
+              <Input
+                id="version"
+                type="number"
+                value={config.Version || ""}
+                onChange={(e) => setConfig({ ...config, Version: e.target.value ? parseInt(e.target.value) : undefined })}
+                disabled={!canEdit}
+                placeholder="3"
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="displayTmpTags"
+                checked={config.DisplayTmpTagsInStrings || false}
+                onChange={(e) => setConfig({ ...config, DisplayTmpTagsInStrings: e.target.checked })}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label htmlFor="displayTmpTags">Display Temporary Tags in Strings</Label>
+            </div>
           </CardContent>
         </Card>
 
@@ -276,19 +317,165 @@ export function ServerConfig({ serverId, serverStatus }: ServerConfigProps) {
               <Label htmlFor="gameMode">Default Game Mode</Label>
               <select
                 id="gameMode"
-                value={config.Defaults?.GameMode || "survival"}
+                value={config.Defaults?.GameMode || "Adventure"}
                 onChange={(e) => setConfig({ 
                   ...config, 
-                  Defaults: { ...config.Defaults, GameMode: e.target.value as any } 
+                  Defaults: { ...config.Defaults, GameMode: e.target.value as "Adventure" | "Creative" } 
                 })}
                 disabled={!canEdit}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="survival">Survival</option>
-                <option value="creative">Creative</option>
-                <option value="adventure">Adventure</option>
-                <option value="spectator">Spectator</option>
+                <option value="Adventure">Adventure</option>
+                <option value="Creative">Creative</option>
               </select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Storage Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="playerStorageType">Player Storage Type</Label>
+              <select
+                id="playerStorageType"
+                value={config.PlayerStorage?.Type || "Hytale"}
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  PlayerStorage: { ...config.PlayerStorage, Type: e.target.value } 
+                })}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="Hytale">Hytale</option>
+                <option value="Disk">Disk</option>
+              </select>
+            </div>
+
+            {config.PlayerStorage?.Type === "Disk" && (
+              <div className="space-y-2">
+                <Label htmlFor="playerStoragePath">Player Storage Path</Label>
+                <Input
+                  id="playerStoragePath"
+                  value={config.PlayerStorage?.Path || ""}
+                  onChange={(e) => setConfig({ 
+                    ...config, 
+                    PlayerStorage: { ...config.PlayerStorage, Path: e.target.value } 
+                  })}
+                  disabled={!canEdit}
+                  placeholder="path/to/storage"
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="authStoreType">Auth Credential Store Type</Label>
+              <select
+                id="authStoreType"
+                value={config.AuthCredentialStore?.Type || "Memory"}
+                onChange={(e) => setConfig({ 
+                  ...config, 
+                  AuthCredentialStore: { ...config.AuthCredentialStore, Type: e.target.value } 
+                })}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="Memory">Memory</option>
+                <option value="Encrypted">Encrypted</option>
+              </select>
+            </div>
+
+            {config.AuthCredentialStore?.Type === "Encrypted" && (
+              <div className="space-y-2">
+                <Label htmlFor="authStorePath">Auth Credential Store Path</Label>
+                <Input
+                  id="authStorePath"
+                  value={config.AuthCredentialStore?.Path || ""}
+                  onChange={(e) => setConfig({ 
+                    ...config, 
+                    AuthCredentialStore: { ...config.AuthCredentialStore, Path: e.target.value } 
+                  })}
+                  disabled={!canEdit}
+                  placeholder="auth.enc"
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Advanced Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="connectionTimeouts">Connection Timeouts (JSON)</Label>
+              <textarea
+                id="connectionTimeouts"
+                value={JSON.stringify(config.ConnectionTimeouts || { JoinTimeouts: {} }, null, 2)}
+                onChange={(e) => {
+                  try {
+                    const parsed = JSON.parse(e.target.value)
+                    setConfig({ ...config, ConnectionTimeouts: parsed })
+                  } catch {
+                    // Invalid JSON, don't update
+                  }
+                }}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[100px]"
+                placeholder='{ "JoinTimeouts": {} }'
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="rateLimit">Rate Limit (JSON)</Label>
+              <textarea
+                id="rateLimit"
+                value={JSON.stringify(config.RateLimit || {}, null, 2)}
+                onChange={(e) => {
+                  try {
+                    const parsed = JSON.parse(e.target.value)
+                    setConfig({ ...config, RateLimit: parsed })
+                  } catch {
+                    // Invalid JSON, don't update
+                  }
+                }}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[100px]"
+                placeholder="{}"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="modules">Modules (JSON - Read Only)</Label>
+              <textarea
+                id="modules"
+                value={JSON.stringify(config.Modules || {}, null, 2)}
+                disabled
+                className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm font-mono min-h-[100px]"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="logLevels">Log Levels (JSON - Read Only)</Label>
+              <textarea
+                id="logLevels"
+                value={JSON.stringify(config.LogLevels || {}, null, 2)}
+                disabled
+                className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm font-mono min-h-[100px]"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mods">Mods (JSON - Read Only)</Label>
+              <textarea
+                id="mods"
+                value={JSON.stringify(config.Mods || {}, null, 2)}
+                disabled
+                className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm font-mono min-h-[100px]"
+              />
             </div>
           </CardContent>
         </Card>
