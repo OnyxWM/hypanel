@@ -573,6 +573,30 @@ EOF
 create_systemd_service() {
     log "Creating systemd service"
     
+    # Build ReadWritePaths dynamically, only including paths that exist
+    local read_write_paths=(
+        "$HYPANEL_SERVERS_DIR"
+        "$HYPANEL_LOG_DIR"
+        "$HYPANEL_INSTALL_DIR/data"
+        "$HYPANEL_INSTALL_DIR/apps/backend/data"
+    )
+    
+    # Add faillock paths only if they exist (for PAM authentication failure tracking)
+    local faillock_paths=(
+        "/run/faillock"
+        "/var/run/faillock"
+        "/var/lib/faillock"
+    )
+    
+    for path in "${faillock_paths[@]}"; do
+        if [[ -d "$path" ]] || [[ -e "$path" ]]; then
+            read_write_paths+=("$path")
+        fi
+    done
+    
+    # Join paths with spaces
+    local read_write_paths_str="${read_write_paths[*]}"
+    
     cat > "$HYPANEL_SERVICE_FILE" << EOF
 [Unit]
 Description=hypanel - Hytale Server Management Panel
@@ -597,7 +621,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$HYPANEL_SERVERS_DIR $HYPANEL_LOG_DIR $HYPANEL_INSTALL_DIR/data $HYPANEL_INSTALL_DIR/apps/backend/data /run/faillock /var/run/faillock /var/lib/faillock
+ReadWritePaths=$read_write_paths_str
 
 [Install]
 WantedBy=multi-user.target
