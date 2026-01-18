@@ -23,6 +23,7 @@ import fs from "fs";
 import { Installer } from "../installation/Installer.js";
 import { createConfigError, createFilesystemError, HypanelError } from "../errors/index.js";
 import { getPlayerTracker } from "./PlayerTracker.js";
+import { getServerIP } from "../utils/network.js";
 
 export class ServerManager extends EventEmitter {
   private instances: Map<string, ServerInstance>;
@@ -31,6 +32,7 @@ export class ServerManager extends EventEmitter {
   private playerListPollingInterval: NodeJS.Timeout | null = null;
   private backupCleanupInterval: NodeJS.Timeout | null = null;
   private playerTracker = getPlayerTracker();
+  private cachedServerIP: string | null = null;
 
   constructor() {
     super();
@@ -900,6 +902,7 @@ export class ServerManager extends EventEmitter {
     }
 
     const hytaleMaxPlayers = this.getHytaleConfigMaxPlayers(id);
+    const actualServerIP = this.getActualServerIP();
 
     // If no instance exists, try to load config to get maxMemory
     let maxMemory = dbServer.maxMemory || 0;
@@ -934,6 +937,8 @@ export class ServerManager extends EventEmitter {
         backupEnabled,
         aotCacheEnabled,
         uptime: 0,
+        // Replace "0.0.0.0" with actual server IP for display
+        ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
       };
     }
 
@@ -958,11 +963,25 @@ export class ServerManager extends EventEmitter {
       cpu: status === "online" ? dbServer.cpu : 0,
       memory: status === "online" ? dbServer.memory : 0,
       players: status === "online" ? dbServer.players : 0,
+      // Replace "0.0.0.0" with actual server IP for display
+      ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
     };
+  }
+
+  /**
+   * Gets the server's actual IP address, with caching.
+   * The IP is cached since it doesn't change frequently.
+   */
+  private getActualServerIP(): string {
+    if (this.cachedServerIP === null) {
+      this.cachedServerIP = getServerIP();
+    }
+    return this.cachedServerIP;
   }
 
   getAllServers(): Server[] {
     const dbServers = getAllServers();
+    const actualServerIP = this.getActualServerIP();
     
     return dbServers.map((dbServer) => {
       const instance = this.instances.get(dbServer.id);
@@ -1001,6 +1020,8 @@ export class ServerManager extends EventEmitter {
           backupEnabled,
           aotCacheEnabled,
           uptime: 0,
+          // Replace "0.0.0.0" with actual server IP for display
+          ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
         };
       }
 
@@ -1024,6 +1045,8 @@ export class ServerManager extends EventEmitter {
         cpu: status === "online" ? dbServer.cpu : 0,
         memory: status === "online" ? dbServer.memory : 0,
         players: status === "online" ? dbServer.players : 0,
+        // Replace "0.0.0.0" with actual server IP for display
+        ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
       };
     });
   }

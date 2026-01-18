@@ -44,44 +44,52 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="w-full max-w-md border-border/50 bg-card/60 backdrop-blur-xl">
-        <CardHeader>
-          <CardTitle>Sign in</CardTitle>
-          <CardDescription>Log in to access the HyPanel Web UI.</CardDescription>
-        </CardHeader>
-        <form onSubmit={onSubmit}>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-                {error}
+      <div className="flex w-full max-w-md flex-col items-center">
+        <img
+          src="/newlogo.png"
+          alt="HyPanel"
+          className="mb-6 h-10 w-auto max-w-full sm:h-12"
+        />
+
+        <Card className="w-full border-border/50 bg-card/60 backdrop-blur-xl">
+          <CardHeader>
+            <CardTitle>Sign in</CardTitle>
+            <CardDescription>Log in to access the HyPanel Web UI.</CardDescription>
+          </CardHeader>
+          <form onSubmit={onSubmit}>
+            <CardContent className="space-y-4">
+              {error && (
+                <div className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input id="username" value="hypanel" disabled />
               </div>
-            )}
 
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input id="username" value="hypanel" disabled />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoFocus
-                autoComplete="current-password"
-                required
-              />
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-end">
-            <Button type="submit" disabled={isSubmitting || password.length === 0}>
-              {isSubmitting ? "Signing in..." : "Sign in"}
-            </Button>
-          </CardFooter>
-        </form>
-      </Card>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoFocus
+                  autoComplete="current-password"
+                  required
+                />
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-end">
+              <Button type="submit" disabled={isSubmitting || password.length === 0}>
+                {isSubmitting ? "Signing in..." : "Sign in"}
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
+      </div>
     </div>
   )
 }

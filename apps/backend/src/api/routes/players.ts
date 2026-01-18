@@ -16,7 +16,6 @@ export function createPlayerRoutes(serverManager: ServerManager): Router {
 
   // GET /api/players - Get all players across all servers
   router.get("/", (req: Request, res: Response) => {
-    console.log("[DEBUG] /api/players route hit");
     try {
       const allPlayers = playerTracker.getPlayers();
       const servers = serverManager.getAllServers();

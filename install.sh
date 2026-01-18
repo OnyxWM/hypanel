@@ -298,56 +298,6 @@ create_directories() {
 download_and_install_hypanel() {
     log "Installing hypanel $HYPANEL_VERSION"
 
-    if [[ "$HYPANEL_VERSION" == "latest" ]]; then
-        local download_url
-        download_url=$(curl -s https://api.github.com/repos/hypanel/hypanel/releases/latest | grep "tarball_url" | cut -d '"' -f4)
-        if [[ -z "$download_url" ]]; then
-            error "Failed to fetch latest release URL from GitHub API. Repository may not be published yet."
-        fi
-        log "Downloading latest release from: $download_url"
-
-        local temp_download="/tmp/hypanel-${HYPANEL_VERSION}.tar.gz"
-        curl -fsSL "$download_url" -o "$temp_download"
-
-        if [[ ! -f "$temp_download" ]]; then
-            error "Failed to download hypanel"
-        fi
-
-        local temp_extract="/tmp/hypanel-extract"
-        rm -rf "$temp_extract"
-        mkdir -p "$temp_extract"
-
-        tar -xzf "$temp_download" -C "$temp_extract" --strip-components=1
-
-        rsync -a "$temp_extract/" "$HYPANEL_INSTALL_DIR/"
-
-        rm -rf "$temp_extract"
-        rm -f "$temp_download"
-    else
-        local download_url="https://github.com/hypanel/hypanel/archive/refs/tags/v${HYPANEL_VERSION}.tar.gz"
-        log "Downloading version $HYPANEL_VERSION from: $download_url"
-
-        local temp_download="/tmp/hypanel-${HYPANEL_VERSION}.tar.gz"
-        curl -fsSL "$download_url" -o "$temp_download"
-
-        if [[ ! -f "$temp_download" ]]; then
-            error "Failed to download hypanel"
-        fi
-
-        local temp_extract="/tmp/hypanel-extract"
-        rm -rf "$temp_extract"
-        mkdir -p "$temp_extract"
-
-        tar -xzf "$temp_download" -C "$temp_extract" --strip-components=1
-
-        rsync -a "$temp_extract/" "$HYPANEL_INSTALL_DIR/"
-
-        rm -rf "$temp_extract"
-        rm -f "$temp_download"
-    fi
-
-    log "Building backend and webpanel..."
-
     # Find node and npm - prefer Node.js 24 for native module compatibility
     find_node() {
         # Prefer Node.js 24 from /opt
@@ -396,37 +346,94 @@ download_and_install_hypanel() {
 
     log "Using Node.js: $node_path"
 
-    # Build backend
-    cd "$HYPANEL_INSTALL_DIR/apps/backend"
+    # Determine download URL for pre-built release
+    local download_url
+    if [[ "$HYPANEL_VERSION" == "latest" ]]; then
+        log "Fetching latest release from GitHub..."
+        # Use GitHub API to find the latest release and get the .tar.gz asset
+        local release_info
+        release_info=$(curl -s https://api.github.com/repos/OnyxWm/hypanel/releases/latest)
+        
+        if [[ -z "$release_info" ]]; then
+            error "Failed to fetch latest release info from GitHub API. Repository may not be published yet."
+        fi
 
-    # Clean and reinstall dependencies to ensure native modules are built for correct Node version
-    log "Installing backend dependencies..."
-    rm -rf node_modules/.cache 2>/dev/null || true
-    if ! "$npm_path" install; then
-        error "Failed to install backend dependencies"
+        # Extract the .tar.gz asset URL
+        download_url=$(echo "$release_info" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1)
+        
+        if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
+            error "Failed to find .tar.gz asset in latest release. Please ensure a release with a .tar.gz asset exists."
+        fi
+        
+        log "Downloading latest release from: $download_url"
+    else
+        # Remove 'v' prefix if present
+        local version_clean="${HYPANEL_VERSION#v}"
+        download_url="https://github.com/OnyxWm/hypanel/releases/download/v${version_clean}/hypanel-v${version_clean}.tar.gz"
+        log "Downloading version $HYPANEL_VERSION from: $download_url"
+    fi
+
+    local temp_download="/tmp/hypanel-${HYPANEL_VERSION}.tar.gz"
+    log "Downloading pre-built release..."
+    if ! curl -fsSL "$download_url" -o "$temp_download"; then
+        error "Failed to download hypanel release from $download_url"
+    fi
+
+    if [[ ! -f "$temp_download" ]]; then
+        error "Failed to download hypanel release"
+    fi
+
+    # Extract to temporary location
+    local temp_extract="/tmp/hypanel-extract"
+    rm -rf "$temp_extract"
+    mkdir -p "$temp_extract"
+
+    log "Extracting release package..."
+    tar -xzf "$temp_download" -C "$temp_extract"
+
+    # Copy to install directory (preserve apps/ structure)
+    log "Installing to $HYPANEL_INSTALL_DIR..."
+    rsync -a "$temp_extract/" "$HYPANEL_INSTALL_DIR/"
+
+    # Clean up temp files
+    rm -rf "$temp_extract"
+    rm -f "$temp_download"
+
+    # Verify backend dist exists
+    if [[ ! -d "$HYPANEL_INSTALL_DIR/apps/backend/dist" ]]; then
+        error "Backend dist directory not found in release package"
+    fi
+
+    # Verify webpanel dist exists
+    if [[ ! -d "$HYPANEL_INSTALL_DIR/apps/webpanel/dist" ]]; then
+        error "Webpanel dist directory not found in release package"
+    fi
+
+    # Install/verify production dependencies for backend
+    cd "$HYPANEL_INSTALL_DIR/apps/backend"
+    
+    # Check if node_modules exists, if not install production dependencies
+    if [[ ! -d "node_modules" ]]; then
+        log "Installing backend production dependencies..."
+        if ! "$npm_path" install --omit=dev; then
+            error "Failed to install backend production dependencies"
+        fi
+    else
+        log "Backend node_modules found, ensuring dependencies are up to date..."
+        if ! "$npm_path" install --omit=dev; then
+            warning "Failed to update backend dependencies, continuing with existing..."
+        fi
     fi
 
     # Rebuild native modules (better-sqlite3) for the current Node.js version
+    # This is necessary because native modules are platform/Node version specific
     log "Rebuilding native modules for Node.js $( "$node_path" --version )..."
     if ! "$npm_path" rebuild better-sqlite3; then
         warning "Failed to rebuild better-sqlite3, trying clean install..."
         rm -rf node_modules/better-sqlite3
-        "$npm_path" install better-sqlite3 --build-from-source --force
-    fi
-
-    if ! "$npm_path" run build; then
-        error "Failed to build backend"
-    fi
-
-    # Build webpanel
-    cd "$HYPANEL_INSTALL_DIR/apps/webpanel"
-    log "Installing webpanel dependencies..."
-    if ! "$npm_path" install; then
-        error "Failed to install webpanel dependencies"
-    fi
-
-    if ! "$npm_path" run build; then
-        error "Failed to build webpanel"
+        if ! "$npm_path" install better-sqlite3 --build-from-source --force --omit=dev; then
+            warning "Failed to rebuild better-sqlite3. The application may not work correctly."
+        fi
     fi
 
     cd "$HYPANEL_INSTALL_DIR"
@@ -453,7 +460,7 @@ download_and_install_hypanel() {
         fi
     fi
 
-    log "hypanel installed and built successfully to $HYPANEL_INSTALL_DIR"
+    log "hypanel installed successfully to $HYPANEL_INSTALL_DIR"
     log "Webpanel will be served at http://${ip_address}:3000"
 }
 

@@ -1,0 +1,13 @@
+{
+  "name": "hypanel-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "webpanel": "cd apps/webpanel && npm run dev",
+    "backend": "cd apps/backend && npm start",
+    "dev": "concurrently \"npm run backend\" \"npm run webpanel\" --names \"backend,webpanel\" --prefix-colors \"blue,green\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

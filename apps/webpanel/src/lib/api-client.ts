@@ -362,7 +362,6 @@ export class WebSocketClient {
       this.ws = new WebSocket(this.url)
 
       this.ws.onopen = () => {
-        console.log("WebSocket connected")
         this.reconnectAttempts = 0
         if (this.serverId) {
           this.subscribe(this.serverId)
@@ -386,7 +385,6 @@ export class WebSocketClient {
       }
 
       this.ws.onclose = () => {
-        console.log("WebSocket disconnected")
         // Only attempt reconnect if we didn't intentionally disconnect
         if (!this.isIntentionallyDisconnecting) {
           this.attemptReconnect()
@@ -408,7 +406,6 @@ export class WebSocketClient {
     this.reconnectAttempts++
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
     setTimeout(() => {
-      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
       this.connect()
     }, delay)
   }
