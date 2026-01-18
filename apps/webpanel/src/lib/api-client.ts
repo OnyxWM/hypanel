@@ -27,6 +27,7 @@ export class ApiClient {
     const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData
     const response = await fetch(url, {
       ...options,
+      credentials: "include",
       headers: {
         ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
         ...options.headers,
@@ -51,6 +52,22 @@ export class ApiClient {
 
     // If no JSON content, return undefined for void responses
     return undefined as T
+  }
+
+  // Web UI authentication
+  async login(input: { username?: string; password: string }): Promise<{ ok: boolean; user: { username: string } }> {
+    return this.request<{ ok: boolean; user: { username: string } }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: input.username ?? "hypanel", password: input.password }),
+    })
+  }
+
+  async logout(): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>("/api/auth/logout", { method: "POST" })
+  }
+
+  async me(): Promise<{ authenticated: boolean; user: { username: string } }> {
+    return this.request<{ authenticated: boolean; user: { username: string } }>("/api/auth/me")
   }
 
   // Server operations

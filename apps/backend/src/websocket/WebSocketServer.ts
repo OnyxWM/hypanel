@@ -3,10 +3,14 @@ import { ServerManager } from "../server/ServerManager.js";
 import { logger } from "../logger/Logger.js";
 import { ServerStatus, ConsoleLog } from "../types/index.js";
 import { getPlayerTracker } from "../server/PlayerTracker.js";
+import type { IncomingMessage } from "http";
+import { getSessionById, getSessionFromCookieHeader } from "../api/middleware/auth.js";
 
 interface Client {
   ws: WebSocket;
   serverId: string | null;
+  sessionId: string;
+  username: string;
 }
 
 export class WebSocketServerManager {
@@ -25,13 +29,29 @@ export class WebSocketServerManager {
   }
 
   private setupServer(): void {
-    this.wss.on("connection", (ws: WebSocket) => {
-      const client: Client = { ws, serverId: null };
+    this.wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+      const sess = getSessionFromCookieHeader(req.headers.cookie);
+      if (!sess) {
+        ws.close(1008, "Unauthorized");
+        return;
+      }
+
+      const client: Client = { ws, serverId: null, sessionId: sess.id, username: sess.username };
       this.clients.add(client);
 
       logger.info(`WebSocket client connected (total: ${this.clients.size})`);
 
       ws.on("message", (message: Buffer) => {
+        // Session may have been revoked/expired after connect
+        if (!getSessionById(client.sessionId)) {
+          try {
+            ws.close(1008, "Unauthorized");
+          } finally {
+            this.clients.delete(client);
+          }
+          return;
+        }
+
         try {
           const data = JSON.parse(message.toString());
           this.handleMessage(client, data);
@@ -242,6 +262,21 @@ export class WebSocketServerManager {
     let count = 0;
 
     for (const client of this.clients) {
+      // Ensure revoked/expired sessions stop receiving broadcasts
+      if (!getSessionById(client.sessionId)) {
+        try {
+          // Close with "Policy Violation" (1008) to indicate unauthorized
+          if (client.ws.readyState !== WebSocket.CLOSED) {
+            client.ws.close(1008, "Unauthorized");
+          }
+        } catch {
+          // ignore close errors
+        } finally {
+          this.clients.delete(client);
+        }
+        continue;
+      }
+
       if (client.serverId === serverId && client.ws.readyState === WebSocket.OPEN) {
         try {
           client.ws.send(message);
@@ -262,6 +297,20 @@ export class WebSocketServerManager {
     let count = 0;
 
     for (const client of this.clients) {
+      // Ensure revoked/expired sessions stop receiving broadcasts
+      if (!getSessionById(client.sessionId)) {
+        try {
+          if (client.ws.readyState !== WebSocket.CLOSED) {
+            client.ws.close(1008, "Unauthorized");
+          }
+        } catch {
+          // ignore close errors
+        } finally {
+          this.clients.delete(client);
+        }
+        continue;
+      }
+
       if (client.ws.readyState === WebSocket.OPEN) {
         try {
           client.ws.send(message);

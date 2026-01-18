@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { Play, Square, RotateCcw, MoreVertical, Users, Cpu, HardDrive, Clock, Download, Key } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -36,6 +36,7 @@ interface ServerCardProps {
 export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onInstall, installProgress }: ServerCardProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const navigate = useNavigate()
 
   const clampPercent = (value: number) => {
     if (!Number.isFinite(value)) return 0
@@ -276,7 +277,7 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
                 size="sm"
                 variant="secondary"
                 className="flex-1 bg-destructive/20 text-destructive border-destructive/30 backdrop-blur-sm hover:bg-destructive/30"
-                onClick={() => window.open(`/servers/${server.id}/console`, '_blank')}
+                onClick={() => navigate(`/console?serverId=${encodeURIComponent(server.id)}`)}
                 disabled={isLoading}
               >
                 <Key className="mr-2 h-3 w-3" />

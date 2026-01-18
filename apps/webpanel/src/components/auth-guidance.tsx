@@ -1,6 +1,7 @@
 import { AlertCircle, Key, ExternalLink } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { useNavigate } from "react-router-dom"
 
 interface AuthGuidanceProps {
   serverId: string
@@ -8,6 +9,8 @@ interface AuthGuidanceProps {
 }
 
 export function AuthGuidance({ serverId, className }: AuthGuidanceProps) {
+  const navigate = useNavigate()
+
   return (
     <Alert className={`bg-destructive/10 border-destructive/30 backdrop-blur-sm ${className}`}>
       <AlertCircle className="h-4 w-4 text-destructive" />
@@ -37,7 +40,7 @@ export function AuthGuidance({ serverId, className }: AuthGuidanceProps) {
             variant="outline"
             size="sm"
             className="text-xs"
-            onClick={() => window.open(`/servers/${serverId}/console`, '_blank')}
+            onClick={() => navigate(`/console?serverId=${encodeURIComponent(serverId)}`)}
           >
             <ExternalLink className="mr-2 h-3 w-3" />
             Open Console

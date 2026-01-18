@@ -576,11 +576,12 @@ StandardError=journal
 SyslogIdentifier=hypanel
 
 # Security settings
-NoNewPrivileges=true
+# NOTE: OS-password login via PAM requires setuid helpers (unix_chkpwd); NoNewPrivileges must be disabled.
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$HYPANEL_SERVERS_DIR $HYPANEL_LOG_DIR $HYPANEL_INSTALL_DIR/data
+ReadWritePaths=$HYPANEL_SERVERS_DIR $HYPANEL_LOG_DIR $HYPANEL_INSTALL_DIR/data $HYPANEL_INSTALL_DIR/apps/backend/data /run/faillock /var/run/faillock /var/lib/faillock
 
 [Install]
 WantedBy=multi-user.target

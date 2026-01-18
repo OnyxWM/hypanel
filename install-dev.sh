@@ -246,6 +246,59 @@ EOF"
     fi
 }
 
+ensure_systemd_service_auth_compat() {
+    # OS-password login via PAM requires setuid helpers (unix_chkpwd) and may write faillock state.
+    # NoNewPrivileges=true breaks this; ProtectSystem=strict requires explicit ReadWritePaths.
+    log "Ensuring systemd unit allows PAM authentication..."
+
+    # Ensure faillock directory exists on distros that use it
+    sudo mkdir -p /run/faillock || true
+
+    # Use a node binary that actually exists on the host.
+    local node_bin="/usr/bin/node"
+    if [[ -x "/opt/nodejs-24/bin/node" ]]; then
+        node_bin="/opt/nodejs-24/bin/node"
+    elif [[ -x "/usr/local/bin/node" ]]; then
+        node_bin="/usr/local/bin/node"
+    elif [[ -x "/usr/bin/node" ]]; then
+        node_bin="/usr/bin/node"
+    fi
+
+    sudo bash -c "cat > \"$HYPANEL_SERVICE_FILE\" << EOF
+[Unit]
+Description=hypanel - Hytale Server Management Panel
+After=network.target
+
+[Service]
+Type=simple
+User=hypanel
+Group=hypanel
+WorkingDirectory=/opt/hypanel
+EnvironmentFile=/etc/hypanel/hypanel.env
+ExecStart=${node_bin} /opt/hypanel/apps/backend/dist/index.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hypanel
+
+# Security settings
+# NOTE: PAM auth for OS passwords requires setuid helpers (unix_chkpwd); NoNewPrivileges must be disabled.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/home/hypanel /home/hypanel/hytale /var/log/hypanel /opt/hypanel/data /opt/hypanel/apps/backend/data /run/faillock
+
+[Install]
+WantedBy=multi-user.target
+EOF"
+
+    sudo chmod 644 "$HYPANEL_SERVICE_FILE"
+    sudo chown root:root "$HYPANEL_SERVICE_FILE"
+    sudo systemctl daemon-reload
+}
+
 restart_service() {
     log "Preparing to restart hypanel service..."
 
@@ -310,6 +363,7 @@ main() {
     deploy_to_opt
     install_backend_runtime_deps_in_opt
     configure_systemd_integration_permissions
+    ensure_systemd_service_auth_compat
     restart_service
     show_status
 

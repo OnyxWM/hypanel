@@ -10,7 +10,9 @@ import { createDownloaderRoutes } from "./src/api/routes/downloader.js";
 import { createSystemRoutes } from "./src/api/routes/system.js";
 import { createPlayerRoutes } from "./src/api/routes/players.js";
 import { createNotificationRoutes } from "./src/api/routes/notifications.js";
+import { createAuthRoutes } from "./src/api/routes/auth.js";
 import { errorHandler } from "./src/api/middleware/validation.js";
+import { requireAuth } from "./src/api/middleware/auth.js";
 import { WebSocketServerManager } from "./src/websocket/WebSocketServer.js";
 import { logger } from "./src/logger/Logger.js";
 
@@ -37,9 +39,18 @@ async function initialize(): Promise<void> {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
-    // CORS middleware (allow all origins for now)
+    // CORS middleware (support cookie auth in dev)
+    const allowedOrigins = (process.env.HYPANEL_WEB_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     app.use((req, res, next) => {
-      res.header("Access-Control-Allow-Origin", "*");
+      const origin = req.headers.origin;
+      if (typeof origin === "string" && allowedOrigins.includes(origin)) {
+        res.header("Access-Control-Allow-Origin", origin);
+        res.header("Vary", "Origin");
+        res.header("Access-Control-Allow-Credentials", "true");
+      }
       res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
       res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
       if (req.method === "OPTIONS") {
@@ -49,12 +60,13 @@ async function initialize(): Promise<void> {
     });
 
     // API routes
-    app.use("/api/servers", createServerRoutes(serverManager));
-    app.use("/api/servers", createStatsRoutes());
-    app.use("/api/downloader", createDownloaderRoutes());
-    app.use("/api/system", createSystemRoutes(serverManager));
-    app.use("/api/players", createPlayerRoutes(serverManager));
-    app.use("/api/notifications", createNotificationRoutes());
+    app.use("/api/auth", createAuthRoutes());
+    app.use("/api/servers", requireAuth, createServerRoutes(serverManager));
+    app.use("/api/servers", requireAuth, createStatsRoutes());
+    app.use("/api/downloader", requireAuth, createDownloaderRoutes());
+    app.use("/api/system", requireAuth, createSystemRoutes(serverManager));
+    app.use("/api/players", requireAuth, createPlayerRoutes(serverManager));
+    app.use("/api/notifications", requireAuth, createNotificationRoutes());
 
     // Health check endpoint
     app.get("/health", (req, res) => {

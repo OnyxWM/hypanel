@@ -50,6 +50,18 @@ export function Sidebar() {
             )
           })}
         </nav>
+
+        {/* Support */}
+        <div className="border-t border-sidebar-border px-6 py-4">
+          <a
+            href="https://ko-fi.com/onyxwm"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground"
+          >
+            Support my work
+          </a>
+        </div>
       </div>
     </aside>
   )

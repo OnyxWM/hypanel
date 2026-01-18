@@ -6,19 +6,73 @@ import ServerDetailsPage from "./pages/ServerDetailsPage"
 import BackupsPage from "./pages/BackupsPage"
 import PlayersPage from "./pages/PlayersPage"
 import SettingsPage from "./pages/SettingsPage"
+import LoginPage from "./pages/LoginPage"
+import { AuthProvider, RequireAuth } from "@/lib/auth"
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/servers" element={<ServersPage />} />
-        <Route path="/servers/:id" element={<ServerDetailsPage />} />
-        <Route path="/console" element={<ConsolePage />} />
-        <Route path="/players" element={<PlayersPage />} />
-        <Route path="/backups" element={<BackupsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <DashboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/servers"
+            element={
+              <RequireAuth>
+                <ServersPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/servers/:id"
+            element={
+              <RequireAuth>
+                <ServerDetailsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/console"
+            element={
+              <RequireAuth>
+                <ConsolePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/players"
+            element={
+              <RequireAuth>
+                <PlayersPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/backups"
+            element={
+              <RequireAuth>
+                <BackupsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <RequireAuth>
+                <SettingsPage />
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   )
 }

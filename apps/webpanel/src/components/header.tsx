@@ -10,8 +10,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AuthModal } from "./auth-modal"
 import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { apiClient, wsClient } from "@/lib/api-client"
 import type { Notification } from "@/lib/api"
+import { useAuth } from "@/lib/auth"
 
 interface HeaderProps {
   title: string
@@ -19,6 +21,8 @@ interface HeaderProps {
 }
 
 export function Header({ title, subtitle }: HeaderProps) {
+  const navigate = useNavigate()
+  const { logout } = useAuth()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authData, setAuthData] = useState<{ url: string; code: string } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -160,6 +164,17 @@ export function Header({ title, subtitle }: HeaderProps) {
     }
   }
 
+  const handleSignOut = async () => {
+    try {
+      await logout()
+    } catch (error) {
+      console.error("Failed to sign out:", error)
+    } finally {
+      wsClient.disconnect()
+      navigate("/login", { replace: true })
+    }
+  }
+
   return (
     <>
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/60 px-6 backdrop-blur-xl">
@@ -257,13 +272,9 @@ export function Header({ title, subtitle }: HeaderProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 bg-popover/80 backdrop-blur-xl border-border/50">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Profile</DropdownMenuItem>
-              <DropdownMenuItem>Billing</DropdownMenuItem>
-              <DropdownMenuItem>API Keys</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive">Sign out</DropdownMenuItem>
+              <DropdownMenuItem className="text-destructive" onSelect={handleSignOut}>
+                Sign out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

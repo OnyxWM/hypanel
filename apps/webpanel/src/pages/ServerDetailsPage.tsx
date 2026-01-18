@@ -413,7 +413,7 @@ export default function ServerDetailsPage() {
                 </>
               ) : server.status === "auth_required" ? (
                 <>
-                  <Button variant="outline" onClick={() => window.location.hash = '#console'}>
+                  <Button variant="outline" onClick={() => navigate(`/console?serverId=${encodeURIComponent(server.id)}`)}>
                     <Key className="mr-2 h-4 w-4" />
                     Authenticate
                   </Button>
