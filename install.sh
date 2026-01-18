@@ -125,6 +125,8 @@ install_packages() {
         "unzip"
         "tar"
         "jq"
+        "build-essential"
+        "python3"
     )
 
     local missing_packages=()
