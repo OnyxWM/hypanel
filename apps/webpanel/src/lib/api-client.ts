@@ -8,8 +8,38 @@ import type {
   SystemJournalResponse,
 } from "./api"
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000"
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3001"
+// Get API base URL dynamically from current location
+function getApiBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  // In production, use same origin (backend serves the webpanel)
+  // In development, fallback to localhost
+  if (typeof window !== 'undefined') {
+    return window.location.origin
+  }
+  return "http://localhost:3000"
+}
+
+// Get WebSocket URL dynamically from current location
+function getWebSocketUrl(): string {
+  if (import.meta.env.VITE_WS_URL) {
+    return import.meta.env.VITE_WS_URL
+  }
+  // Derive from current location, converting http to ws
+  // WebSocket uses port 3001 by default (configurable via WS_PORT env var)
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const hostname = window.location.hostname
+    // Use port 3001 for WebSocket (default backend WebSocket port)
+    const port = '3001'
+    return `${protocol}//${hostname}:${port}`
+  }
+  return "ws://localhost:3001"
+}
+
+const API_BASE_URL = getApiBaseUrl()
+const WS_URL = getWebSocketUrl()
 
 // API Client
 export class ApiClient {

@@ -2,7 +2,20 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react"
 import { Navigate, useLocation } from "react-router-dom"
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000"
+// Get API base URL dynamically from current location
+function getApiBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  // In production, use same origin (backend serves the webpanel)
+  // In development, fallback to localhost
+  if (typeof window !== 'undefined') {
+    return window.location.origin
+  }
+  return "http://localhost:3000"
+}
+
+const API_BASE_URL = getApiBaseUrl()
 
 type AuthUser = { username: string }
 

@@ -621,7 +621,7 @@ SyslogIdentifier=hypanel
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=false
 ReadWritePaths=$read_write_paths_str
 
 [Install]
