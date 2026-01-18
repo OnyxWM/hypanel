@@ -184,10 +184,13 @@ install_java() {
             ;;
     esac
 
-    if java -version 2>&1 | head -n1 | grep -q "openjdk 25"; then
-        log "Java 25 installed successfully"
+    # Verify Java 25 installation by checking version number
+    local java_version_check
+    java_version_check=$(java -version 2>&1 | head -n1 | cut -d'"' -f2 | cut -d'.' -f1)
+    if [[ -n "$java_version_check" ]] && [[ "$java_version_check" -ge 25 ]]; then
+        log "Java $java_version_check installed successfully"
     else
-        error "Java 25 installation failed"
+        error "Java 25 installation failed. Detected version: ${java_version_check:-unknown}"
     fi
 }
 
