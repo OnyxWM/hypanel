@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { RotateCcw, Power, RefreshCw } from "lucide-react"
+import { RotateCcw, Power, RefreshCw, Download } from "lucide-react"
 
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 import { apiClient } from "@/lib/api-client"
-import type { JournalEntry, SystemActionSummary } from "@/lib/api"
+import type { JournalEntry, SystemActionSummary, UpdateCheckResponse } from "@/lib/api"
 
 type ActionState = "idle" | "running"
 
@@ -35,16 +35,18 @@ export default function SettingsPage() {
   const [stopAllState, setStopAllState] = useState<ActionState>("idle")
   const [restartAllState, setRestartAllState] = useState<ActionState>("idle")
   const [restartDaemonState, setRestartDaemonState] = useState<ActionState>("idle")
+  const [checkUpdateState, setCheckUpdateState] = useState<ActionState>("idle")
 
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [lastSummary, setLastSummary] = useState<SystemActionSummary | null>(null)
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const journalCursorRef = useRef<string | undefined>(undefined)
 
   const canRunActions =
-    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle"
+    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle" && checkUpdateState === "idle"
 
   useEffect(() => {
     journalCursorRef.current = journalCursor
@@ -174,6 +176,30 @@ export default function SettingsPage() {
     }
   }
 
+  const runCheckForUpdates = async () => {
+    if (!canRunActions) return
+
+    setActionError(null)
+    setActionSuccess(null)
+    setUpdateCheckResult(null)
+    setCheckUpdateState("running")
+    try {
+      const result = await apiClient.checkForUpdates()
+      setUpdateCheckResult(result)
+      if (result.error) {
+        setActionError(result.error)
+      } else if (result.updateAvailable) {
+        setActionSuccess(`Update available! Current: ${result.currentVersion}, Latest: ${result.latestVersion}`)
+      } else {
+        setActionSuccess(`You're up to date! Current version: ${result.currentVersion}`)
+      }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to check for updates")
+    } finally {
+      setCheckUpdateState("idle")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
@@ -232,7 +258,30 @@ export default function SettingsPage() {
                   <RefreshCw className={cn("h-4 w-4 mr-2", restartDaemonState === "running" && "animate-spin")} />
                   {restartDaemonState === "running" ? "Restarting..." : "Restart daemon"}
                 </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={runCheckForUpdates}
+                  disabled={!canRunActions}
+                  className="md:w-64"
+                >
+                  <Download className={cn("h-4 w-4 mr-2", checkUpdateState === "running" && "animate-spin")} />
+                  {checkUpdateState === "running" ? "Checking..." : "Check for updates"}
+                </Button>
               </div>
+
+              {updateCheckResult && updateCheckResult.updateAvailable && updateCheckResult.releaseUrl && (
+                <div className="text-sm">
+                  <a
+                    href={updateCheckResult.releaseUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    View release on GitHub →
+                  </a>
+                </div>
+              )}
 
               {lastSummary && (
                 <div className="text-sm text-muted-foreground">

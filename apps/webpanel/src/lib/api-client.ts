@@ -6,6 +6,8 @@ import type {
   Notification,
   SystemActionSummary,
   SystemJournalResponse,
+  UpdateCheckResponse,
+  VersionResponse,
 } from "./api"
 
 // Get API base URL dynamically from current location
@@ -363,6 +365,14 @@ export class ApiClient {
     return this.request<{ success: boolean; message: string; players: number; playerNames: string[] }>(`/api/servers/${serverId}/refresh-players`, {
       method: "POST",
     })
+  }
+
+  async getCurrentVersion(): Promise<VersionResponse> {
+    return this.request<VersionResponse>("/api/system/version")
+  }
+
+  async checkForUpdates(): Promise<UpdateCheckResponse> {
+    return this.request<UpdateCheckResponse>("/api/system/version/check")
   }
 }
 

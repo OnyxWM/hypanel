@@ -1,8 +1,12 @@
 import { Link, useLocation } from "react-router-dom"
-import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive } from "lucide-react"
+import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Download, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/contexts/sidebar-context"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
+import { apiClient } from "@/lib/api-client"
+import type { UpdateCheckResponse } from "@/lib/api"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -17,6 +21,64 @@ export function Sidebar() {
   const location = useLocation()
   const pathname = location.pathname
   const { isOpen, close } = useSidebar()
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null)
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null)
+
+  // Load dismissed version from localStorage
+  useEffect(() => {
+    const dismissed = localStorage.getItem("hypanel-update-dismissed")
+    if (dismissed) {
+      setDismissedVersion(dismissed)
+    }
+  }, [])
+
+  // Check for updates on mount and periodically
+  useEffect(() => {
+    let cancelled = false
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const checkForUpdates = async () => {
+      try {
+        const result = await apiClient.checkForUpdates()
+        if (cancelled) return
+
+        // Only show if update is available and not dismissed for this version
+        if (
+          result.updateAvailable &&
+          result.latestVersion &&
+          result.latestVersion !== dismissedVersion
+        ) {
+          setUpdateInfo(result)
+        } else {
+          setUpdateInfo(null)
+        }
+      } catch (error) {
+        // Silently fail - don't show errors in sidebar
+        console.error("Failed to check for updates:", error)
+      }
+    }
+
+    // Check immediately
+    checkForUpdates()
+
+    // Check every 30 minutes
+    intervalId = setInterval(checkForUpdates, 30 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      if (intervalId) {
+        clearInterval(intervalId)
+      }
+    }
+  }, [dismissedVersion])
+
+  const handleDismissUpdate = () => {
+    if (updateInfo?.latestVersion) {
+      localStorage.setItem("hypanel-update-dismissed", updateInfo.latestVersion)
+      setDismissedVersion(updateInfo.latestVersion)
+      setUpdateInfo(null)
+    }
+  }
 
   // Close sidebar when route changes on mobile
   useEffect(() => {
@@ -76,6 +138,53 @@ export function Sidebar() {
             )
           })}
         </nav>
+
+        {/* Update Notification */}
+        {updateInfo && updateInfo.updateAvailable && (
+          <div className="border-t border-sidebar-border px-3 py-3">
+            <Card className="border-sidebar-border bg-sidebar-accent/50 backdrop-blur-sm">
+              <CardContent className="p-3">
+                <div className="flex items-start gap-2">
+                  <Download className="h-4 w-4 mt-0.5 text-primary flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-sidebar-foreground mb-1">
+                      Update Available
+                    </div>
+                    <div className="text-xs text-sidebar-foreground/70 mb-2">
+                      v{updateInfo.currentVersion} → v{updateInfo.latestVersion}
+                    </div>
+                    {updateInfo.releaseUrl && (
+                      <a
+                        href={updateInfo.releaseUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline block mb-2"
+                      >
+                        View release →
+                      </a>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDismissUpdate}
+                      className="h-6 px-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDismissUpdate}
+                    className="h-6 w-6 p-0 flex-shrink-0 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Support */}
         <div className="border-t border-sidebar-border px-6 py-4">

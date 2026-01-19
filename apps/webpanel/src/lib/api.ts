@@ -89,3 +89,16 @@ export interface SystemJournalResponse {
   entries: JournalEntry[]
   nextCursor?: string
 }
+
+export interface UpdateCheckResponse {
+  currentVersion: string
+  latestVersion: string
+  updateAvailable: boolean
+  releaseUrl?: string
+  releaseNotes?: string
+  error?: string
+}
+
+export interface VersionResponse {
+  version: string
+}
