@@ -36,6 +36,8 @@ export default function SettingsPage() {
   const [restartAllState, setRestartAllState] = useState<ActionState>("idle")
   const [restartDaemonState, setRestartDaemonState] = useState<ActionState>("idle")
   const [checkUpdateState, setCheckUpdateState] = useState<ActionState>("idle")
+  const [updateState, setUpdateState] = useState<ActionState>("idle")
+  const [updateProgress, setUpdateProgress] = useState<string | null>(null)
 
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
@@ -47,7 +49,7 @@ export default function SettingsPage() {
   const journalCursorRef = useRef<string | undefined>(undefined)
 
   const canRunActions =
-    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle" && checkUpdateState === "idle"
+    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle" && checkUpdateState === "idle" && updateState === "idle"
 
   useEffect(() => {
     journalCursorRef.current = journalCursor
@@ -198,7 +200,8 @@ export default function SettingsPage() {
     setUpdateCheckResult(null)
     setCheckUpdateState("running")
     try {
-      const result = await apiClient.checkForUpdates()
+      // Force refresh to bypass cache for manual checks
+      const result = await apiClient.checkForUpdates(true)
       setUpdateCheckResult(result)
       
       // Build success/error message with rate limit info
@@ -227,6 +230,41 @@ export default function SettingsPage() {
       setActionError(e instanceof Error ? e.message : "Failed to check for updates")
     } finally {
       setCheckUpdateState("idle")
+    }
+  }
+
+  const runUpdateApplication = async () => {
+    if (!canRunActions) return
+    if (!updateCheckResult?.updateAvailable) return
+    if (!window.confirm("This will stop all servers, download and install the update, then restart the service. Continue?")) return
+
+    setActionError(null)
+    setActionSuccess(null)
+    setUpdateProgress(null)
+    setUpdateState("running")
+    
+    try {
+      setUpdateProgress("Stopping servers...")
+      const result = await apiClient.updateApplication()
+      
+      if (result.success) {
+        setUpdateProgress(null)
+        setActionSuccess(result.message || "Update installed successfully! The service will restart shortly. Please refresh the page in a few moments.")
+        // Clear update check result since we've updated
+        setUpdateCheckResult(null)
+        // Optionally refresh after a delay
+        setTimeout(() => {
+          window.location.reload()
+        }, 5000)
+      } else {
+        setUpdateProgress(null)
+        setActionError(result.error || result.message || "Update failed")
+      }
+    } catch (e) {
+      setUpdateProgress(null)
+      setActionError(e instanceof Error ? e.message : "Failed to update application")
+    } finally {
+      setUpdateState("idle")
     }
   }
 
@@ -305,7 +343,25 @@ export default function SettingsPage() {
                   <Download className={cn("h-4 w-4 mr-2", checkUpdateState === "running" && "animate-spin")} />
                   {checkUpdateState === "running" ? "Checking..." : "Check for updates"}
                 </Button>
+
+                {updateCheckResult && updateCheckResult.updateAvailable && (
+                  <Button
+                    variant="default"
+                    onClick={runUpdateApplication}
+                    disabled={!canRunActions}
+                    className="md:w-64"
+                  >
+                    <Download className={cn("h-4 w-4 mr-2", updateState === "running" && "animate-spin")} />
+                    {updateState === "running" ? "Updating..." : "Update Application"}
+                  </Button>
+                )}
               </div>
+
+              {updateProgress && (
+                <div className="text-sm text-muted-foreground">
+                  {updateProgress}
+                </div>
+              )}
 
               {updateCheckResult && updateCheckResult.updateAvailable && updateCheckResult.releaseUrl && (
                 <div className="text-sm">

@@ -7,6 +7,7 @@ import type {
   SystemActionSummary,
   SystemJournalResponse,
   UpdateCheckResponse,
+  UpdateResponse,
   VersionResponse,
 } from "./api"
 
@@ -371,8 +372,11 @@ export class ApiClient {
     return this.request<VersionResponse>("/api/system/version")
   }
 
-  async checkForUpdates(): Promise<UpdateCheckResponse> {
-    return this.request<UpdateCheckResponse>("/api/system/version/check")
+  async checkForUpdates(forceRefresh: boolean = false): Promise<UpdateCheckResponse> {
+    const url = forceRefresh 
+      ? "/api/system/version/check?force=true"
+      : "/api/system/version/check"
+    return this.request<UpdateCheckResponse>(url)
   }
 
   async checkServerUpdate(serverId: string): Promise<{ updateAvailable: boolean, currentVersion: string, latestVersion: string }> {
@@ -383,6 +387,12 @@ export class ApiClient {
 
   async updateServerVersion(serverId: string): Promise<{ success: boolean, message: string, server: Server }> {
     return this.request<{ success: boolean, message: string, server: Server }>(`/api/servers/${serverId}/update`, {
+      method: "POST",
+    })
+  }
+
+  async updateApplication(): Promise<UpdateResponse> {
+    return this.request<UpdateResponse>("/api/system/version/update", {
       method: "POST",
     })
   }

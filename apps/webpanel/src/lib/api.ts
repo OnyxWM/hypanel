@@ -104,3 +104,10 @@ export interface UpdateCheckResponse {
 export interface VersionResponse {
   version: string
 }
+
+export interface UpdateResponse {
+  success: boolean
+  message: string
+  version?: string
+  error?: string
+}

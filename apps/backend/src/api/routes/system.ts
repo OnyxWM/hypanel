@@ -1,14 +1,25 @@
 import { Router, Request, Response } from "express";
 import pidusage from "pidusage";
 import os from "os";
+import fs from "fs";
+import path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { ServerManager } from "../../server/ServerManager.js";
 import { HYPANEL_SYSTEMD_UNIT, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
 import { getCurrentVersion, compareVersions } from "../../utils/version.js";
+
+const execAsync = promisify(exec);
 
 interface GitHubRelease {
   tag_name: string;
   html_url: string;
   body: string | null;
+  assets?: Array<{
+    name: string;
+    browser_download_url: string;
+    size: number;
+  }>;
 }
 
 interface UpdateCheckCache {
@@ -208,9 +219,10 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
     try {
       const currentVersion = getCurrentVersion();
       const now = Date.now();
+      const forceRefresh = req.query.force === "true" || req.query.force === "1";
 
-      // Check cache first
-      if (updateCheckCache && now < updateCheckCache.expiresAt) {
+      // Check cache first (unless force refresh is requested)
+      if (!forceRefresh && updateCheckCache && now < updateCheckCache.expiresAt) {
         // Return cached data, but update currentVersion in case it changed
         const cachedData = { ...updateCheckCache.data, currentVersion };
         return res.json(cachedData);
@@ -353,6 +365,260 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         latestVersion: getCurrentVersion(),
         updateAvailable: false,
         error: "Failed to check for updates",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // POST /api/system/version/update - Update the application to the latest version
+  router.post("/version/update", async (req: Request, res: Response) => {
+    try {
+      const currentVersion = getCurrentVersion();
+      const HYPANEL_INSTALL_DIR = "/opt/hypanel";
+      const tempDownload = "/tmp/hypanel-update.tar.gz";
+      const tempExtract = "/tmp/hypanel-update-extract";
+
+      // Step 1: Verify an update is available
+      console.log("Checking for available updates...");
+      const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+      
+      const headers: Record<string, string> = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "hypanel",
+      };
+
+      const githubToken = process.env.GITHUB_TOKEN;
+      if (githubToken) {
+        headers["Authorization"] = `Bearer ${githubToken}`;
+      }
+
+      let latestRelease: GitHubRelease;
+      try {
+        const response = await fetch(githubApiUrl, { headers });
+        if (!response.ok) {
+          return res.status(500).json({
+            success: false,
+            error: `Failed to fetch release info: ${response.status}`,
+            message: "Could not check for updates",
+          });
+        }
+        latestRelease = await response.json() as GitHubRelease;
+      } catch (error) {
+        console.error("Failed to fetch latest release:", error);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to fetch latest release from GitHub",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      const latestVersion = latestRelease.tag_name?.replace(/^v/, "") || latestRelease.tag_name || "";
+      const comparison = compareVersions(currentVersion, latestVersion);
+      
+      if (comparison >= 0) {
+        return res.status(400).json({
+          success: false,
+          error: "No update available",
+          message: `Already running latest version: ${currentVersion}`,
+        });
+      }
+
+      console.log(`Update available: ${currentVersion} -> ${latestVersion}`);
+
+      // Step 2: Stop all servers
+      console.log("Stopping all servers...");
+      try {
+        const servers = serverManager.getAllServers();
+        const serversToStop = servers.filter((s) => s.status !== "offline").map((s) => s.id);
+        
+        if (serversToStop.length > 0) {
+          await Promise.allSettled(
+            serversToStop.map(async (id) => {
+              try {
+                await serverManager.stopServer(id, true); // Force stop
+              } catch (err) {
+                console.warn(`Failed to stop server ${id}:`, err);
+              }
+            })
+          );
+          // Wait a bit for servers to fully stop
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      } catch (error) {
+        console.error("Error stopping servers:", error);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to stop all servers",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Step 3: Download the release tarball
+      console.log("Downloading update package...");
+      const downloadUrl = latestRelease.assets?.find((asset: any) => 
+        asset.name?.endsWith(".tar.gz")
+      )?.browser_download_url;
+
+      if (!downloadUrl) {
+        return res.status(500).json({
+          success: false,
+          error: "No .tar.gz asset found in release",
+          message: "Release does not contain a downloadable package",
+        });
+      }
+
+      try {
+        const downloadResponse = await fetch(downloadUrl, { headers });
+        if (!downloadResponse.ok) {
+          return res.status(500).json({
+            success: false,
+            error: `Failed to download update: ${downloadResponse.status}`,
+            message: "Could not download update package",
+          });
+        }
+
+        const arrayBuffer = await downloadResponse.arrayBuffer();
+        fs.writeFileSync(tempDownload, Buffer.from(arrayBuffer));
+        console.log(`Downloaded ${arrayBuffer.byteLength} bytes`);
+      } catch (error) {
+        console.error("Download failed:", error);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to download update package",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Step 4: Extract to temporary location
+      console.log("Extracting update package...");
+      try {
+        // Clean up any existing extract directory
+        if (fs.existsSync(tempExtract)) {
+          fs.rmSync(tempExtract, { recursive: true, force: true });
+        }
+        fs.mkdirSync(tempExtract, { recursive: true });
+
+        // Extract using tar command
+        await execAsync(`tar -xzf "${tempDownload}" -C "${tempExtract}"`);
+        console.log("Extraction complete");
+      } catch (error) {
+        console.error("Extraction failed:", error);
+        // Clean up
+        if (fs.existsSync(tempDownload)) fs.unlinkSync(tempDownload);
+        if (fs.existsSync(tempExtract)) fs.rmSync(tempExtract, { recursive: true, force: true });
+        return res.status(500).json({
+          success: false,
+          error: "Failed to extract update package",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Step 5: Verify extracted files
+      const extractedBackendDist = path.join(tempExtract, "apps", "backend", "dist");
+      const extractedWebpanelDist = path.join(tempExtract, "apps", "webpanel", "dist");
+      
+      if (!fs.existsSync(extractedBackendDist) || !fs.existsSync(extractedWebpanelDist)) {
+        console.error("Extracted package missing required directories");
+        if (fs.existsSync(tempDownload)) fs.unlinkSync(tempDownload);
+        if (fs.existsSync(tempExtract)) fs.rmSync(tempExtract, { recursive: true, force: true });
+        return res.status(500).json({
+          success: false,
+          error: "Invalid update package structure",
+          message: "Extracted package does not contain required directories",
+        });
+      }
+
+      // Step 6: Install to /opt/hypanel
+      console.log("Installing update to /opt/hypanel...");
+      try {
+        // Check if install directory exists
+        if (!fs.existsSync(HYPANEL_INSTALL_DIR)) {
+          return res.status(500).json({
+            success: false,
+            error: "Installation directory not found",
+            message: `${HYPANEL_INSTALL_DIR} does not exist. This endpoint is only for production installations.`,
+          });
+        }
+
+        // Use rsync to copy files, preserving data directories
+        // Exclude data directories and node_modules to preserve existing data
+        await execAsync(
+          `rsync -a --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" || cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/"`
+        );
+
+        // Ensure proper permissions
+        await execAsync(`chmod -R 644 "${HYPANEL_INSTALL_DIR}"/* 2>/dev/null || true`);
+        await execAsync(`find "${HYPANEL_INSTALL_DIR}" -type d -exec chmod 755 {} \\; 2>/dev/null || true`);
+        await execAsync(`chmod +x "${HYPANEL_INSTALL_DIR}/apps/backend/dist/index.js" 2>/dev/null || true`);
+
+        console.log("Installation complete");
+      } catch (error) {
+        console.error("Installation failed:", error);
+        if (fs.existsSync(tempDownload)) fs.unlinkSync(tempDownload);
+        if (fs.existsSync(tempExtract)) fs.rmSync(tempExtract, { recursive: true, force: true });
+        return res.status(500).json({
+          success: false,
+          error: "Failed to install update",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Step 7: Rebuild native modules
+      console.log("Rebuilding native modules...");
+      try {
+        const backendDir = path.join(HYPANEL_INSTALL_DIR, "apps", "backend");
+        const nodePath = process.execPath; // Use the Node.js that's running this process
+        
+        // Find npm
+        let npmPath = "npm";
+        try {
+          const npmCheck = await execAsync("which npm");
+          npmPath = npmCheck.stdout.trim() || "npm";
+        } catch {
+          // Fallback to npm in PATH
+        }
+
+        // Install/rebuild production dependencies
+        await execAsync(`cd "${backendDir}" && "${npmPath}" install --omit=dev`, {
+          env: { ...process.env, PATH: process.env.PATH },
+        });
+
+        // Rebuild better-sqlite3
+        await execAsync(`cd "${backendDir}" && "${npmPath}" rebuild better-sqlite3 || "${npmPath}" install better-sqlite3 --build-from-source --force --omit=dev`, {
+          env: { ...process.env, PATH: process.env.PATH },
+        });
+
+        console.log("Native modules rebuilt");
+      } catch (error) {
+        console.warn("Warning: Failed to rebuild native modules:", error);
+        // Continue anyway - the app might still work
+      }
+
+      // Step 8: Clean up temp files
+      try {
+        if (fs.existsSync(tempDownload)) fs.unlinkSync(tempDownload);
+        if (fs.existsSync(tempExtract)) fs.rmSync(tempExtract, { recursive: true, force: true });
+      } catch (error) {
+        console.warn("Warning: Failed to clean up temp files:", error);
+      }
+
+      // Step 9: Restart systemd service
+      console.log("Restarting systemd service...");
+      // Return response first, then restart (similar to daemon/restart endpoint)
+      res.status(202).json({
+        success: true,
+        message: `Update installed successfully. Service will restart shortly.`,
+        version: latestVersion,
+      });
+
+      // Queue restart after a short delay
+      queueRestartUnit({ unit: HYPANEL_SYSTEMD_UNIT, delayMs: 1000 });
+      
+    } catch (error) {
+      console.error("Update process failed:", error);
+      res.status(500).json({
+        success: false,
+        error: "Update failed",
         message: error instanceof Error ? error.message : String(error),
       });
     }
