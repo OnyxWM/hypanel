@@ -8,10 +8,21 @@ const __dirname = path.dirname(__filename);
  */
 export function getCurrentVersion() {
     try {
-        // Try to read from the backend package.json
-        const packageJsonPath = path.resolve(__dirname, "..", "..", "package.json");
-        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-        return packageJson.version || "1.0.0";
+        // In development: __dirname is src/utils, so go up 2 levels to backend/
+        // In production: __dirname is dist/src/utils, so go up 3 levels to backend/
+        // Try both paths to handle both scenarios
+        const pathsToTry = [
+            path.resolve(__dirname, "..", "..", "package.json"), // Development: src/utils -> backend/package.json
+            path.resolve(__dirname, "..", "..", "..", "package.json"), // Production: dist/src/utils -> backend/package.json
+            path.resolve(process.cwd(), "package.json"), // Fallback: current working directory
+        ];
+        for (const packageJsonPath of pathsToTry) {
+            if (fs.existsSync(packageJsonPath)) {
+                const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+                return packageJson.version || "1.0.0";
+            }
+        }
+        throw new Error("package.json not found in any expected location");
     }
     catch (error) {
         console.warn("Failed to read version from package.json:", error);
