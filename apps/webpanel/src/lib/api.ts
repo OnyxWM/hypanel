@@ -110,4 +110,5 @@ export interface UpdateResponse {
   message: string
   version?: string
   error?: string
+  requiresPassword?: boolean
 }

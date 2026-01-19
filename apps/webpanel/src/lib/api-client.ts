@@ -68,8 +68,14 @@ export class ApiClient {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }))
-      throw new Error(error.error || error.message || `HTTP ${response.status}`)
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      // For 401 errors, preserve the full error object (including requiresPassword)
+      if (response.status === 401) {
+        const error = new Error(errorData.error || errorData.message || `HTTP ${response.status}`) as Error & { requiresPassword?: boolean }
+        error.requiresPassword = errorData.requiresPassword
+        throw error
+      }
+      throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`)
     }
 
     // Handle 204 No Content responses (no body)
@@ -391,9 +397,10 @@ export class ApiClient {
     })
   }
 
-  async updateApplication(): Promise<UpdateResponse> {
+  async updateApplication(password?: string): Promise<UpdateResponse> {
     return this.request<UpdateResponse>("/api/system/version/update", {
       method: "POST",
+      body: password ? JSON.stringify({ password }) : undefined,
     })
   }
 }

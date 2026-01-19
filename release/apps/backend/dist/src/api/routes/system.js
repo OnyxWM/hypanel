@@ -299,6 +299,84 @@ export function createSystemRoutes(serverManager) {
             const HYPANEL_INSTALL_DIR = "/opt/hypanel";
             const tempDownload = "/tmp/hypanel-update.tar.gz";
             const tempExtract = "/tmp/hypanel-update-extract";
+            const password = req.body?.password;
+            // Helper function to run sudo commands with optional password
+            const runSudo = async (command) => {
+                if (password) {
+                    // Use sudo -S to read password from stdin
+                    // Create a temporary script to safely pass the password
+                    const tempScript = `/tmp/hypanel-sudo-${Date.now()}.sh`;
+                    try {
+                        // Write password to script (more secure than command line)
+                        fs.writeFileSync(tempScript, `#!/bin/bash\necho '${password.replace(/'/g, "'\\''")}' | sudo -S ${command}\n`);
+                        fs.chmodSync(tempScript, 0o700);
+                        const result = await execAsync(`bash "${tempScript}" 2>&1`, {
+                            maxBuffer: 10 * 1024 * 1024,
+                        });
+                        // Check for password errors in combined output
+                        const output = `${result.stdout} ${result.stderr}`;
+                        if (output.includes("incorrect password") || output.includes("sorry") ||
+                            output.includes("authentication failure")) {
+                            throw new Error("Incorrect password");
+                        }
+                        // Clean up script immediately
+                        try {
+                            fs.unlinkSync(tempScript);
+                        }
+                        catch {
+                            // Ignore cleanup errors
+                        }
+                        return result.stdout;
+                    }
+                    catch (error) {
+                        // Clean up script on error
+                        try {
+                            fs.unlinkSync(tempScript);
+                        }
+                        catch {
+                            // Ignore cleanup errors
+                        }
+                        // Check if it's a password error
+                        const errorMsg = error instanceof Error ? error.message : String(error);
+                        const errorOutput = error?.stdout || error?.stderr || "";
+                        const fullError = `${errorMsg} ${errorOutput}`;
+                        if (fullError.includes("incorrect password") || fullError.includes("sorry") ||
+                            fullError.includes("authentication failure")) {
+                            throw new Error("Incorrect password");
+                        }
+                        throw error;
+                    }
+                }
+                else {
+                    // Try without password (NOPASSWD should work)
+                    try {
+                        const result = await execAsync(`sudo ${command} 2>&1`, {
+                            maxBuffer: 10 * 1024 * 1024,
+                        });
+                        // Check if sudo is asking for password in combined output
+                        const output = `${result.stdout} ${result.stderr}`;
+                        if (output.includes("password") || output.includes("a password is required") ||
+                            output.includes("command not allowed") || output.includes("unable to open /run/sudo")) {
+                            throw new Error("Password required");
+                        }
+                        return result.stdout;
+                    }
+                    catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : String(error);
+                        // execAsync errors have stdout and stderr properties
+                        const errorStdout = error?.stdout || "";
+                        const errorStderr = error?.stderr || "";
+                        const fullError = `${errorMsg} ${errorStdout} ${errorStderr}`;
+                        // Check for various password requirement indicators
+                        if (fullError.includes("password") || fullError.includes("a password is required") ||
+                            fullError.includes("command not allowed") || fullError.includes("unable to open /run/sudo") ||
+                            fullError.includes("terminal is required") || fullError.includes("command not allowed")) {
+                            throw new Error("Password required");
+                        }
+                        throw error;
+                    }
+                }
+            };
             // Step 1: Verify an update is available
             console.log("Checking for available updates...");
             const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
@@ -448,17 +526,129 @@ export function createSystemRoutes(serverManager) {
                         message: `${HYPANEL_INSTALL_DIR} does not exist. This endpoint is only for production installations.`,
                     });
                 }
-                // Check if filesystem is writable first
+                // Check if filesystem is writable first (using sudo since we'll be writing with sudo)
+                let filesystemWritable = false;
                 try {
                     const testFile = path.join(HYPANEL_INSTALL_DIR, ".hypanel-update-test");
-                    fs.writeFileSync(testFile, "test");
-                    fs.unlinkSync(testFile);
+                    // Test with sudo to match actual write operations - use touch instead of sh -c for security
+                    await runSudo(`touch "${testFile}"`);
+                    await runSudo(`rm -f "${testFile}"`);
+                    filesystemWritable = true;
                 }
                 catch (testError) {
+                    const testErrorMsg = testError instanceof Error ? testError.message : String(testError);
+                    const testErrorStdout = testError?.stdout || "";
+                    const testErrorStderr = testError?.stderr || "";
+                    const testFullError = `${testErrorMsg} ${testErrorStdout} ${testErrorStderr}`;
+                    console.log("Filesystem test error - checking for password requirement");
+                    console.log("  Error message:", testErrorMsg);
+                    console.log("  Error stdout:", testErrorStdout.substring(0, 200));
+                    console.log("  Error stderr:", testErrorStderr.substring(0, 200));
+                    console.log("  Full error:", testFullError.substring(0, 500));
+                    // Check if it's a password requirement - check both the thrown error message and the original error output
+                    const isPasswordError = testErrorMsg.includes("Password required") ||
+                        testFullError.includes("password") ||
+                        testFullError.includes("Password required") ||
+                        testFullError.includes("a password is required") ||
+                        testFullError.includes("command not allowed") ||
+                        testFullError.includes("unable to open /run/sudo") ||
+                        testFullError.includes("terminal is required");
+                    if (isPasswordError) {
+                        console.log("Password requirement detected! Returning 401 with requiresPassword: true");
+                        if (!password) {
+                            return res.status(401).json({
+                                success: false,
+                                error: "Password required",
+                                message: "Sudo password is required to write to /opt/hypanel. Please provide your password.",
+                                requiresPassword: true,
+                            });
+                        }
+                        else if (testFullError.includes("Incorrect password") || testFullError.includes("incorrect") ||
+                            testFullError.includes("sorry") || testFullError.includes("authentication failure")) {
+                            return res.status(401).json({
+                                success: false,
+                                error: "Incorrect password",
+                                message: "The provided password is incorrect. Please try again.",
+                                requiresPassword: true,
+                            });
+                        }
+                        else {
+                            // Password provided but still getting password error - might be wrong password
+                            return res.status(401).json({
+                                success: false,
+                                error: "Password required",
+                                message: "Sudo password is required. Please provide your password.",
+                                requiresPassword: true,
+                            });
+                        }
+                    }
+                    console.warn("Filesystem appears read-only, attempting to remount as read-write...");
+                    // Try to remount the filesystem as read-write
+                    try {
+                        // Find the mount point - check /opt/hypanel, /opt, or root
+                        let mountPoint = null;
+                        try {
+                            const mountCheck = await execAsync(`mount | grep " ${HYPANEL_INSTALL_DIR} " || mount | grep " /opt " || mount | grep " / " | head -1`);
+                            const mountLine = mountCheck.stdout.trim();
+                            if (mountLine.includes(` ${HYPANEL_INSTALL_DIR} `)) {
+                                mountPoint = HYPANEL_INSTALL_DIR;
+                            }
+                            else if (mountLine.includes(' /opt ')) {
+                                mountPoint = '/opt';
+                            }
+                            else {
+                                mountPoint = '/';
+                            }
+                        }
+                        catch {
+                            // If we can't find the mount, try common mount points
+                            mountPoint = '/opt';
+                        }
+                        if (mountPoint) {
+                            // Try to remount as read-write
+                            await runSudo(`mount -o remount,rw "${mountPoint}" 2>&1`);
+                            // Test again with sudo
+                            const retestFile = path.join(HYPANEL_INSTALL_DIR, ".hypanel-update-test");
+                            await runSudo(`touch "${retestFile}"`);
+                            await runSudo(`rm -f "${retestFile}"`);
+                            filesystemWritable = true;
+                            console.log(`Filesystem at ${mountPoint} remounted as read-write successfully`);
+                        }
+                    }
+                    catch (remountError) {
+                        console.error("Failed to remount filesystem:", remountError);
+                        const remountErrorMsg = remountError instanceof Error ? remountError.message : String(remountError);
+                        const remountErrorStdout = remountError?.stdout || "";
+                        const remountErrorStderr = remountError?.stderr || "";
+                        const remountFullError = `${remountErrorMsg} ${remountErrorStdout} ${remountErrorStderr}`;
+                        // Check if it's a password requirement
+                        if (remountFullError.includes("password") || remountFullError.includes("Password required") ||
+                            remountFullError.includes("a password is required") || remountFullError.includes("command not allowed") ||
+                            remountFullError.includes("unable to open /run/sudo") || remountFullError.includes("terminal is required")) {
+                            if (!password) {
+                                return res.status(401).json({
+                                    success: false,
+                                    error: "Password required",
+                                    message: "Sudo password is required to remount the filesystem as read-write. Please provide your password.",
+                                    requiresPassword: true,
+                                });
+                            }
+                            else {
+                                return res.status(401).json({
+                                    success: false,
+                                    error: "Incorrect password",
+                                    message: "The provided password is incorrect. Please try again.",
+                                    requiresPassword: true,
+                                });
+                            }
+                        }
+                    }
+                }
+                if (!filesystemWritable) {
                     return res.status(500).json({
                         success: false,
                         error: "Filesystem is read-only",
-                        message: `Cannot write to ${HYPANEL_INSTALL_DIR}. The filesystem may be mounted read-only. Please remount as read-write or check filesystem permissions.`,
+                        message: `Cannot write to ${HYPANEL_INSTALL_DIR}. The filesystem is mounted read-only and could not be remounted. Please manually remount as read-write: sudo mount -o remount,rw /opt (or the appropriate mount point)`,
                     });
                 }
                 // Use rsync to copy files, preserving data directories
@@ -467,23 +657,69 @@ export function createSystemRoutes(serverManager) {
                 // Use --no-owner --no-group to avoid ownership preservation issues
                 // Use --inplace to avoid creating temporary files (helps with some read-only scenarios)
                 try {
-                    await execAsync(`sudo rsync -a --no-owner --no-group --inplace --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" 2>&1`);
+                    await runSudo(`rsync -a --no-owner --no-group --inplace --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" 2>&1`);
                 }
                 catch (rsyncError) {
+                    const rsyncErrorMsg = rsyncError instanceof Error ? rsyncError.message : String(rsyncError);
+                    // Check if it's a password error
+                    if (rsyncErrorMsg.includes("password") || rsyncErrorMsg.includes("Password required") || rsyncErrorMsg.includes("Incorrect password")) {
+                        if (!password) {
+                            return res.status(401).json({
+                                success: false,
+                                error: "Password required",
+                                message: "Sudo password is required to install the update. Please provide your password.",
+                                requiresPassword: true,
+                            });
+                        }
+                        else {
+                            return res.status(401).json({
+                                success: false,
+                                error: "Incorrect password",
+                                message: "The provided password is incorrect. Please try again.",
+                                requiresPassword: true,
+                            });
+                        }
+                    }
                     // If rsync fails, try cp as fallback
                     console.warn("rsync failed, trying cp fallback:", rsyncError);
                     try {
-                        await execAsync(`sudo cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/" 2>&1`);
+                        await runSudo(`cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/" 2>&1`);
                     }
                     catch (cpError) {
                         console.error("Both rsync and cp failed:", cpError);
-                        throw new Error(`Failed to copy files: ${cpError instanceof Error ? cpError.message : String(cpError)}`);
+                        const errorMsg = cpError instanceof Error ? cpError.message : String(cpError);
+                        // Check if it's a password error
+                        if (errorMsg.includes("password") || errorMsg.includes("Password required") || errorMsg.includes("Incorrect password")) {
+                            if (!password) {
+                                return res.status(401).json({
+                                    success: false,
+                                    error: "Password required",
+                                    message: "Sudo password is required to install the update. Please provide your password.",
+                                    requiresPassword: true,
+                                });
+                            }
+                            else {
+                                return res.status(401).json({
+                                    success: false,
+                                    error: "Incorrect password",
+                                    message: "The provided password is incorrect. Please try again.",
+                                    requiresPassword: true,
+                                });
+                            }
+                        }
+                        throw new Error(`Failed to copy files: ${errorMsg}`);
                     }
                 }
                 // Ensure proper permissions (use sudo for root-owned directory)
-                await execAsync(`sudo chmod -R 644 "${HYPANEL_INSTALL_DIR}"/* 2>/dev/null || true`);
-                await execAsync(`sudo find "${HYPANEL_INSTALL_DIR}" -type d -exec chmod 755 {} \\; 2>/dev/null || true`);
-                await execAsync(`sudo chmod +x "${HYPANEL_INSTALL_DIR}/apps/backend/dist/index.js" 2>/dev/null || true`);
+                try {
+                    await runSudo(`chmod -R 644 "${HYPANEL_INSTALL_DIR}"/* 2>/dev/null || true`);
+                    await runSudo(`find "${HYPANEL_INSTALL_DIR}" -type d -exec chmod 755 {} \\; 2>/dev/null || true`);
+                    await runSudo(`chmod +x "${HYPANEL_INSTALL_DIR}/apps/backend/dist/index.js" 2>/dev/null || true`);
+                }
+                catch (permError) {
+                    console.warn("Warning: Failed to set some permissions:", permError);
+                    // Continue anyway
+                }
                 console.log("Installation complete");
             }
             catch (error) {
@@ -512,7 +748,7 @@ export function createSystemRoutes(serverManager) {
                 catch {
                     // Fallback to npm in PATH
                 }
-                // Install/rebuild production dependencies
+                // Install/rebuild production dependencies (npm doesn't need sudo, runs as hypanel user)
                 await execAsync(`cd "${backendDir}" && "${npmPath}" install --omit=dev`, {
                     env: { ...process.env, PATH: process.env.PATH },
                 });

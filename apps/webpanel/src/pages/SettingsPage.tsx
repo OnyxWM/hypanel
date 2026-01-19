@@ -10,6 +10,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { apiClient } from "@/lib/api-client"
 import type { JournalEntry, SystemActionSummary, UpdateCheckResponse } from "@/lib/api"
@@ -40,6 +42,9 @@ export default function SettingsPage() {
   const [checkUpdateState, setCheckUpdateState] = useState<ActionState>("idle")
   const [updateState, setUpdateState] = useState<ActionState>("idle")
   const [updateProgress, setUpdateProgress] = useState<string | null>(null)
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false)
+  const [password, setPassword] = useState("")
+  const [passwordError, setPasswordError] = useState<string | null>(null)
 
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
@@ -274,7 +279,7 @@ export default function SettingsPage() {
     }
   }
 
-  const runUpdateApplication = async (skipConfirmation: boolean = false) => {
+  const runUpdateApplication = async (skipConfirmation: boolean = false, providedPassword?: string) => {
     if (!canRunActions) return
     if (!updateCheckResult?.updateAvailable) return
     if (!skipConfirmation && !window.confirm("This will stop all servers, download and install the update, then restart the service. Continue?")) return
@@ -282,31 +287,67 @@ export default function SettingsPage() {
     setActionError(null)
     setActionSuccess(null)
     setUpdateProgress(null)
+    setPasswordError(null)
     setUpdateState("running")
     
     try {
       setUpdateProgress("Stopping servers...")
-      const result = await apiClient.updateApplication()
+      const result = await apiClient.updateApplication(providedPassword)
       
       if (result.success) {
         setUpdateProgress(null)
         setActionSuccess(result.message || "Update installed successfully! The service will restart shortly. Please refresh the page in a few moments.")
         // Clear update check result since we've updated
         setUpdateCheckResult(null)
+        setShowPasswordDialog(false)
+        setPassword("")
         // Optionally refresh after a delay
         setTimeout(() => {
           window.location.reload()
         }, 5000)
       } else {
         setUpdateProgress(null)
-        setActionError(result.error || result.message || "Update failed")
+        // Check if password is required
+        if (result.requiresPassword) {
+          setUpdateState("idle")
+          setShowPasswordDialog(true)
+          setPasswordError(null)
+        } else {
+          setActionError(result.error || result.message || "Update failed")
+          setUpdateState("idle")
+        }
       }
     } catch (e) {
       setUpdateProgress(null)
-      setActionError(e instanceof Error ? e.message : "Failed to update application")
-    } finally {
-      setUpdateState("idle")
+      const error = e instanceof Error ? e.message : "Failed to update application"
+      // Check if password is required (from error object or message)
+      const requiresPassword = (e as any)?.requiresPassword || 
+                               error.includes("Password required") ||
+                               error.includes("password is required")
+      
+      if (requiresPassword) {
+        setUpdateState("idle")
+        setShowPasswordDialog(true)
+        if (error.includes("Incorrect") || error.includes("incorrect")) {
+          setPasswordError("Incorrect password. Please try again.")
+        } else {
+          setPasswordError(null)
+        }
+        setPassword("")
+      } else {
+        setActionError(error)
+        setUpdateState("idle")
+      }
     }
+  }
+
+  const handlePasswordSubmit = () => {
+    if (!password.trim()) {
+      setPasswordError("Password is required")
+      return
+    }
+    setPasswordError(null)
+    runUpdateApplication(true, password)
   }
 
   return (
@@ -483,6 +524,70 @@ export default function SettingsPage() {
           </Card>
         </div>
       </main>
+
+      {/* Password Dialog for Update */}
+      <Dialog 
+        open={showPasswordDialog} 
+        onOpenChange={(open) => {
+          setShowPasswordDialog(open)
+          if (!open) {
+            // Clear password and errors when dialog closes
+            setPassword("")
+            setPasswordError(null)
+            if (updateState !== "running") {
+              setUpdateState("idle")
+            }
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Password Required</DialogTitle>
+            <DialogDescription>
+              Sudo password is required to install the update. This is needed to write to /opt/hypanel and remount the filesystem if needed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="password">Sudo Password</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  setPasswordError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && updateState !== "running") {
+                    handlePasswordSubmit()
+                  }
+                }}
+                placeholder="Enter your password"
+                autoFocus
+                disabled={updateState === "running"}
+              />
+              {passwordError && (
+                <p className="text-sm text-destructive">{passwordError}</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPasswordDialog(false)
+              }}
+              disabled={updateState === "running"}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handlePasswordSubmit} disabled={updateState === "running" || !password.trim()}>
+              {updateState === "running" ? "Updating..." : "Continue Update"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

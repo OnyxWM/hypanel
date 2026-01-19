@@ -655,9 +655,10 @@ configure_systemd_integration_permissions() {
 # Managed by hypanel install.sh
 # Allow the hypanel service user to restart/check the hypanel systemd unit without a password.
 ${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart hypanel, /usr/bin/systemctl is-active hypanel
-# Allow file operations for updates (rsync, cp, chmod, chown, find)
+# Allow file operations for updates (rsync, cp, chmod, chown, find, touch, rm, mount)
 # These commands are used by the update endpoint to install updates to /opt/hypanel
-${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/rsync, /usr/bin/cp, /usr/bin/chmod, /usr/bin/chown, /usr/bin/find
+# Note: mount is allowed for remounting filesystems during updates
+${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/rsync, /usr/bin/cp, /usr/bin/chmod, /usr/bin/chown, /usr/bin/find, /usr/bin/touch, /usr/bin/rm, /usr/bin/mount
 EOF
 
     chmod 440 "$sudoers_file"
