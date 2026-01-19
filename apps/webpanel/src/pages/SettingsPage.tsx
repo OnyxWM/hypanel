@@ -388,7 +388,7 @@ export default function SettingsPage() {
                 {updateCheckResult && updateCheckResult.updateAvailable && (
                   <Button
                     variant="default"
-                    onClick={runUpdateApplication}
+                    onClick={() => runUpdateApplication()}
                     disabled={!canRunActions}
                     className="md:w-64"
                   >
