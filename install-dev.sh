@@ -206,11 +206,15 @@ configure_systemd_integration_permissions() {
     fi
 
     # Allow hypanel daemon to restart its own systemd unit without password (locked down).
+    # Also allow file operations needed for updates (rsync, cp, chmod, chown, find).
     local sudoers_file="/etc/sudoers.d/hypanel-systemctl"
     sudo bash -c "cat > \"$sudoers_file\" << 'EOF'
 # Managed by hypanel install-dev.sh
 # Allow the hypanel service user to restart/check the hypanel systemd unit without a password.
 ${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart hypanel, /usr/bin/systemctl is-active hypanel
+# Allow file operations for updates (rsync, cp, chmod, chown, find)
+# These commands are used by the update endpoint to install updates to /opt/hypanel
+${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/rsync, /usr/bin/cp, /usr/bin/chmod, /usr/bin/chown, /usr/bin/find
 EOF"
 
     sudo chmod 440 "$sudoers_file"
