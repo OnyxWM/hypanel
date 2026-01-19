@@ -159,33 +159,25 @@ install_java() {
         fi
     fi
 
-    log "Installing Java 25 (OpenJDK)"
+    log "Installing Java 25 (Temurin)"
     
-    case "$OS" in
-        ubuntu|debian)
-            apt-get install -y openjdk-25-jdk
-            ;;
-        *)
-            # Build Java from source for non-Debian systems
-            local java_dir="/opt/jdk-25"
-            local temp_java="/tmp/jdk-25.tar.gz"
-            
-            log "Downloading OpenJDK 25 from Adoptium"
-            curl -fsSL "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.1%2B5/OpenJDK25U-jdk_x64_linux_hotspot_25.0.1_5.tar.gz" -o "$temp_java"
-            
-            log "Extracting Java to $java_dir"
-            mkdir -p "$java_dir"
-            tar -xzf "$temp_java" -C "$java_dir" --strip-components=1
-            
-            rm -f "$temp_java"
-            
-            # Create symlinks
-            ln -sf "$java_dir/bin/java" /usr/local/bin/java
-            ln -sf "$java_dir/bin/javac" /usr/local/bin/javac
-            
-            log "Java 25 installed to $java_dir"
-            ;;
-    esac
+    local java_dir="/opt/jdk-25"
+    local temp_java="/tmp/jdk-25.tar.gz"
+    
+    log "Downloading Temurin 25 x64 from Adoptium"
+    curl -fsSL "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.1%2B5/OpenJDK25U-jdk_x64_linux_hotspot_25.0.1_5.tar.gz" -o "$temp_java"
+    
+    log "Extracting Java to $java_dir"
+    mkdir -p "$java_dir"
+    tar -xzf "$temp_java" -C "$java_dir" --strip-components=1
+    
+    rm -f "$temp_java"
+    
+    # Create symlinks
+    ln -sf "$java_dir/bin/java" /usr/local/bin/java
+    ln -sf "$java_dir/bin/javac" /usr/local/bin/javac
+    
+    log "Java 25 installed to $java_dir"
 
     # Verify Java 25 installation by checking version number
     local java_version_check
