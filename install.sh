@@ -429,14 +429,25 @@ download_and_install_hypanel() {
         fi
     fi
 
-    # Rebuild native modules (better-sqlite3) for the current Node.js version
+    # Rebuild native modules (better-sqlite3 and authenticate-pam) for the current Node.js version
     # This is necessary because native modules are platform/Node version specific
     log "Rebuilding native modules for Node.js $( "$node_path" --version )..."
+    
+    # Rebuild better-sqlite3
     if ! "$npm_path" rebuild better-sqlite3; then
         warning "Failed to rebuild better-sqlite3, trying clean install..."
         rm -rf node_modules/better-sqlite3
         if ! "$npm_path" install better-sqlite3 --build-from-source --force --omit=dev; then
             warning "Failed to rebuild better-sqlite3. The application may not work correctly."
+        fi
+    fi
+    
+    # Rebuild authenticate-pam
+    if ! "$npm_path" rebuild authenticate-pam; then
+        warning "Failed to rebuild authenticate-pam, trying clean install..."
+        rm -rf node_modules/authenticate-pam
+        if ! "$npm_path" install authenticate-pam --build-from-source --force --omit=dev; then
+            warning "Failed to rebuild authenticate-pam. PAM authentication may not work correctly."
         fi
     fi
 
