@@ -41,6 +41,7 @@ export default function SettingsPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [lastSummary, setLastSummary] = useState<SystemActionSummary | null>(null)
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null)
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const journalCursorRef = useRef<string | undefined>(undefined)
@@ -71,6 +72,19 @@ export default function SettingsPage() {
       viewport.scrollTop = viewport.scrollHeight
     }
   }, [autoScroll, journalEntries])
+
+  useEffect(() => {
+    // Load current version on mount
+    const loadVersion = async () => {
+      try {
+        const res = await apiClient.getCurrentVersion()
+        setCurrentVersion(res.version)
+      } catch (e) {
+        console.error("Failed to load version:", e)
+      }
+    }
+    loadVersion()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -225,7 +239,14 @@ export default function SettingsPage() {
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader>
               <CardTitle className="text-lg">Global actions</CardTitle>
-              <CardDescription>These actions affect multiple servers or the daemon itself.</CardDescription>
+              <CardDescription>
+                These actions affect multiple servers or the daemon itself.
+                {currentVersion && (
+                  <span className="block mt-1 text-xs text-muted-foreground">
+                    Current version: v{currentVersion}
+                  </span>
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-col gap-3 md:flex-row">
