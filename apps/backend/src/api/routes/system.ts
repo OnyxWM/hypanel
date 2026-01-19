@@ -542,14 +542,15 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
 
         // Use rsync to copy files, preserving data directories
         // Exclude data directories and node_modules to preserve existing data
+        // Use sudo since /opt/hypanel is root-owned
         await execAsync(
-          `rsync -a --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" || cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/"`
+          `sudo rsync -a --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" || sudo cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/"`
         );
 
-        // Ensure proper permissions
-        await execAsync(`chmod -R 644 "${HYPANEL_INSTALL_DIR}"/* 2>/dev/null || true`);
-        await execAsync(`find "${HYPANEL_INSTALL_DIR}" -type d -exec chmod 755 {} \\; 2>/dev/null || true`);
-        await execAsync(`chmod +x "${HYPANEL_INSTALL_DIR}/apps/backend/dist/index.js" 2>/dev/null || true`);
+        // Ensure proper permissions (use sudo for root-owned directory)
+        await execAsync(`sudo chmod -R 644 "${HYPANEL_INSTALL_DIR}"/* 2>/dev/null || true`);
+        await execAsync(`sudo find "${HYPANEL_INSTALL_DIR}" -type d -exec chmod 755 {} \\; 2>/dev/null || true`);
+        await execAsync(`sudo chmod +x "${HYPANEL_INSTALL_DIR}/apps/backend/dist/index.js" 2>/dev/null || true`);
 
         console.log("Installation complete");
       } catch (error) {
