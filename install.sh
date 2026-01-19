@@ -50,8 +50,8 @@ detect_os() {
 
     case "$OS" in
         ubuntu)
-            if [[ -z "$OS_VERSION" ]] || [[ "${OS_VERSION%%.*}" -lt 24 ]]; then
-                warning "Ubuntu 24.04 or later is recommended. Found: $PRETTY_NAME"
+            if [[ -z "$OS_VERSION" ]] || [[ "${OS_VERSION%%.*}" -lt 22 ]]; then
+                warning "Ubuntu 22.04 or later is recommended. Found: $PRETTY_NAME"
             else
                 log "Detected OS: $PRETTY_NAME (fully supported)"
             fi
@@ -65,7 +65,7 @@ detect_os() {
             ;;
         *)
             warning "Detected OS: $PRETTY_NAME"
-            warning "hypanel is recommended for Debian 12+ or Ubuntu 24.04+"
+            warning "hypanel is recommended for Debian 12+ or Ubuntu 22.04+"
             warning "Core functionality should work, but some features may require manual setup"
             ;;
     esac
