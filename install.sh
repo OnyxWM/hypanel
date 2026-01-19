@@ -165,7 +165,7 @@ install_java() {
     local temp_java="/tmp/jdk-25.tar.gz"
     
     log "Downloading Temurin 25 x64 from Adoptium"
-    curl -fsSL "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.1%2B5/OpenJDK25U-jdk_x64_linux_hotspot_25.0.1_5.tar.gz" -o "$temp_java"
+    curl -fsSL "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.1%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.1_8.tar.gz" -o "$temp_java"
     
     log "Extracting Java to $java_dir"
     mkdir -p "$java_dir"
