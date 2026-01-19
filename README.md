@@ -84,6 +84,12 @@ sudo apt-get update && sudo apt-get install -y curl
    
    - Your server is now ready to accept connections!
 
+### External Connections
+
+For external connections outside of your home network, you will need to configure standard port forwarding on your router. Forward the server's port (shown in the server details, e.g., `5520`) to your server's local IP address. This allows players from outside your local network to connect to your Hytale server.
+
+**Note**: Port forwarding configuration varies by router manufacturer. Consult your router's documentation or admin interface for specific instructions on how to set up port forwarding.
+
 ## Uninstallation
 
 To completely remove Hypanel from your system, run the uninstall script:
