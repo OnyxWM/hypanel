@@ -1,15 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
+import { Menu } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { ServerConsole } from "@/components/server-console"
 import { AuthGuidance } from "@/components/auth-guidance"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { apiClient, wsClient } from "@/lib/api-client"
+import { useSidebar } from "@/contexts/sidebar-context"
 import type { Server, ConsoleLog } from "@/lib/api"
 
 export default function ConsolePage() {
   const [searchParams] = useSearchParams()
+  const { toggle } = useSidebar()
   const [servers, setServers] = useState<Server[]>([])
   const [selectedServer, setSelectedServer] = useState<string>("")
   const [logs, setLogs] = useState<ConsoleLog[]>([])
@@ -127,15 +131,27 @@ export default function ConsolePage() {
   return (
     <div className="h-screen bg-background overflow-hidden">
       <Sidebar />
-      <main className="flex h-screen flex-col pl-64">
+      <main className="flex h-screen flex-col pl-0 md:pl-64">
         <div className="flex flex-col h-full">
           {/* Header and Controls */}
           <div className="flex-shrink-0 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="px-6 py-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h1 className="text-2xl font-semibold">Console</h1>
-                  <p className="text-sm text-muted-foreground">Server console output and commands</p>
+            <div className="px-4 md:px-6 py-4">
+              <div className="flex items-center justify-between mb-3 gap-3">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {/* Hamburger menu button for mobile */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="md:hidden h-9 w-9 shrink-0"
+                    onClick={toggle}
+                    aria-label="Toggle sidebar"
+                  >
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                  <div className="min-w-0 flex-1">
+                    <h1 className="text-xl md:text-2xl font-semibold truncate">Console</h1>
+                    <p className="text-xs md:text-sm text-muted-foreground truncate">Server console output and commands</p>
+                  </div>
                 </div>
               </div>
               {error && (
@@ -143,9 +159,9 @@ export default function ConsolePage() {
                   {error}
                 </div>
               )}
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-2 md:gap-4">
                 <Select value={selectedServer} onValueChange={setSelectedServer} disabled={isLoading}>
-                  <SelectTrigger className="w-[250px]">
+                  <SelectTrigger className="w-full md:w-[250px]">
                     <SelectValue placeholder={isLoading ? "Loading servers..." : "Select server"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -195,7 +211,7 @@ export default function ConsolePage() {
           </div>
           
           {/* Console - Takes remaining space */}
-          <div className="flex-1 min-h-0 px-6 py-4">
+          <div className="flex-1 min-h-0 px-4 md:px-6 py-4">
             <ServerConsole
               logs={logs}
               onSendCommand={handleSendCommand}

@@ -177,12 +177,12 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="pl-64">
+      <main className="pl-0 md:pl-64">
         <Header
           title="Settings"
           subtitle="Manage global actions and view systemd logs for the Hypanel daemon"
         />
-        <div className="p-6 space-y-6">
+        <div className="p-4 md:p-6 space-y-6">
           {actionError && (
             <Alert variant="destructive">
               <AlertTitle>Action failed</AlertTitle>

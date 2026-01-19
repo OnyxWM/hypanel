@@ -1,6 +1,8 @@
 import { Link, useLocation } from "react-router-dom"
 import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useSidebar } from "@/contexts/sidebar-context"
+import { useEffect } from "react"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -14,10 +16,34 @@ const navigation = [
 export function Sidebar() {
   const location = useLocation()
   const pathname = location.pathname
+  const { isOpen, close } = useSidebar()
+
+  // Close sidebar when route changes on mobile
+  useEffect(() => {
+    close()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar backdrop-blur-xl">
-      <div className="flex h-full flex-col">
+    <>
+      {/* Overlay backdrop for mobile */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={close}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={cn(
+          "fixed left-0 top-0 z-50 h-screen w-64 border-r border-border bg-sidebar backdrop-blur-xl transition-transform duration-300 ease-in-out",
+          // On mobile: show/hide based on isOpen, on desktop: always show
+          isOpen ? "translate-x-0" : "-translate-x-full",
+          "md:translate-x-0"
+        )}
+      >
+        <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center border-b border-sidebar-border px-6">
           <Link to="/" className="flex items-center">
@@ -64,5 +90,6 @@ export function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   )
 }

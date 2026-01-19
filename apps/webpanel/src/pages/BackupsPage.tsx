@@ -72,9 +72,9 @@ export default function BackupsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="pl-64">
+      <main className="pl-0 md:pl-64">
         <Header title="Backups" subtitle="View and manage server backups" />
-        <div className="p-6">
+        <div className="p-4 md:p-6">
           {error && (
             <div className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
               {error}
@@ -120,7 +120,7 @@ export default function BackupsPage() {
                         {serverBackup.backups.map((backup) => (
                           <div
                             key={backup.name}
-                            className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-4 hover:bg-secondary transition-colors"
+                            className="flex flex-col md:flex-row md:items-center md:justify-between rounded-lg border border-border bg-secondary/50 p-4 hover:bg-secondary transition-colors gap-3"
                           >
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                               <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 shrink-0">
@@ -139,7 +139,7 @@ export default function BackupsPage() {
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                                <div className="flex flex-wrap items-center gap-2 md:gap-4 mt-1 text-xs text-muted-foreground">
                                   <span className="flex items-center gap-1">
                                     <HardDrive className="h-3 w-3" />
                                     {formatBytes(backup.size)}
@@ -151,7 +151,7 @@ export default function BackupsPage() {
                                 </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0 ml-4">
+                            <div className="flex items-center gap-2 shrink-0 md:ml-4">
                               {!backup.isDirectory && (
                                 <Button
                                   variant="outline"

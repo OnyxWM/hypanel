@@ -328,7 +328,7 @@ export default function ServerDetailsPage() {
     return (
       <div className="min-h-screen bg-background">
         <Sidebar />
-        <main className="pl-64">
+        <main className="pl-0 md:pl-64">
           <div className="flex h-[50vh] items-center justify-center">
             <p className="text-muted-foreground">Loading server...</p>
           </div>
@@ -341,7 +341,7 @@ export default function ServerDetailsPage() {
     return (
       <div className="min-h-screen bg-background">
         <Sidebar />
-        <main className="pl-64">
+        <main className="pl-0 md:pl-64">
           <div className="flex h-[50vh] items-center justify-center">
             <p className="text-muted-foreground">Server not found</p>
           </div>
@@ -363,16 +363,16 @@ export default function ServerDetailsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="pl-64">
+      <main className="pl-0 md:pl-64">
         <Header title={server.name} subtitle={`${server.ip}:${server.port}`} />
-        <div className="p-6">
+        <div className="p-4 md:p-6">
           {error && (
             <div className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
               {error}
             </div>
           )}
           {/* Back Link & Actions */}
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 md:gap-4">
             <Link
               to="/servers"
               className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"

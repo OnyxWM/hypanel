@@ -1,4 +1,4 @@
-import { Bell, User, ShieldCheck, Check } from "lucide-react"
+import { Bell, User, ShieldCheck, Check, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import { useNavigate } from "react-router-dom"
 import { apiClient, wsClient } from "@/lib/api-client"
 import type { Notification } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
+import { useSidebar } from "@/contexts/sidebar-context"
 
 interface HeaderProps {
   title: string
@@ -23,6 +24,7 @@ interface HeaderProps {
 export function Header({ title, subtitle }: HeaderProps) {
   const navigate = useNavigate()
   const { logout } = useAuth()
+  const { toggle } = useSidebar()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authData, setAuthData] = useState<{ url: string; code: string } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -177,13 +179,25 @@ export function Header({ title, subtitle }: HeaderProps) {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/60 px-6 backdrop-blur-xl">
-        <div>
-          <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-          {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/60 px-4 md:px-6 backdrop-blur-xl">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {/* Hamburger menu button for mobile */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden h-9 w-9 shrink-0"
+            onClick={toggle}
+            aria-label="Toggle sidebar"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-base md:text-lg font-semibold text-foreground truncate">{title}</h1>
+            {subtitle && <p className="text-xs md:text-sm text-muted-foreground truncate">{subtitle}</p>}
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
           <Button
             variant={isAuthenticated ? "default" : "outline"}
             size="sm"
@@ -223,7 +237,7 @@ export function Header({ title, subtitle }: HeaderProps) {
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-96 bg-popover/80 backdrop-blur-xl border-border/50">
+            <DropdownMenuContent align="end" className="w-[calc(100vw-2rem)] md:w-96 bg-popover/80 backdrop-blur-xl border-border/50">
               <div className="flex items-center justify-between px-2 py-1.5">
                 <DropdownMenuLabel className="p-0">Notifications</DropdownMenuLabel>
                 <Button

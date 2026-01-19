@@ -88,12 +88,12 @@ export default function PlayersPage() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="pl-64">
+      <main className="pl-0 md:pl-64">
         <Header 
           title="Players" 
           subtitle={`${players.length} player${players.length !== 1 ? "s" : ""} online across all servers`} 
         />
-        <div className="p-6">
+        <div className="p-4 md:p-6">
           {error && (
             <div className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
               {error}

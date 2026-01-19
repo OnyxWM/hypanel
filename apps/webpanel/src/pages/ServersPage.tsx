@@ -175,9 +175,9 @@ export default function ServersPage() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="pl-64">
+      <main className="pl-0 md:pl-64">
         <Header title="Servers" subtitle={`${servers.length} servers configured`} />
-        <div className="p-6">
+        <div className="p-4 md:p-6">
           {error && (
             <div className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
               {error}
@@ -190,7 +190,7 @@ export default function ServersPage() {
           ) : (
             <>
               {/* Toolbar */}
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 md:gap-4">
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <Select value={filter} onValueChange={setFilter}>

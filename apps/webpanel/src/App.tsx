@@ -8,12 +8,14 @@ import PlayersPage from "./pages/PlayersPage"
 import SettingsPage from "./pages/SettingsPage"
 import LoginPage from "./pages/LoginPage"
 import { AuthProvider, RequireAuth } from "@/lib/auth"
+import { SidebarProvider } from "@/contexts/sidebar-context"
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
+        <SidebarProvider>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/"
@@ -72,6 +74,7 @@ export default function App() {
             }
           />
         </Routes>
+        </SidebarProvider>
       </AuthProvider>
     </BrowserRouter>
   )
