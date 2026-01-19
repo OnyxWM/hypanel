@@ -112,7 +112,7 @@ install_packages() {
         *)
             warning "Package installation skipped on $OS"
             warning "Please install the following packages manually:"
-            warning "  curl ca-certificates unzip tar jq rsync"
+            warning "  curl ca-certificates unzip tar jq rsync sudo"
             return 0
             ;;
     esac
@@ -129,6 +129,7 @@ install_packages() {
         "build-essential"
         "python3"
         "rsync"
+        "sudo"
     )
 
     local missing_packages=()
@@ -644,6 +645,28 @@ configure_systemd_integration_permissions() {
     # Also allow file operations needed for updates (rsync, cp, chmod, chown, find).
     # This is intentionally locked down to specific commands only.
     local sudoers_file="/etc/sudoers.d/hypanel-systemctl"
+    local sudoers_dir="/etc/sudoers.d"
+    
+    # #region agent log
+    local debug_log="/Users/brodieowens/Code/React/hypanel/.cursor/debug.log"
+    {
+        echo "{\"timestamp\":$(date +%s)000,\"location\":\"install.sh:645\",\"message\":\"Checking sudoers directory\",\"data\":{\"sudoers_dir\":\"$sudoers_dir\",\"sudoers_dir_exists\":$([ -d "$sudoers_dir" ] && echo true || echo false),\"euid\":$EUID,\"user\":\"$(whoami)\",\"can_write\":$([ -w "$sudoers_dir" ] && echo true || echo false)},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}"
+        echo "{\"timestamp\":$(date +%s)000,\"location\":\"install.sh:645\",\"message\":\"Root check\",\"data\":{\"euid\":$EUID,\"is_root\":$([ $EUID -eq 0 ] && echo true || echo false)},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}"
+    } >> "$debug_log" 2>/dev/null || true
+    # #endregion agent log
+    
+    # Ensure sudoers.d directory exists
+    if [[ ! -d "$sudoers_dir" ]]; then
+        log "Creating $sudoers_dir directory"
+        mkdir -p "$sudoers_dir" || error "Failed to create $sudoers_dir directory"
+    fi
+    
+    # #region agent log
+    {
+        echo "{\"timestamp\":$(date +%s)000,\"location\":\"install.sh:654\",\"message\":\"Before file creation\",\"data\":{\"sudoers_file\":\"$sudoers_file\",\"dir_exists_after\":$([ -d "$sudoers_dir" ] && echo true || echo false),\"can_write_dir\":$([ -w "$sudoers_dir" ] && echo true || echo false)},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}"
+    } >> "$debug_log" 2>/dev/null || true
+    # #endregion agent log
+    
     cat > "$sudoers_file" << EOF
 # Managed by hypanel install.sh
 # Allow the hypanel service user to restart/check the hypanel systemd unit without a password.
@@ -653,6 +676,17 @@ ${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart hypanel, /usr/bi
 # Note: mount is allowed for remounting filesystems during updates
 ${HYPANEL_USER} ALL=(root) NOPASSWD: /usr/bin/rsync, /usr/bin/cp, /usr/bin/chmod, /usr/bin/chown, /usr/bin/find, /usr/bin/touch, /usr/bin/rm, /usr/bin/mount
 EOF
+    local cat_exit_code=$?
+    
+    # #region agent log
+    {
+        echo "{\"timestamp\":$(date +%s)000,\"location\":\"install.sh:665\",\"message\":\"After file creation attempt\",\"data\":{\"cat_exit_code\":$cat_exit_code,\"file_exists\":$([ -f "$sudoers_file" ] && echo true || echo false),\"file_error\":\"$([ ! -f "$sudoers_file" ] && echo \"File not created\" || echo \"File exists\")\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\"}"
+    } >> "$debug_log" 2>/dev/null || true
+    # #endregion agent log
+    
+    if [[ ! -f "$sudoers_file" ]]; then
+        error "Failed to create $sudoers_file (cat exit code: $cat_exit_code)"
+    fi
 
     chmod 440 "$sudoers_file"
     chown root:root "$sudoers_file"
