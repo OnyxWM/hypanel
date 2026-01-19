@@ -200,12 +200,28 @@ export default function SettingsPage() {
     try {
       const result = await apiClient.checkForUpdates()
       setUpdateCheckResult(result)
+      
+      // Build success/error message with rate limit info
+      let message = ""
       if (result.error) {
-        setActionError(result.error)
+        message = result.error
+        if (result.rateLimitReset) {
+          const resetTime = new Date(result.rateLimitReset).toLocaleString()
+          message += ` (Resets at ${resetTime})`
+        }
+        setActionError(message)
       } else if (result.updateAvailable) {
-        setActionSuccess(`Update available! Current: ${result.currentVersion}, Latest: ${result.latestVersion}`)
+        message = `Update available! Current: ${result.currentVersion}, Latest: ${result.latestVersion}`
+        if (result.rateLimitRemaining !== undefined) {
+          message += ` (${result.rateLimitRemaining} API requests remaining)`
+        }
+        setActionSuccess(message)
       } else {
-        setActionSuccess(`You're up to date! Current version: ${result.currentVersion}`)
+        message = `You're up to date! Current version: ${result.currentVersion}`
+        if (result.rateLimitRemaining !== undefined) {
+          message += ` (${result.rateLimitRemaining} API requests remaining)`
+        }
+        setActionSuccess(message)
       }
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Failed to check for updates")

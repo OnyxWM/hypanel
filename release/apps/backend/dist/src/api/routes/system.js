@@ -3,6 +3,9 @@ import pidusage from "pidusage";
 import os from "os";
 import { HYPANEL_SYSTEMD_UNIT, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
 import { getCurrentVersion, compareVersions } from "../../utils/version.js";
+// In-memory cache for GitHub release data
+let updateCheckCache = null;
+const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 export function createSystemRoutes(serverManager) {
     const router = Router();
     // GET /api/system/stats - Get aggregated system resource stats from all running servers
@@ -155,25 +158,75 @@ export function createSystemRoutes(serverManager) {
     router.get("/version/check", async (req, res) => {
         try {
             const currentVersion = getCurrentVersion();
+            const now = Date.now();
+            // Check cache first
+            if (updateCheckCache && now < updateCheckCache.expiresAt) {
+                // Return cached data, but update currentVersion in case it changed
+                const cachedData = { ...updateCheckCache.data, currentVersion };
+                return res.json(cachedData);
+            }
             // Fetch latest release from GitHub API
             const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+            // Build headers with optional GitHub token
+            const headers = {
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "hypanel",
+            };
+            // Add GitHub token if available (increases rate limit from 60/hour to 5,000/hour)
+            const githubToken = process.env.GITHUB_TOKEN;
+            if (githubToken) {
+                headers["Authorization"] = `Bearer ${githubToken}`;
+            }
             let latestRelease;
+            let rateLimitRemaining;
+            let rateLimitReset;
             try {
-                const response = await fetch(githubApiUrl, {
-                    headers: {
-                        "Accept": "application/vnd.github+json",
-                        "User-Agent": "hypanel",
-                    },
-                });
+                const response = await fetch(githubApiUrl, { headers });
+                // Parse rate limit headers
+                const rateLimitRemainingHeader = response.headers.get("X-RateLimit-Remaining");
+                const rateLimitResetHeader = response.headers.get("X-RateLimit-Reset");
+                if (rateLimitRemainingHeader) {
+                    rateLimitRemaining = parseInt(rateLimitRemainingHeader, 10);
+                }
+                if (rateLimitResetHeader) {
+                    rateLimitReset = parseInt(rateLimitResetHeader, 10) * 1000; // Convert to milliseconds
+                }
                 if (!response.ok) {
+                    if (response.status === 403) {
+                        // Rate limit exceeded
+                        const errorMessage = rateLimitReset
+                            ? `Rate limit exceeded. Resets at ${new Date(rateLimitReset).toLocaleString()}`
+                            : "Rate limit exceeded. Please try again later.";
+                        // Cache the error response for a shorter duration (15 minutes)
+                        updateCheckCache = {
+                            data: {
+                                currentVersion,
+                                latestVersion: currentVersion,
+                                updateAvailable: false,
+                                error: errorMessage,
+                                rateLimitRemaining,
+                                rateLimitReset,
+                            },
+                            timestamp: now,
+                            expiresAt: now + (15 * 60 * 1000), // 15 minutes
+                        };
+                        return res.status(429).json(updateCheckCache.data);
+                    }
                     if (response.status === 404) {
                         // No releases found
-                        return res.json({
+                        const errorData = {
                             currentVersion,
                             latestVersion: currentVersion,
                             updateAvailable: false,
                             error: "No releases found",
-                        });
+                        };
+                        // Cache 404 for 1 hour
+                        updateCheckCache = {
+                            data: errorData,
+                            timestamp: now,
+                            expiresAt: now + CACHE_DURATION_MS,
+                        };
+                        return res.json(errorData);
                     }
                     throw new Error(`GitHub API returned ${response.status}`);
                 }
@@ -182,12 +235,21 @@ export function createSystemRoutes(serverManager) {
             catch (error) {
                 // Network error or API failure
                 console.error("Failed to fetch latest release from GitHub:", error);
-                return res.status(503).json({
+                const errorData = {
                     currentVersion,
                     latestVersion: currentVersion,
                     updateAvailable: false,
                     error: "Failed to check for updates. Please try again later.",
-                });
+                    rateLimitRemaining,
+                    rateLimitReset,
+                };
+                // Cache error for shorter duration (15 minutes)
+                updateCheckCache = {
+                    data: errorData,
+                    timestamp: now,
+                    expiresAt: now + (15 * 60 * 1000),
+                };
+                return res.status(503).json(errorData);
             }
             // Extract version from tag (remove 'v' prefix if present)
             const latestVersion = latestRelease.tag_name?.replace(/^v/, "") || latestRelease.tag_name || "";
@@ -196,17 +258,29 @@ export function createSystemRoutes(serverManager) {
             // Compare versions
             const comparison = compareVersions(currentVersion, latestVersion);
             const updateAvailable = comparison < 0; // Current version is less than latest
-            res.json({
+            const responseData = {
                 currentVersion,
                 latestVersion,
                 updateAvailable,
                 releaseUrl,
                 releaseNotes: releaseNotes.substring(0, 500), // Limit release notes length
-            });
+                rateLimitRemaining,
+                rateLimitReset,
+            };
+            // Cache successful response for 1 hour
+            updateCheckCache = {
+                data: responseData,
+                timestamp: now,
+                expiresAt: now + CACHE_DURATION_MS,
+            };
+            res.json(responseData);
         }
         catch (error) {
             console.error("Error checking for updates:", error);
             res.status(500).json({
+                currentVersion: getCurrentVersion(),
+                latestVersion: getCurrentVersion(),
+                updateAvailable: false,
                 error: "Failed to check for updates",
                 message: error instanceof Error ? error.message : String(error),
             });

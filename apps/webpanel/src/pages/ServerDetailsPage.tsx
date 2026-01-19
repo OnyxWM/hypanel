@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { useLocation, useNavigate, useParams, useSearchParams, Link } from "react-router-dom"
-import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key, RefreshCw, Upload, Trash2, Users, Cpu, HardDrive, Clock } from "lucide-react"
+import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key, RefreshCw, Upload, Trash2, Users, Cpu, HardDrive, Clock, Download } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { StatsCard } from "@/components/stats-card"
@@ -12,10 +12,11 @@ import { WorldList } from "@/components/world-list"
 import { WorldConfig } from "@/components/world-config"
 import { AuthGuidance } from "@/components/auth-guidance"
 import { PlayerList } from "@/components/player-list"
+import { UpdateProgressModal, type UpdateProgressState } from "@/components/update-progress-modal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { apiClient, wsClient } from "@/lib/api-client"
 import type { Server, ConsoleLog, Player, ModFile } from "@/lib/api"
@@ -40,6 +41,12 @@ export default function ServerDetailsPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null)
   const modFileInputRef = useRef<HTMLInputElement | null>(null)
+  const [updateModalOpen, setUpdateModalOpen] = useState(false)
+  const [updateState, setUpdateState] = useState<UpdateProgressState>("checking")
+  const [updateError, setUpdateError] = useState<string | undefined>(undefined)
+  const [updateCurrentVersion, setUpdateCurrentVersion] = useState<string | undefined>(undefined)
+  const [updateLatestVersion, setUpdateLatestVersion] = useState<string | undefined>(undefined)
+  const [updateConfirmationOpen, setUpdateConfirmationOpen] = useState(false)
 
   const shouldAutoOpenSettings = searchParams.get("settings") === "1"
 
@@ -262,6 +269,66 @@ export default function ServerDetailsPage() {
     }
   }
 
+  const handleCheckForUpdates = async () => {
+    if (!id) return
+    try {
+      setUpdateModalOpen(true)
+      setUpdateState("checking")
+      setUpdateError(undefined)
+      
+      const result = await apiClient.checkServerUpdate(id)
+      setUpdateCurrentVersion(result.currentVersion)
+      setUpdateLatestVersion(result.latestVersion)
+      
+      if (result.updateAvailable) {
+        setUpdateModalOpen(false)
+        setUpdateConfirmationOpen(true)
+      } else {
+        setUpdateState("success")
+        setUpdateError(undefined)
+      }
+    } catch (err) {
+      setUpdateState("error")
+      setUpdateError(err instanceof Error ? err.message : "Failed to check for updates")
+    }
+  }
+
+  const handleConfirmUpdate = async () => {
+    if (!id) return
+    setUpdateConfirmationOpen(false)
+    setUpdateModalOpen(true)
+    setUpdateState("backing_up")
+    setUpdateError(undefined)
+    
+    try {
+      // The update endpoint handles all steps: backup, stop, download, install
+      // We show "backing_up" initially, then "downloading" after a delay
+      // In a future enhancement, WebSocket events could provide real-time progress
+      const updatePromise = apiClient.updateServerVersion(id)
+      
+      // Show downloading state after a short delay (backup should be quick)
+      const downloadingTimeout = setTimeout(() => {
+        setUpdateState("downloading")
+      }, 3000)
+      
+      // Show installing state after more time
+      const installingTimeout = setTimeout(() => {
+        setUpdateState("installing")
+      }, 15000)
+      
+      await updatePromise
+      
+      clearTimeout(downloadingTimeout)
+      clearTimeout(installingTimeout)
+      
+      setUpdateState("success")
+      await loadServer() // Refresh server data to get updated version
+    } catch (err) {
+      setUpdateState("error")
+      setUpdateError(err instanceof Error ? err.message : "Failed to update server")
+    }
+  }
+
   const handleSendCommand = async (command: string) => {
     if (!id) return
     try {
@@ -440,6 +507,12 @@ export default function ServerDetailsPage() {
                 <Settings className="mr-2 h-4 w-4" />
                 Settings
               </Button>
+              {server.installState === "INSTALLED" && (
+                <Button variant="outline" onClick={handleCheckForUpdates}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Check for Updates
+                </Button>
+              )}
             </div>
           </div>
 
@@ -453,6 +526,39 @@ export default function ServerDetailsPage() {
                 serverStatus={server.status}
                 onUpdated={(updated) => setServer(updated)}
               />
+            </DialogContent>
+          </Dialog>
+
+          <UpdateProgressModal
+            open={updateModalOpen}
+            onOpenChange={setUpdateModalOpen}
+            state={updateState}
+            error={updateError}
+            currentVersion={updateCurrentVersion}
+            latestVersion={updateLatestVersion}
+          />
+
+          <Dialog open={updateConfirmationOpen} onOpenChange={setUpdateConfirmationOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Update Available</DialogTitle>
+                <DialogDescription>
+                  A new version is available. Update from {updateCurrentVersion} to {updateLatestVersion}?
+                  {server.status === "online" && (
+                    <span className="block mt-2 text-warning">
+                      The server will be stopped during the update process.
+                    </span>
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setUpdateConfirmationOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleConfirmUpdate}>
+                  Update Now
+                </Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
 

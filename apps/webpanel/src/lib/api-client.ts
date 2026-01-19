@@ -374,6 +374,18 @@ export class ApiClient {
   async checkForUpdates(): Promise<UpdateCheckResponse> {
     return this.request<UpdateCheckResponse>("/api/system/version/check")
   }
+
+  async checkServerUpdate(serverId: string): Promise<{ updateAvailable: boolean, currentVersion: string, latestVersion: string }> {
+    return this.request<{ updateAvailable: boolean, currentVersion: string, latestVersion: string }>(`/api/servers/${serverId}/check-update`, {
+      method: "POST",
+    })
+  }
+
+  async updateServerVersion(serverId: string): Promise<{ success: boolean, message: string, server: Server }> {
+    return this.request<{ success: boolean, message: string, server: Server }>(`/api/servers/${serverId}/update`, {
+      method: "POST",
+    })
+  }
 }
 
 export const apiClient = new ApiClient()

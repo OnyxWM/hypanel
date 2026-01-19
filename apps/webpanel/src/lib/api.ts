@@ -96,6 +96,8 @@ export interface UpdateCheckResponse {
   updateAvailable: boolean
   releaseUrl?: string
   releaseNotes?: string
+  rateLimitRemaining?: number
+  rateLimitReset?: number
   error?: string
 }
 

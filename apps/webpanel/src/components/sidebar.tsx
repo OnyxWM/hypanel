@@ -42,6 +42,18 @@ export function Sidebar() {
         const result = await apiClient.checkForUpdates()
         if (cancelled) return
 
+        // Handle rate limit errors gracefully
+        if (result.error && result.error.includes("Rate limit")) {
+          // If rate limited, extend the next check interval
+          // Don't show error in sidebar, just log it
+          console.warn("Update check rate limited:", result.error)
+          if (result.rateLimitReset) {
+            const resetTime = new Date(result.rateLimitReset)
+            console.log(`Rate limit resets at: ${resetTime.toLocaleString()}`)
+          }
+          return
+        }
+
         // Only show if update is available and not dismissed for this version
         if (
           result.updateAvailable &&
@@ -54,15 +66,18 @@ export function Sidebar() {
         }
       } catch (error) {
         // Silently fail - don't show errors in sidebar
-        console.error("Failed to check for updates:", error)
+        // Only log if it's not a rate limit error
+        if (!(error instanceof Error && error.message.includes("429"))) {
+          console.error("Failed to check for updates:", error)
+        }
       }
     }
 
     // Check immediately
     checkForUpdates()
 
-    // Check every 30 minutes
-    intervalId = setInterval(checkForUpdates, 30 * 60 * 1000)
+    // Check every 2 hours (reduced frequency to respect GitHub API rate limits)
+    intervalId = setInterval(checkForUpdates, 2 * 60 * 60 * 1000)
 
     return () => {
       cancelled = true

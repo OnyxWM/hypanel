@@ -44,6 +44,7 @@ Environment variables (defaults shown):
 - `SERVERS_DIR=./servers` - Directory for server configurations
 - `LOGS_DIR=./logs` - Directory for log files
 - `NODE_ENV=development` - Environment (development/production)
+- `GITHUB_TOKEN` - (Optional) GitHub Personal Access Token for update checks. Increases API rate limit from 60/hour to 5,000/hour. Only needs `public_repo` scope (read-only). Create at: https://github.com/settings/tokens
 
 ## Running
 
