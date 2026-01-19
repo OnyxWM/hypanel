@@ -8,9 +8,13 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
 import { Installer } from "../installation/Installer.js";
-import { createConfigError, createFilesystemError } from "../errors/index.js";
+import { createConfigError, createFilesystemError, HypanelError } from "../errors/index.js";
 import { getPlayerTracker } from "./PlayerTracker.js";
 import { getServerIP } from "../utils/network.js";
+import { spawn } from "child_process";
+import { promisify } from "util";
+import { exec } from "child_process";
+const execAsync = promisify(exec);
 export class ServerManager extends EventEmitter {
     instances;
     configManager;
@@ -1381,6 +1385,448 @@ export class ServerManager extends EventEmitter {
             throw createFilesystemError("access", backupPath, "Backup not found", serverId);
         }
         return backupPath;
+    }
+    /**
+     * Find hytale-downloader executable
+     */
+    async findDownloader() {
+        const commonPaths = [
+            "/opt/hytale-downloader/hytale-downloader", // Bundled installation location
+            "/usr/local/bin/hytale-downloader",
+            "/usr/bin/hytale-downloader",
+            "./hytale-downloader"
+        ];
+        // Check common paths first
+        for (const downloadPath of commonPaths) {
+            try {
+                await fs.promises.access(downloadPath, fs.constants.F_OK | fs.constants.X_OK);
+                logger.info(`Found hytale-downloader at: ${downloadPath}`);
+                return downloadPath;
+            }
+            catch {
+                // Continue checking
+            }
+        }
+        // Check PATH
+        return new Promise((resolve) => {
+            const which = spawn("which", ["hytale-downloader"]);
+            which.on("close", (code) => {
+                if (code === 0) {
+                    logger.info("Found hytale-downloader in PATH");
+                    resolve("hytale-downloader");
+                }
+                else {
+                    resolve(null);
+                }
+            });
+            which.on("error", () => {
+                resolve(null);
+            });
+        });
+    }
+    /**
+     * Check if a server update is available
+     */
+    async checkServerUpdate(serverId) {
+        const dbServer = getServerFromDb(serverId);
+        if (!dbServer) {
+            throw createFilesystemError("access", serverId, "Server not found", serverId);
+        }
+        const currentVersion = dbServer.version || "unknown";
+        // Find hytale-downloader
+        const downloaderPath = await this.findDownloader();
+        if (!downloaderPath) {
+            throw new HypanelError("DOWNLOADER_NOT_FOUND", "hytale-downloader not found", "Ensure hytale-downloader is installed and accessible", undefined, 500);
+        }
+        // Execute hytale-downloader -print-version using spawn for better control
+        // Note: -print-version should be fast, but if it hangs, it might be checking for updates
+        try {
+            logger.info(`Executing hytale-downloader -print-version for server ${serverId}`);
+            // Helper function to execute the command
+            const executeCommand = async (args) => {
+                return new Promise((resolve, reject) => {
+                    // Add credentials path if configured (same as installer)
+                    const finalArgs = [...args];
+                    if (appConfig.downloaderCredentialsPath) {
+                        finalArgs.push("-credentials-path", appConfig.downloaderCredentialsPath);
+                    }
+                    logger.debug(`Spawning: ${downloaderPath} ${finalArgs.join(" ")}`);
+                    const childProcess = spawn(downloaderPath, finalArgs, {
+                        stdio: ["pipe", "pipe", "pipe"],
+                        env: { ...process.env } // Pass through environment variables
+                    });
+                    let stdout = "";
+                    let stderr = "";
+                    let timeoutId = null;
+                    let hasResolved = false;
+                    // Set 10 second timeout (should be fast for -print-version)
+                    timeoutId = setTimeout(() => {
+                        if (!hasResolved) {
+                            hasResolved = true;
+                            childProcess.kill("SIGTERM");
+                            // Give it a moment to clean up, then force kill
+                            setTimeout(() => {
+                                try {
+                                    childProcess.kill("SIGKILL");
+                                }
+                                catch {
+                                    // Ignore errors on force kill
+                                }
+                            }, 1000);
+                            reject(new Error("Command timed out after 10 seconds. hytale-downloader may be waiting for network or authentication."));
+                        }
+                    }, 10000);
+                    childProcess.stdout?.on("data", (data) => {
+                        const text = data.toString();
+                        stdout += text;
+                        logger.debug(`[hytale-downloader stdout]: ${text.trim()}`);
+                    });
+                    childProcess.stderr?.on("data", (data) => {
+                        const text = data.toString();
+                        stderr += text;
+                        logger.debug(`[hytale-downloader stderr]: ${text.trim()}`);
+                    });
+                    childProcess.on("close", (code, signal) => {
+                        if (timeoutId) {
+                            clearTimeout(timeoutId);
+                        }
+                        if (hasResolved) {
+                            return; // Already handled by timeout
+                        }
+                        hasResolved = true;
+                        logger.debug(`hytale-downloader exited with code ${code}, signal ${signal}`);
+                        logger.debug(`stdout: ${stdout || "(empty)"}`);
+                        logger.debug(`stderr: ${stderr || "(empty)"}`);
+                        if (code === 0) {
+                            const version = stdout.trim();
+                            if (version) {
+                                resolve(version);
+                            }
+                            else {
+                                reject(new Error(`hytale-downloader returned empty version. stdout: "${stdout}", stderr: "${stderr}"`));
+                            }
+                        }
+                        else {
+                            const errorMsg = stderr || stdout || `Process exited with code ${code}`;
+                            reject(new Error(`hytale-downloader failed: ${errorMsg}`));
+                        }
+                    });
+                    childProcess.on("error", (error) => {
+                        if (timeoutId) {
+                            clearTimeout(timeoutId);
+                        }
+                        if (!hasResolved) {
+                            hasResolved = true;
+                            reject(new Error(`Failed to execute hytale-downloader: ${error.message}`));
+                        }
+                    });
+                });
+            };
+            // Try with -skip-update-check first
+            let latestVersion;
+            try {
+                const args = ["-print-version", "-skip-update-check"];
+                latestVersion = await executeCommand(args);
+            }
+            catch (firstError) {
+                // If that fails, try without -skip-update-check
+                logger.warn(`First attempt failed, trying without -skip-update-check: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+                try {
+                    const args = ["-print-version"];
+                    latestVersion = await executeCommand(args);
+                }
+                catch (secondError) {
+                    // Both attempts failed
+                    throw firstError; // Throw the original error
+                }
+            }
+            logger.info(`Latest version from hytale-downloader: ${latestVersion}, current version: ${currentVersion}`);
+            const updateAvailable = latestVersion !== currentVersion && latestVersion !== "unknown" && currentVersion !== "unknown";
+            return {
+                updateAvailable,
+                currentVersion,
+                latestVersion
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            logger.error(`Failed to check for updates for server ${serverId}: ${errorMessage}`);
+            // Check if it's a timeout error
+            if (errorMessage.includes("timeout") || errorMessage.includes("timed out")) {
+                throw new HypanelError("UPDATE_CHECK_TIMEOUT", "Update check timed out - hytale-downloader did not respond in time. The command may be waiting for network access or authentication.", `Test the command manually: "${downloaderPath}" -print-version. If it hangs, check network connectivity, authentication, or hytale-downloader configuration.`, undefined, 500);
+            }
+            throw new HypanelError("UPDATE_CHECK_FAILED", `Failed to check for updates: ${errorMessage}`, `Check that hytale-downloader is properly installed and configured. Test manually: "${downloaderPath}" -print-version`, undefined, 500);
+        }
+    }
+    /**
+     * Update a server to the latest version
+     */
+    async updateServer(serverId) {
+        const dbServer = getServerFromDb(serverId);
+        if (!dbServer) {
+            throw createFilesystemError("access", serverId, "Server not found", serverId);
+        }
+        const instance = this.instances.get(serverId);
+        const wasRunning = instance && instance.getStatus() === "online";
+        // Step 1: Create backup if server is running (must be done before stopping)
+        if (wasRunning && instance) {
+            logger.info(`Creating backup for server ${serverId} before update`);
+            instance.sendCommand("backup");
+            // Wait for backup to complete - monitor console logs
+            // We'll wait up to 5 minutes for backup to complete
+            let backupComplete = false;
+            const startTime = Date.now();
+            const timeout = 5 * 60 * 1000; // 5 minutes
+            while (!backupComplete && (Date.now() - startTime) < timeout) {
+                // Check recent logs for backup completion
+                const { getConsoleLogs } = await import("../database/db.js");
+                const recentLogs = getConsoleLogs(serverId, 50);
+                // Look for backup completion message (this may vary by server implementation)
+                // Common patterns: "Backup complete", "Backup saved", etc.
+                for (const log of recentLogs.slice().reverse()) {
+                    const message = log.message.toLowerCase();
+                    if (message.includes("backup") && (message.includes("complete") || message.includes("saved") || message.includes("finished"))) {
+                        backupComplete = true;
+                        break;
+                    }
+                }
+                if (!backupComplete) {
+                    await new Promise(resolve => setTimeout(resolve, 2000)); // Check every 2 seconds
+                }
+            }
+            if (!backupComplete) {
+                logger.warn(`Backup completion not detected for server ${serverId}, proceeding anyway`);
+            }
+            else {
+                logger.info(`Backup completed for server ${serverId}`);
+            }
+            // Step 2: Stop server
+            logger.info(`Stopping server ${serverId} for update`);
+            await this.stopServer(serverId, false);
+            // Wait for server to fully stop
+            let attempts = 0;
+            while (attempts < 30) {
+                const currentInstance = this.instances.get(serverId);
+                if (!currentInstance || currentInstance.getStatus() === "offline") {
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+            if (attempts >= 30) {
+                throw new HypanelError("SERVER_STOP_TIMEOUT", "Server did not stop in time", "Try stopping the server manually and try again", undefined, 500);
+            }
+        }
+        // Find hytale-downloader
+        const downloaderPath = await this.findDownloader();
+        if (!downloaderPath) {
+            throw new HypanelError("DOWNLOADER_NOT_FOUND", "hytale-downloader not found", "Ensure hytale-downloader is installed and accessible", undefined, 500);
+        }
+        // Get server root directory
+        const serverRoot = dbServer.serverRoot || path.join(appConfig.serversDir, serverId);
+        const resolvedRoot = path.resolve(serverRoot);
+        // Step 3: Download update using hytale-downloader (using spawn like the installer)
+        logger.info(`Downloading update for server ${serverId}`);
+        try {
+            const downloadResult = await new Promise((resolve) => {
+                const args = [
+                    "-download-path", resolvedRoot,
+                    "-skip-update-check"
+                ];
+                // Add credentials path if configured
+                if (appConfig.downloaderCredentialsPath) {
+                    args.push("-credentials-path", appConfig.downloaderCredentialsPath);
+                }
+                logger.info(`Executing: ${downloaderPath} ${args.join(" ")}`);
+                const childProcess = spawn(downloaderPath, args, {
+                    cwd: resolvedRoot,
+                    stdio: ["pipe", "pipe", "pipe"]
+                });
+                let stdout = "";
+                let stderr = "";
+                let timeoutId = null;
+                // Set 30 minute timeout for download
+                timeoutId = setTimeout(() => {
+                    childProcess.kill("SIGTERM");
+                    setTimeout(() => {
+                        try {
+                            childProcess.kill("SIGKILL");
+                        }
+                        catch {
+                            // Ignore errors on force kill
+                        }
+                    }, 1000);
+                    resolve({
+                        success: false,
+                        error: "Download timed out after 30 minutes",
+                        stdout,
+                        stderr
+                    });
+                }, 30 * 60 * 1000);
+                childProcess.stdout?.on("data", (data) => {
+                    const text = data.toString();
+                    stdout += text;
+                    logger.info(`[hytale-downloader][${serverId}] ${text.trim()}`);
+                });
+                childProcess.stderr?.on("data", (data) => {
+                    const text = data.toString();
+                    stderr += text;
+                    logger.info(`[hytale-downloader][${serverId}][ERROR] ${text.trim()}`);
+                });
+                childProcess.on("close", (code) => {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
+                    if (code === 0) {
+                        logger.info(`hytale-downloader completed successfully for server ${serverId}`);
+                        if (stdout.trim()) {
+                            logger.debug(`[hytale-downloader][${serverId}] Full stdout:\n${stdout}`);
+                        }
+                        if (stderr.trim()) {
+                            logger.debug(`[hytale-downloader][${serverId}] Full stderr:\n${stderr}`);
+                        }
+                        resolve({ success: true, stdout, stderr });
+                    }
+                    else {
+                        const error = stderr || stdout || `Process exited with code ${code}`;
+                        logger.error(`hytale-downloader failed for server ${serverId}: ${error}`);
+                        if (stdout.trim()) {
+                            logger.error(`[hytale-downloader][${serverId}] stdout:\n${stdout}`);
+                        }
+                        if (stderr.trim()) {
+                            logger.error(`[hytale-downloader][${serverId}] stderr:\n${stderr}`);
+                        }
+                        resolve({ success: false, error, stdout, stderr });
+                    }
+                });
+                childProcess.on("error", (error) => {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
+                    logger.error(`Failed to execute hytale-downloader for server ${serverId}: ${error.message}`);
+                    resolve({ success: false, error: error.message, stdout, stderr });
+                });
+            });
+            if (!downloadResult.success) {
+                throw new Error(downloadResult.error || "Download failed");
+            }
+            logger.info(`Update downloaded successfully for server ${serverId}`);
+            // Step 3b: Extract the downloaded ZIP file
+            logger.info(`Extracting update for server ${serverId}`);
+            const zipPath = `${resolvedRoot}.zip`;
+            try {
+                // Check if ZIP file exists
+                await fs.promises.access(zipPath, fs.constants.F_OK);
+                logger.info(`Found ZIP file at: ${zipPath}`);
+                // Extract ZIP file to server root
+                await execAsync(`unzip -o "${zipPath}" -d "${resolvedRoot}"`);
+                logger.info(`Successfully extracted ZIP file for server ${serverId}`);
+                // Remove the ZIP file after extraction
+                await fs.promises.unlink(zipPath);
+                logger.debug(`Removed ZIP file: ${zipPath}`);
+            }
+            catch (extractError) {
+                // If ZIP file doesn't exist, check if files are already extracted
+                if (extractError.code === 'ENOENT') {
+                    logger.debug(`No ZIP file found at ${zipPath}, files may already be extracted`);
+                }
+                else {
+                    const errorMessage = extractError instanceof Error ? extractError.message : "Unknown extraction error";
+                    logger.error(`Failed to extract ZIP file for server ${serverId}: ${errorMessage}`);
+                    throw new HypanelError("UPDATE_EXTRACTION_FAILED", `Failed to extract downloaded ZIP file: ${errorMessage}`, "Check disk space and permissions, then retry update", undefined, 500);
+                }
+            }
+        }
+        catch (error) {
+            logger.error(`Failed to download update: ${error instanceof Error ? error.message : String(error)}`);
+            if (error instanceof HypanelError) {
+                throw error;
+            }
+            throw new HypanelError("UPDATE_DOWNLOAD_FAILED", `Failed to download update: ${error instanceof Error ? error.message : "Unknown error"}`, "Check that hytale-downloader is properly configured and has network access", undefined, 500);
+        }
+        // Step 4: Get latest version and update in database
+        // Use the same spawn approach to avoid hanging
+        try {
+            logger.info(`Getting latest version to update database for server ${serverId}`);
+            const latestVersion = await new Promise((resolve, reject) => {
+                const args = ["-print-version", "-skip-update-check"];
+                if (appConfig.downloaderCredentialsPath) {
+                    args.push("-credentials-path", appConfig.downloaderCredentialsPath);
+                }
+                const childProcess = spawn(downloaderPath, args, {
+                    stdio: ["pipe", "pipe", "pipe"],
+                    env: { ...process.env }
+                });
+                let stdout = "";
+                let stderr = "";
+                let timeoutId = null;
+                let hasResolved = false;
+                timeoutId = setTimeout(() => {
+                    if (!hasResolved) {
+                        hasResolved = true;
+                        childProcess.kill("SIGTERM");
+                        setTimeout(() => {
+                            try {
+                                childProcess.kill("SIGKILL");
+                            }
+                            catch {
+                                // Ignore errors on force kill
+                            }
+                        }, 1000);
+                        reject(new Error("Version check timed out"));
+                    }
+                }, 10000);
+                childProcess.stdout?.on("data", (data) => {
+                    stdout += data.toString();
+                });
+                childProcess.stderr?.on("data", (data) => {
+                    stderr += data.toString();
+                });
+                childProcess.on("close", (code) => {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
+                    if (hasResolved) {
+                        return;
+                    }
+                    hasResolved = true;
+                    if (code === 0) {
+                        const version = stdout.trim();
+                        if (version) {
+                            resolve(version);
+                        }
+                        else {
+                            reject(new Error(`Empty version returned. stderr: ${stderr || "none"}`));
+                        }
+                    }
+                    else {
+                        const errorMsg = stderr || stdout || `Process exited with code ${code}`;
+                        reject(new Error(`Version check failed: ${errorMsg}`));
+                    }
+                });
+                childProcess.on("error", (error) => {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
+                    if (!hasResolved) {
+                        hasResolved = true;
+                        reject(new Error(`Failed to execute hytale-downloader: ${error.message}`));
+                    }
+                });
+            });
+            // Update server version in database
+            await updateServerConfig(serverId, { version: latestVersion });
+            logger.info(`Updated server ${serverId} version to ${latestVersion}`);
+        }
+        catch (error) {
+            logger.warn(`Failed to update version in database: ${error instanceof Error ? error.message : String(error)}`);
+            // Don't fail the update if we can't update the version field - the files are already updated
+        }
+        // Step 5: Restart server if it was running before
+        if (wasRunning) {
+            logger.info(`Restarting server ${serverId} after update`);
+            await this.startServer(serverId);
+        }
     }
     /**
      * Cleanup old backups for all servers, enforcing a maximum of 10 backups per server

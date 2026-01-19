@@ -82,6 +82,22 @@ export declare class ServerManager extends EventEmitter {
     deleteBackup(serverId: string, backupName: string): Promise<void>;
     getBackupPath(serverId: string, backupName: string): string;
     /**
+     * Find hytale-downloader executable
+     */
+    private findDownloader;
+    /**
+     * Check if a server update is available
+     */
+    checkServerUpdate(serverId: string): Promise<{
+        updateAvailable: boolean;
+        currentVersion: string;
+        latestVersion: string;
+    }>;
+    /**
+     * Update a server to the latest version
+     */
+    updateServer(serverId: string): Promise<void>;
+    /**
      * Cleanup old backups for all servers, enforcing a maximum of 10 backups per server
      * Keeps the 10 most recent backups and deletes older ones
      */

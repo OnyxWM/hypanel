@@ -1081,6 +1081,63 @@ export function createServerRoutes(serverManager) {
             });
         }
     });
+    // POST /api/servers/:id/check-update - Check if server update is available
+    router.post("/:id/check-update", validateParams(serverIdSchema), async (req, res) => {
+        try {
+            const { id } = req.params;
+            const result = await serverManager.checkServerUpdate(id);
+            res.json(result);
+        }
+        catch (error) {
+            if (error instanceof HypanelError) {
+                return res.status(error.statusCode).json(error.toJSON());
+            }
+            if (error instanceof Error && error.message.includes("not found")) {
+                return res.status(404).json({
+                    code: "SERVER_NOT_FOUND",
+                    message: error.message,
+                    suggestedAction: "Verify the server ID is correct"
+                });
+            }
+            res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Failed to check for updates",
+                details: error instanceof Error ? error.message : "Unknown error",
+                suggestedAction: "Check server logs for details"
+            });
+        }
+    });
+    // POST /api/servers/:id/update - Update server to latest version
+    router.post("/:id/update", validateParams(serverIdSchema), async (req, res) => {
+        try {
+            const { id } = req.params;
+            await serverManager.updateServer(id);
+            const server = serverManager.getServer(id);
+            res.json({
+                success: true,
+                message: "Server updated successfully",
+                server
+            });
+        }
+        catch (error) {
+            if (error instanceof HypanelError) {
+                return res.status(error.statusCode).json(error.toJSON());
+            }
+            if (error instanceof Error && error.message.includes("not found")) {
+                return res.status(404).json({
+                    code: "SERVER_NOT_FOUND",
+                    message: error.message,
+                    suggestedAction: "Verify the server ID is correct"
+                });
+            }
+            res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Failed to update server",
+                details: error instanceof Error ? error.message : "Unknown error",
+                suggestedAction: "Check server logs for details"
+            });
+        }
+    });
     // DELETE /api/servers/:id - Delete server
     router.delete("/:id", validateParams(serverIdSchema), async (req, res) => {
         try {
