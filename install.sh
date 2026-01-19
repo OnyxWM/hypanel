@@ -112,7 +112,7 @@ install_packages() {
         *)
             warning "Package installation skipped on $OS"
             warning "Please install the following packages manually:"
-            warning "  curl ca-certificates unzip tar jq rsync sudo"
+            warning "  curl ca-certificates unzip tar jq rsync sudo libpam0g-dev"
             return 0
             ;;
     esac
@@ -130,6 +130,7 @@ install_packages() {
         "python3"
         "rsync"
         "sudo"
+        "libpam0g-dev"
     )
 
     local missing_packages=()
