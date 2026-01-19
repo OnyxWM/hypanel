@@ -2,6 +2,7 @@ import { Router } from "express";
 import pidusage from "pidusage";
 import os from "os";
 import { HYPANEL_SYSTEMD_UNIT, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
+import { getCurrentVersion, compareVersions } from "../../utils/version.js";
 export function createSystemRoutes(serverManager) {
     const router = Router();
     // GET /api/system/stats - Get aggregated system resource stats from all running servers
@@ -133,6 +134,80 @@ export function createSystemRoutes(serverManager) {
         catch (error) {
             res.status(500).json({
                 error: "Failed to read system journal",
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    });
+    // GET /api/system/version - Get current installed version
+    router.get("/version", (req, res) => {
+        try {
+            const currentVersion = getCurrentVersion();
+            res.json({ version: currentVersion });
+        }
+        catch (error) {
+            res.status(500).json({
+                error: "Failed to get version",
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    });
+    // GET /api/system/version/check - Check for updates against GitHub releases
+    router.get("/version/check", async (req, res) => {
+        try {
+            const currentVersion = getCurrentVersion();
+            // Fetch latest release from GitHub API
+            const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+            let latestRelease;
+            try {
+                const response = await fetch(githubApiUrl, {
+                    headers: {
+                        "Accept": "application/vnd.github+json",
+                        "User-Agent": "hypanel",
+                    },
+                });
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        // No releases found
+                        return res.json({
+                            currentVersion,
+                            latestVersion: currentVersion,
+                            updateAvailable: false,
+                            error: "No releases found",
+                        });
+                    }
+                    throw new Error(`GitHub API returned ${response.status}`);
+                }
+                latestRelease = await response.json();
+            }
+            catch (error) {
+                // Network error or API failure
+                console.error("Failed to fetch latest release from GitHub:", error);
+                return res.status(503).json({
+                    currentVersion,
+                    latestVersion: currentVersion,
+                    updateAvailable: false,
+                    error: "Failed to check for updates. Please try again later.",
+                });
+            }
+            // Extract version from tag (remove 'v' prefix if present)
+            const latestVersion = latestRelease.tag_name?.replace(/^v/, "") || latestRelease.tag_name || "";
+            const releaseUrl = latestRelease.html_url || `https://github.com/OnyxWm/hypanel/releases/tag/${latestRelease.tag_name}`;
+            const releaseNotes = latestRelease.body || "";
+            // Compare versions
+            const comparison = compareVersions(currentVersion, latestVersion);
+            const updateAvailable = comparison < 0; // Current version is less than latest
+            res.json({
+                currentVersion,
+                latestVersion,
+                updateAvailable,
+                releaseUrl,
+                releaseNotes: releaseNotes.substring(0, 500), // Limit release notes length
+            });
+        }
+        catch (error) {
+            console.error("Error checking for updates:", error);
+            res.status(500).json({
+                error: "Failed to check for updates",
                 message: error instanceof Error ? error.message : String(error),
             });
         }
