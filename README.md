@@ -1,70 +1,184 @@
+<div align="center">
+  <img src="apps/webpanel/public/newlogo.png" alt="Hypanel Logo" width="200">
+</div>
+
 # Hypanel
 
-A comprehensive server management panel for Hytale game servers. Hypanel provides a modern web interface and robust backend API for managing multiple Hytale server instances, monitoring resources, and executing commands in real-time.
+A Linux server manager tool for Hytale servers that allows you to create, install, update, and delete Hytale servers in a web GUI. Manage your servers with ease through a modern web interface.
 
 ## Features
 
-- 🎮 **Server Management**: Create, start, stop, restart, and delete Hytale servers
-- 📊 **Real-time Monitoring**: Live resource usage tracking (CPU, memory)
-- 💬 **Console Access**: Real-time console log streaming via WebSocket
-- 🎨 **Modern UI**: Beautiful, responsive web interface built with React and Tailwind CSS
-- 🔌 **REST API**: Comprehensive RESTful API for server operations
-- 🔄 **WebSocket Support**: Real-time updates and bidirectional communication
-- 💾 **Persistent Storage**: SQLite database for server configurations and state
-- 📝 **Logging**: Comprehensive logging with Winston and daily log rotation
+- **Server Management**: Create, install, update, and delete Hytale servers via web GUI
+- **Autostart**: Enable automatic server startup on system boot
+- **Player Management**: View, kick, opp, or manage whitelist/banlist players
+- **Backup Management**: Create and download server backups directly from your browser
+- **Mod Management**: Upload, view, and delete mod files through the web interface
+- **Real-time Monitoring**: Monitor server resource usage (CPU, memory) in real-time
+- **Console Access**: Access and interact with server console logs via WebSocket
 
-## Tech Stack
+## Supported Systems
 
-### Backend
-- **Node.js** with **Express** - REST API server
-- **TypeScript** - Type-safe development
-- **SQLite** (better-sqlite3) - Database
-- **WebSocket** (ws) - Real-time communication
-- **Winston** - Logging framework
-- **Zod** - Schema validation
+Hypanel is tested and supported on:
+- **Ubuntu** 22.04, 24.04
+- **Debian** 12, 13
 
-### Frontend
-- **React 19** - UI framework
-- **TypeScript** - Type-safe development
-- **Vite** - Build tool and dev server
-- **React Router** - Client-side routing
-- **Tailwind CSS** - Styling
-- **Radix UI** - Accessible component primitives
-- **Recharts** - Data visualization
-- **React Hook Form** - Form management
+> **Note**: Hypanel may work on other Linux distributions, but they are not officially supported. If you choose to use Hypanel on an unsupported distribution, you will be responsible for testing and troubleshooting any issues that may arise.
 
-## Project Structure
+## Disclaimer
+
+⚠️ **This tool is currently in a test/experimental phase.** There will likely be bugs or issues. Use at your own risk and report any problems you encounter.
+
+## Installation
+
+### Prerequisites
+
+Install `curl` if it's not already installed:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get update && sudo apt-get install -y curl
+```
+
+### Installation Steps
+
+1. **Run the installation script**:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh | sudo bash
+   ```
+   Or download and run the script manually:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh -o install.sh
+   sudo bash install.sh
+   ```
+
+2. **Access the web panel**: Visit `http://[your-server-ip]:3000` in your browser
+
+3. **Login**: Use the password you created during the installation process
+
+4. **Authorize the downloader**: Click the "Authorize" button at the top of the page to authorize the Hytale downloader. Once authorized, it will show "Authorized" status.
+
+   ![Auth Downloader Button](img/auth-downloader.png)
+   
+   After clicking authorize, you should see:
+   
+   ![Downloader Authorized](img/downloader-authorised.png)
+
+5. **Create and install a server**: From the dashboard, create a new server and install it.
+
+6. **Authorize the server** (first start only):
+   - When you start the server for the first time, it will show an "Auth Required" status
+   
+   ![Server Auth Required](img/auth-server.png)
+   
+   - Click on the "Authenticate" button in the web interface
+   - Run the `/auth login device` command in the server console
+   - Copy the authorization link that appears in the console
+   
+   ![Server Auth Link](img/server-auth-link.png)
+   
+   - Open the link in a new browser tab and sign in with your Hytale account
+   - Once authorized, return to the console and run: `/auth persistence Encrypted save`
+   - You should see confirmation that credential storage has been changed to Encrypted
+   
+   ![Auth Encrypted Persisted](img/auth-encrypted-persisted.png)
+   
+   - Your server is now ready to accept connections!
+
+## Uninstallation
+
+To completely remove Hypanel from your system, run the uninstall script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/uninstall.sh | sudo bash
+```
+
+Or download and run it manually:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/uninstall.sh -o uninstall.sh
+sudo bash uninstall.sh
+```
+
+**Warning**: This will permanently delete all Hypanel data including server instances, configurations, databases, logs, and backups.
+
+## Development
+
+### Tech Stack
+
+#### Backend
+- **Node.js** 18+ with **Express 5.2.1** - REST API server
+- **TypeScript 5.9.3** - Type-safe development
+- **SQLite** (better-sqlite3 11.7.0) - Database
+- **WebSocket** (ws 8.19.0) - Real-time communication
+- **Winston 3.15.0** - Logging framework with daily rotation
+- **Zod 3.23.8** - Schema validation
+- **authenticate-pam 1.0.5** - PAM authentication for Linux
+- **multer 2.0.2** - File upload handling
+- **pidusage 4.0.1** - Process resource monitoring
+- **ts-node-dev 2.0.0** - Development server with hot reload
+- **tsx 4.19.2** - TypeScript execution for testing
+
+#### Frontend
+- **React 19.2.0** - UI framework
+- **TypeScript 5.9.3** - Type-safe development
+- **Vite 7.2.4** - Build tool and dev server
+- **React Router 7.12.0** - Client-side routing
+- **Tailwind CSS 4.1.9** - Utility-first CSS framework
+- **Radix UI** - Accessible component primitives (various packages)
+- **Recharts 2.15.4** - Data visualization
+- **React Hook Form 7.60.0** - Form management
+- **Zod 3.25.76** - Schema validation for forms
+- **Sonner 1.7.4** - Toast notifications
+
+### Project Structure
 
 ```
 hypanel/
 ├── apps/
-│   ├── backend/          # Node.js backend API and daemon
+│   ├── backend/              # Node.js backend API and daemon
 │   │   ├── src/
-│   │   │   ├── api/      # REST API routes and middleware
-│   │   │   ├── websocket/# WebSocket server
-│   │   │   ├── server/   # Server management logic
-│   │   │   ├── database/ # Database operations
-│   │   │   └── ...
-│   │   └── README.md     # Backend-specific documentation
+│   │   │   ├── api/          # REST API routes and middleware
+│   │   │   │   ├── routes/   # API route handlers
+│   │   │   │   └── middleware/# Authentication and validation
+│   │   │   ├── websocket/    # WebSocket server
+│   │   │   ├── server/       # Server management logic
+│   │   │   ├── database/     # Database operations
+│   │   │   ├── installation/ # Server installation logic
+│   │   │   ├── storage/      # Configuration management
+│   │   │   ├── logger/       # Logging utilities
+│   │   │   ├── config/       # Configuration management
+│   │   │   ├── systemd/      # Systemd integration
+│   │   │   ├── types/        # TypeScript type definitions
+│   │   │   ├── utils/        # Utility functions
+│   │   │   └── errors/       # Error handling
+│   │   ├── test/             # Test files
+│   │   ├── daemon.ts         # Daemon entry point
+│   │   └── README.md         # Backend-specific documentation
 │   │
-│   └── webpanel/         # React frontend application
+│   └── webpanel/             # React frontend application
 │       ├── src/
-│       │   ├── components/# React components
-│       │   ├── pages/    # Page components
-│       │   ├── lib/      # Utilities and API client
-│       │   └── ...
-│       └── README.md     # Frontend-specific documentation
+│       │   ├── components/   # React components
+│       │   │   └── ui/       # Reusable UI components
+│       │   ├── pages/        # Page components
+│       │   ├── contexts/     # React contexts
+│       │   ├── lib/          # Utilities and API client
+│       │   └── assets/       # Static assets
+│       ├── public/           # Public assets (logo, favicon)
+│       └── README.md         # Frontend-specific documentation
 │
-└── package.json          # Root package with dev scripts
+├── install.sh                # Installation script
+├── uninstall.sh              # Uninstallation script
+└── package.json              # Root package with dev scripts
 ```
 
-## Prerequisites
+### Prerequisites
 
-- **Node.js** 18+ and npm
+- **Node.js** 18+ and npm (Node.js 24+ recommended for production)
 - **Linux** operating system (for running Hytale servers)
 - **SQLite3** (usually included with Node.js)
+- **TypeScript** 5.9+ (installed as dev dependency)
 
-## Installation
+### Development Setup
 
 1. Clone the repository:
 ```bash
@@ -91,9 +205,9 @@ npm install
 cd ../..
 ```
 
-## Running the Project
+### Running the Project
 
-### Development Mode (Recommended)
+#### Development Mode (Recommended)
 
 Run both backend and frontend concurrently from the root directory:
 
@@ -105,25 +219,33 @@ This will start:
 - Backend API server on `http://localhost:3000`
 - Frontend dev server on `http://localhost:5173` (or next available port)
 
-### Individual Services
+#### Individual Services
 
 You can also run each service separately:
 
 **Backend only:**
 ```bash
+# From root directory (runs production build)
 npm run backend
-# or
-cd apps/backend && npm run dev
+
+# Or from backend directory (development mode with hot reload)
+cd apps/backend
+npm run dev
 ```
 
 **Frontend only:**
 ```bash
+# From root directory
 npm run webpanel
-# or
-cd apps/webpanel && npm run dev
+
+# Or from webpanel directory
+cd apps/webpanel
+npm run dev
 ```
 
-### Production Mode
+**Note**: The root `npm run backend` command runs the production build (`npm start`), while `npm run dev` from the backend directory uses `ts-node-dev` for hot reload during development.
+
+#### Production Mode
 
 **Backend:**
 ```bash
@@ -139,9 +261,9 @@ npm run build
 npm run preview
 ```
 
-## Configuration
+### Configuration
 
-### Backend Configuration
+#### Backend Configuration
 
 The backend can be configured via environment variables. See [apps/backend/README.md](./apps/backend/README.md) for detailed configuration options.
 
@@ -152,13 +274,13 @@ Default values:
 - `SERVERS_DIR=./servers` - Directory for server configurations
 - `LOGS_DIR=./logs` - Directory for log files
 
-### Frontend Configuration
+#### Frontend Configuration
 
 The frontend connects to the backend API. Update the API endpoint in `apps/webpanel/src/lib/api-client.ts` if your backend runs on a different port or host.
 
-## API Documentation
+### API Documentation
 
-### REST API Endpoints
+#### REST API Endpoints
 
 - `GET /api/servers` - List all servers
 - `GET /api/servers/:id` - Get server details
@@ -172,13 +294,11 @@ The frontend connects to the backend API. Update the API endpoint in `apps/webpa
 - `GET /api/servers/:id/stats` - Get server resource stats
 - `GET /health` - Health check
 
-### WebSocket
+#### WebSocket
 
 Connect to `ws://localhost:3001` (or configured WS_PORT) for real-time updates.
 
 For detailed API documentation, see [apps/backend/README.md](./apps/backend/README.md).
-
-## Development
 
 ### Building
 
@@ -200,13 +320,16 @@ npm run build
 ```bash
 cd apps/backend
 npm test
+# or
+npm run test:dev
 ```
 
-The smoke tests cover core workflows including:
+Tests are run using **tsx** (TypeScript execution) and cover core workflows including:
 - SQLite database operations and server persistence
 - Install state machine with locking and retry logic  
 - WebSocket event emission for real-time progress updates
 - Full workflow integration from server creation to installation
+- Filesystem safety checks
 
 These tests use in-memory databases and mock services to avoid external dependencies and can be run as part of CI/CD pipelines.
 
@@ -218,13 +341,36 @@ cd apps/webpanel
 npm run lint
 ```
 
-## System Service (Linux)
+### System Service (Linux)
 
 The backend can be run as a systemd service. See [apps/backend/README.md](./apps/backend/README.md) for detailed instructions.
 
+## Contributing
+
+Contributions are welcomed and encouraged! Any help fixing bugs, improving features, or enhancing documentation is greatly appreciated.
+
+This project is currently in a test/experimental phase, so there are plenty of opportunities to help improve it. Whether you're fixing bugs, adding features, improving documentation, or suggesting enhancements, your contributions make a difference.
+
+### How to Contribute
+
+1. **Report Issues**: Found a bug or have a suggestion? Please open an issue on GitHub describing the problem or feature request.
+
+2. **Submit Pull Requests**: 
+   - Fork the repository
+   - Create a feature branch (`git checkout -b feature/amazing-feature`)
+   - Make your changes
+   - Ensure code follows existing style and passes tests
+   - Submit a pull request with a clear description of your changes
+
+3. **Improve Documentation**: Help improve this README, code comments, or other documentation to make the project more accessible.
+
+4. **Test on Different Systems**: Since this tool targets multiple Linux distributions, testing on different systems and reporting compatibility issues is valuable.
+
+Thank you for considering contributing to Hypanel!
+
 ## License
 
-MIT
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Additional Documentation
 
