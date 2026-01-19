@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { RotateCcw, Power, RefreshCw, Download } from "lucide-react"
 
 import { Sidebar } from "@/components/sidebar"
@@ -27,6 +28,7 @@ function formatTime(ts: Date | string | number): string {
 }
 
 export default function SettingsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [autoScroll, setAutoScroll] = useState(true)
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([])
   const [journalCursor, setJournalCursor] = useState<string | undefined>(undefined)
@@ -44,6 +46,7 @@ export default function SettingsPage() {
   const [lastSummary, setLastSummary] = useState<SystemActionSummary | null>(null)
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null)
   const [currentVersion, setCurrentVersion] = useState<string | null>(null)
+  const [autoUpdateTriggered, setAutoUpdateTriggered] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const journalCursorRef = useRef<string | undefined>(undefined)
@@ -87,6 +90,44 @@ export default function SettingsPage() {
     }
     loadVersion()
   }, [])
+
+  // Auto-trigger update if ?update=true is in URL
+  useEffect(() => {
+    const shouldAutoUpdate = searchParams.get("update") === "true"
+    
+    if (shouldAutoUpdate && !autoUpdateTriggered && canRunActions) {
+      setAutoUpdateTriggered(true)
+      // Remove the query parameter from URL
+      setSearchParams({})
+      
+      // First check for updates, then start the update process
+      const triggerUpdate = async () => {
+        try {
+          // Check for updates first
+          setCheckUpdateState("running")
+          const result = await apiClient.checkForUpdates(true)
+          setUpdateCheckResult(result)
+          setCheckUpdateState("idle")
+          
+          // If update is available, start the update process (skip confirmation since user clicked "Update Now")
+          if (result.updateAvailable) {
+            // Small delay to let the UI update
+            setTimeout(() => {
+              runUpdateApplication(true)
+            }, 500)
+          } else {
+            setActionError("No update available")
+          }
+        } catch (e) {
+          setCheckUpdateState("idle")
+          setActionError(e instanceof Error ? e.message : "Failed to check for updates")
+        }
+      }
+      
+      triggerUpdate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, autoUpdateTriggered, canRunActions])
 
   useEffect(() => {
     let cancelled = false
@@ -233,10 +274,10 @@ export default function SettingsPage() {
     }
   }
 
-  const runUpdateApplication = async () => {
+  const runUpdateApplication = async (skipConfirmation: boolean = false) => {
     if (!canRunActions) return
     if (!updateCheckResult?.updateAvailable) return
-    if (!window.confirm("This will stop all servers, download and install the update, then restart the service. Continue?")) return
+    if (!skipConfirmation && !window.confirm("This will stop all servers, download and install the update, then restart the service. Continue?")) return
 
     setActionError(null)
     setActionSuccess(null)

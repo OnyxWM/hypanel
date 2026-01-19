@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Download, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/contexts/sidebar-context"
@@ -20,6 +20,7 @@ const navigation = [
 export function Sidebar() {
   const location = useLocation()
   const pathname = location.pathname
+  const navigate = useNavigate()
   const { isOpen, close } = useSidebar()
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null)
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null)
@@ -178,14 +179,27 @@ export function Sidebar() {
                         View release →
                       </a>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleDismissUpdate}
-                      className="h-6 px-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
-                    >
-                      Dismiss
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => {
+                          navigate("/settings?update=true")
+                          close()
+                        }}
+                        className="h-6 px-2 text-xs flex-1"
+                      >
+                        Update Now
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleDismissUpdate}
+                        className="h-6 px-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
                   </div>
                   <Button
                     variant="ghost"
