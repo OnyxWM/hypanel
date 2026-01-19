@@ -448,10 +448,38 @@ export function createSystemRoutes(serverManager) {
                         message: `${HYPANEL_INSTALL_DIR} does not exist. This endpoint is only for production installations.`,
                     });
                 }
+                // Check if filesystem is writable first
+                try {
+                    const testFile = path.join(HYPANEL_INSTALL_DIR, ".hypanel-update-test");
+                    fs.writeFileSync(testFile, "test");
+                    fs.unlinkSync(testFile);
+                }
+                catch (testError) {
+                    return res.status(500).json({
+                        success: false,
+                        error: "Filesystem is read-only",
+                        message: `Cannot write to ${HYPANEL_INSTALL_DIR}. The filesystem may be mounted read-only. Please remount as read-write or check filesystem permissions.`,
+                    });
+                }
                 // Use rsync to copy files, preserving data directories
                 // Exclude data directories and node_modules to preserve existing data
                 // Use sudo since /opt/hypanel is root-owned
-                await execAsync(`sudo rsync -a --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" || sudo cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/"`);
+                // Use --no-owner --no-group to avoid ownership preservation issues
+                // Use --inplace to avoid creating temporary files (helps with some read-only scenarios)
+                try {
+                    await execAsync(`sudo rsync -a --no-owner --no-group --inplace --exclude='data' --exclude='node_modules' "${tempExtract}/" "${HYPANEL_INSTALL_DIR}/" 2>&1`);
+                }
+                catch (rsyncError) {
+                    // If rsync fails, try cp as fallback
+                    console.warn("rsync failed, trying cp fallback:", rsyncError);
+                    try {
+                        await execAsync(`sudo cp -r "${tempExtract}"/* "${HYPANEL_INSTALL_DIR}/" 2>&1`);
+                    }
+                    catch (cpError) {
+                        console.error("Both rsync and cp failed:", cpError);
+                        throw new Error(`Failed to copy files: ${cpError instanceof Error ? cpError.message : String(cpError)}`);
+                    }
+                }
                 // Ensure proper permissions (use sudo for root-owned directory)
                 await execAsync(`sudo chmod -R 644 "${HYPANEL_INSTALL_DIR}"/* 2>/dev/null || true`);
                 await execAsync(`sudo find "${HYPANEL_INSTALL_DIR}" -type d -exec chmod 755 {} \\; 2>/dev/null || true`);
