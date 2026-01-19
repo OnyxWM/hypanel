@@ -112,7 +112,7 @@ install_packages() {
         *)
             warning "Package installation skipped on $OS"
             warning "Please install the following packages manually:"
-            warning "  curl ca-certificates unzip tar jq"
+            warning "  curl ca-certificates unzip tar jq rsync"
             return 0
             ;;
     esac
@@ -128,6 +128,7 @@ install_packages() {
         "jq"
         "build-essential"
         "python3"
+        "rsync"
     )
 
     local missing_packages=()
