@@ -50,6 +50,53 @@ fi
 
 log "Using Node.js: $(node --version)"
 
+# Update version in package.json files
+log "Updating version to v${VERSION} in package.json files..."
+
+# Update root package.json
+if [[ -f "$SCRIPT_DIR/package.json" ]]; then
+    if command -v jq &> /dev/null; then
+        jq --arg version "$VERSION" '.version = $version' "$SCRIPT_DIR/package.json" > "$SCRIPT_DIR/package.json.tmp" && mv "$SCRIPT_DIR/package.json.tmp" "$SCRIPT_DIR/package.json"
+    else
+        # Fallback to sed if jq is not available
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/package.json"
+        else
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/package.json"
+        fi
+    fi
+fi
+
+# Update backend package.json
+if [[ -f "$SCRIPT_DIR/apps/backend/package.json" ]]; then
+    if command -v jq &> /dev/null; then
+        jq --arg version "$VERSION" '.version = $version' "$SCRIPT_DIR/apps/backend/package.json" > "$SCRIPT_DIR/apps/backend/package.json.tmp" && mv "$SCRIPT_DIR/apps/backend/package.json.tmp" "$SCRIPT_DIR/apps/backend/package.json"
+    else
+        # Fallback to sed if jq is not available
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/apps/backend/package.json"
+        else
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/apps/backend/package.json"
+        fi
+    fi
+    log "Updated backend package.json version to ${VERSION}"
+fi
+
+# Update webpanel package.json
+if [[ -f "$SCRIPT_DIR/apps/webpanel/package.json" ]]; then
+    if command -v jq &> /dev/null; then
+        jq --arg version "$VERSION" '.version = $version' "$SCRIPT_DIR/apps/webpanel/package.json" > "$SCRIPT_DIR/apps/webpanel/package.json.tmp" && mv "$SCRIPT_DIR/apps/webpanel/package.json.tmp" "$SCRIPT_DIR/apps/webpanel/package.json"
+    else
+        # Fallback to sed if jq is not available
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/apps/webpanel/package.json"
+        else
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$SCRIPT_DIR/apps/webpanel/package.json"
+        fi
+    fi
+    log "Updated webpanel package.json version to ${VERSION}"
+fi
+
 # Clean previous builds
 log "Cleaning previous builds..."
 rm -rf "$RELEASE_DIR"
