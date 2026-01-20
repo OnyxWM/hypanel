@@ -198,6 +198,14 @@ if [[ ! -f "$TARBALL_PATH" ]]; then
     error "Failed to create tarball"
 fi
 
+# Remove macOS extended attributes from tarball if on macOS
+if [[ "$(uname)" == "Darwin" ]]; then
+    if xattr -l "$TARBALL_PATH" 2>/dev/null | grep -q "com.apple.provenance"; then
+        xattr -d com.apple.provenance "$TARBALL_PATH" 2>/dev/null || true
+        log "Removed macOS extended attribute from tarball"
+    fi
+fi
+
 TARBALL_SIZE=$(du -h "$TARBALL_PATH" | cut -f1)
 log "Tarball created successfully: $TARBALL_NAME ($TARBALL_SIZE)"
 
