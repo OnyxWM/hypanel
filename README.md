@@ -43,7 +43,7 @@ sudo apt-get update && sudo apt-get install -y curl
 
 1. **Run the installation script**:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh | sudo bash
+   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh)" 
    ```
    Or download and run the script manually:
    ```bash
@@ -95,7 +95,7 @@ For external connections outside of your home network, you will need to configur
 To completely remove Hypanel from your system, run the uninstall script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/uninstall.sh | sudo bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/uninstall.sh)"
 ```
 
 Or download and run it manually:
