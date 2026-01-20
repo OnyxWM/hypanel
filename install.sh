@@ -781,6 +781,9 @@ show_completion_info() {
 main() {
     log "Starting hypanel installation script"
     log "Version: $HYPANEL_VERSION"
+    if [[ -n "$CHANNEL" ]]; then
+        log "Channel: $CHANNEL"
+    fi
     
     check_root
     detect_os
