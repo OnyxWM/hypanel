@@ -1833,11 +1833,25 @@ export class ServerManager extends EventEmitter {
       }
 
       logger.info(`Latest version from hytale-downloader: ${latestVersion}, current version: ${currentVersion}`);
-      const updateAvailable = latestVersion !== currentVersion && latestVersion !== "unknown" && currentVersion !== "unknown";
+      
+      // Update version from "unknown" to latest if server is installed
+      let updatedVersion = currentVersion;
+      if (currentVersion === "unknown" && dbServer.installState === "INSTALLED" && latestVersion !== "unknown") {
+        try {
+          await updateServerConfig(serverId, { version: latestVersion });
+          updatedVersion = latestVersion;
+          logger.info(`Updated server ${serverId} version from "unknown" to ${latestVersion} during version check`);
+        } catch (error) {
+          logger.warn(`Failed to update version from "unknown" for server ${serverId}: ${error instanceof Error ? error.message : String(error)}`);
+          // Continue with "unknown" version - don't fail the check
+        }
+      }
+      
+      const updateAvailable = latestVersion !== updatedVersion && latestVersion !== "unknown" && updatedVersion !== "unknown";
       
       return {
         updateAvailable,
-        currentVersion,
+        currentVersion: updatedVersion,
         latestVersion
       };
     } catch (error) {
