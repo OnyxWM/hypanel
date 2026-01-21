@@ -41,6 +41,29 @@ interface UpdateCheckCache {
 let updateCheckCache: UpdateCheckCache | null = null;
 const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
+/**
+ * Get the GitHub API URL for checking releases based on the configured channel.
+ * Checks HYPANEL_UPDATE_CHANNEL or CHANNEL environment variables.
+ * @returns Object with the API URL and the channel name used
+ */
+function getGitHubReleaseUrl(): { url: string; channel: string } {
+  const channel = (process.env.HYPANEL_UPDATE_CHANNEL || process.env.CHANNEL || "stable")
+    .toLowerCase()
+    .trim();
+  
+  if (channel === "staging") {
+    return {
+      url: "https://api.github.com/repos/OnyxWm/hypanel/releases/tags/staging",
+      channel: "staging",
+    };
+  }
+  
+  return {
+    url: "https://api.github.com/repos/OnyxWm/hypanel/releases/latest",
+    channel: "stable",
+  };
+}
+
 export function createSystemRoutes(serverManager: ServerManager): Router {
   const router = Router();
 
@@ -228,8 +251,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         return res.json(cachedData);
       }
 
-      // Fetch latest release from GitHub API
-      const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+      // Fetch latest release from GitHub API based on configured channel
+      const { url: githubApiUrl, channel } = getGitHubReleaseUrl();
       
       // Build headers with optional GitHub token
       const headers: Record<string, string> = {
@@ -287,11 +310,14 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
 
           if (response.status === 404) {
             // No releases found
+            const errorMessage = channel === "staging"
+              ? `No staging release found. Please ensure a release with tag 'staging' exists.`
+              : "No releases found";
             const errorData = {
               currentVersion,
               latestVersion: currentVersion,
               updateAvailable: false,
-              error: "No releases found",
+              error: errorMessage,
             };
 
             // Cache 404 for 1 hour
@@ -310,13 +336,13 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         latestRelease = await response.json() as GitHubRelease;
       } catch (error) {
         // Network error or API failure
-        console.error("Failed to fetch latest release from GitHub:", error);
+        console.error(`Failed to fetch ${channel} release from GitHub:`, error);
         
         const errorData = {
           currentVersion,
           latestVersion: currentVersion,
           updateAvailable: false,
-          error: "Failed to check for updates. Please try again later.",
+          error: `Failed to check for ${channel} updates. Please try again later.`,
           rateLimitRemaining,
           rateLimitReset,
         };
@@ -460,8 +486,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       };
 
       // Step 1: Verify an update is available
-      console.log("Checking for available updates...");
-      const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+      const { url: githubApiUrl, channel } = getGitHubReleaseUrl();
+      console.log(`Checking for available ${channel} updates...`);
       
       const headers: Record<string, string> = {
         "Accept": "application/vnd.github+json",
@@ -477,18 +503,21 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       try {
         const response = await fetch(githubApiUrl, { headers });
         if (!response.ok) {
+          const errorMessage = response.status === 404 && channel === "staging"
+            ? `Staging release not found. Please ensure a release with tag 'staging' exists.`
+            : `Failed to fetch ${channel} release info: ${response.status}`;
           return res.status(500).json({
             success: false,
-            error: `Failed to fetch release info: ${response.status}`,
-            message: "Could not check for updates",
+            error: errorMessage,
+            message: `Could not check for ${channel} updates`,
           });
         }
         latestRelease = await response.json() as GitHubRelease;
       } catch (error) {
-        console.error("Failed to fetch latest release:", error);
+        console.error(`Failed to fetch ${channel} release:`, error);
         return res.status(500).json({
           success: false,
-          error: "Failed to fetch latest release from GitHub",
+          error: `Failed to fetch ${channel} release from GitHub`,
           message: error instanceof Error ? error.message : String(error),
         });
       }
@@ -500,11 +529,11 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         return res.status(400).json({
           success: false,
           error: "No update available",
-          message: `Already running latest version: ${currentVersion}`,
+          message: `Already running latest ${channel} version: ${currentVersion}`,
         });
       }
 
-      console.log(`Update available: ${currentVersion} -> ${latestVersion}`);
+      console.log(`${channel.charAt(0).toUpperCase() + channel.slice(1)} update available: ${currentVersion} -> ${latestVersion}`);
 
       // Step 2: Stop all servers
       console.log("Stopping all servers...");

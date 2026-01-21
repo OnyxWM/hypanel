@@ -579,6 +579,7 @@ create_config_files() {
     
     local env_file="$HYPANEL_CONFIG_DIR/hypanel.env"
     if [[ ! -f "$env_file" ]]; then
+        # Create new environment file
         cat > "$env_file" << EOF
 # hypanel Environment Configuration
 NODE_ENV=production
@@ -587,11 +588,37 @@ LOGS_DIR=$HYPANEL_LOG_DIR
 SERVERS_DIR=$HYPANEL_SERVERS_DIR
 DATABASE_PATH=$HYPANEL_INSTALL_DIR/data/hypanel.db
 EOF
+        # Add update channel if CHANNEL is set during installation
+        if [[ -n "$CHANNEL" ]]; then
+            local channel_normalized=$(echo "$CHANNEL" | tr '[:upper:]' '[:lower:]' | xargs)
+            echo "HYPANEL_UPDATE_CHANNEL=$channel_normalized" >> "$env_file"
+            log "Added HYPANEL_UPDATE_CHANNEL=$channel_normalized to environment file"
+        fi
         chmod 640 "$env_file"
         chown root:root "$env_file"
         log "Created environment file: $env_file"
     else
         log "Environment file already exists: $env_file"
+        # Update or add HYPANEL_UPDATE_CHANNEL if CHANNEL is provided during installation
+        if [[ -n "$CHANNEL" ]]; then
+            local channel_normalized=$(echo "$CHANNEL" | tr '[:upper:]' '[:lower:]' | xargs)
+            # Check if HYPANEL_UPDATE_CHANNEL is already set
+            if grep -q "^HYPANEL_UPDATE_CHANNEL=" "$env_file" 2>/dev/null; then
+                # Update existing value
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    # macOS uses different sed syntax
+                    sed -i '' "s|^HYPANEL_UPDATE_CHANNEL=.*|HYPANEL_UPDATE_CHANNEL=$channel_normalized|" "$env_file"
+                else
+                    # Linux sed syntax
+                    sed -i "s|^HYPANEL_UPDATE_CHANNEL=.*|HYPANEL_UPDATE_CHANNEL=$channel_normalized|" "$env_file"
+                fi
+                log "Updated HYPANEL_UPDATE_CHANNEL=$channel_normalized in environment file"
+            else
+                # Add new line
+                echo "HYPANEL_UPDATE_CHANNEL=$channel_normalized" >> "$env_file"
+                log "Added HYPANEL_UPDATE_CHANNEL=$channel_normalized to environment file"
+            fi
+        fi
     fi
 }
 
