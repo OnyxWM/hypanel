@@ -3,6 +3,7 @@
 set -euo pipefail
 
 readonly HYPANEL_VERSION="${HYPANEL_VERSION:-latest}"
+readonly CHANNEL="${CHANNEL:-}"
 readonly HYPANEL_USER="hypanel"
 readonly HYPANEL_HOME="/home/${HYPANEL_USER}"
 readonly HYPANEL_INSTALL_DIR="/opt/hypanel"
@@ -354,23 +355,40 @@ download_and_install_hypanel() {
     # Determine download URL for pre-built release
     local download_url
     if [[ "$HYPANEL_VERSION" == "latest" ]]; then
-        log "Fetching latest release from GitHub..."
-        # Use GitHub API to find the latest release and get the .tar.gz asset
+        # Determine which API endpoint to use based on channel
+        local api_endpoint
+        if [[ "$CHANNEL" == "staging" ]]; then
+            log "Fetching staging release from GitHub..."
+            api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases/tags/staging"
+        else
+            log "Fetching latest release from GitHub..."
+            api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases/latest"
+        fi
+        
+        # Use GitHub API to find the release and get the .tar.gz asset
         local release_info
-        release_info=$(curl -s https://api.github.com/repos/OnyxWm/hypanel/releases/latest)
+        release_info=$(curl -s "$api_endpoint")
         
         if [[ -z "$release_info" ]]; then
-            error "Failed to fetch latest release info from GitHub API. Repository may not be published yet."
+            error "Failed to fetch release info from GitHub API. Repository may not be published yet."
         fi
 
         # Extract the .tar.gz asset URL
         download_url=$(echo "$release_info" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1)
         
         if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
-            error "Failed to find .tar.gz asset in latest release. Please ensure a release with a .tar.gz asset exists."
+            if [[ "$CHANNEL" == "staging" ]]; then
+                error "Failed to find .tar.gz asset in staging release. Please ensure a release with tag 'staging' and a .tar.gz asset exists."
+            else
+                error "Failed to find .tar.gz asset in latest release. Please ensure a release with a .tar.gz asset exists."
+            fi
         fi
         
-        log "Downloading latest release from: $download_url"
+        if [[ "$CHANNEL" == "staging" ]]; then
+            log "Downloading staging release from: $download_url"
+        else
+            log "Downloading latest release from: $download_url"
+        fi
     else
         # Remove 'v' prefix if present
         local version_clean="${HYPANEL_VERSION#v}"
@@ -763,6 +781,9 @@ show_completion_info() {
 main() {
     log "Starting hypanel installation script"
     log "Version: $HYPANEL_VERSION"
+    if [[ -n "$CHANNEL" ]]; then
+        log "Channel: $CHANNEL"
+    fi
     
     check_root
     detect_os

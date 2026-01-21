@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import { EventEmitter } from "events";
 import { logger, logInstallationPhase, logError } from "../logger/Logger.js";
-import { updateServerInstallState, getServer, tryStartInstallation, getAllServers } from "../database/db.js";
+import { updateServerInstallState, getServer, tryStartInstallation, getAllServers, updateServerConfig } from "../database/db.js";
 import { config } from "../config/config.js";
 import path from "path";
 import fs from "fs/promises";
@@ -131,6 +131,88 @@ export class Installer extends EventEmitter {
             }
             // Update database with paths
             await this.updateInstallState(serverId, "INSTALLED", undefined, verification.jarPath, verification.assetsPath);
+            // Get and save the installed version
+            if (!isDev) {
+                try {
+                    const downloaderPath = await this.findDownloader();
+                    if (downloaderPath) {
+                        logger.info(`Getting installed version for server ${serverId}`);
+                        const installedVersion = await new Promise((resolve, reject) => {
+                            const args = ["-print-version", "-skip-update-check"];
+                            if (config.downloaderCredentialsPath) {
+                                args.push("-credentials-path", config.downloaderCredentialsPath);
+                            }
+                            const childProcess = spawn(downloaderPath, args, {
+                                stdio: ["pipe", "pipe", "pipe"],
+                                env: { ...process.env }
+                            });
+                            let stdout = "";
+                            let stderr = "";
+                            let timeoutId = null;
+                            let hasResolved = false;
+                            timeoutId = setTimeout(() => {
+                                if (!hasResolved) {
+                                    hasResolved = true;
+                                    childProcess.kill("SIGTERM");
+                                    setTimeout(() => {
+                                        try {
+                                            childProcess.kill("SIGKILL");
+                                        }
+                                        catch {
+                                            // Ignore errors on force kill
+                                        }
+                                    }, 1000);
+                                    reject(new Error("Version check timed out"));
+                                }
+                            }, 10000);
+                            childProcess.stdout?.on("data", (data) => {
+                                stdout += data.toString();
+                            });
+                            childProcess.stderr?.on("data", (data) => {
+                                stderr += data.toString();
+                            });
+                            childProcess.on("close", (code) => {
+                                if (timeoutId) {
+                                    clearTimeout(timeoutId);
+                                }
+                                if (hasResolved) {
+                                    return;
+                                }
+                                hasResolved = true;
+                                if (code === 0) {
+                                    const version = stdout.trim();
+                                    if (version) {
+                                        resolve(version);
+                                    }
+                                    else {
+                                        reject(new Error(`Empty version returned. stderr: ${stderr || "none"}`));
+                                    }
+                                }
+                                else {
+                                    const errorMsg = stderr || stdout || `Process exited with code ${code}`;
+                                    reject(new Error(`Version check failed: ${errorMsg}`));
+                                }
+                            });
+                            childProcess.on("error", (error) => {
+                                if (timeoutId) {
+                                    clearTimeout(timeoutId);
+                                }
+                                if (!hasResolved) {
+                                    hasResolved = true;
+                                    reject(new Error(`Failed to execute hytale-downloader: ${error.message}`));
+                                }
+                            });
+                        });
+                        // Update server version in database
+                        await updateServerConfig(serverId, { version: installedVersion });
+                        logger.info(`Saved installed version ${installedVersion} for server ${serverId}`);
+                    }
+                }
+                catch (error) {
+                    logger.warn(`Failed to capture version during installation for server ${serverId}: ${error instanceof Error ? error.message : String(error)}`);
+                    // Don't fail installation if version capture fails - installation is still successful
+                }
+            }
             // Installation complete
             this.emitProgress(serverId, {
                 stage: "ready",
