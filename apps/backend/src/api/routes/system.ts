@@ -648,7 +648,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
                                   testFullError.includes("a password is required") || 
                                   testFullError.includes("command not allowed") ||
                                   testFullError.includes("unable to open /run/sudo") || 
-                                  testFullError.includes("terminal is required");
+                                  testFullError.includes("terminal is required") ||
+                                  testFullError.toLowerCase().includes("permission denied");
           
           if (isPasswordError) {
             console.log("Password requirement detected! Returning 401 with requiresPassword: true");
@@ -719,7 +720,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
             // Check if it's a password requirement
             if (remountFullError.includes("password") || remountFullError.includes("Password required") || 
                 remountFullError.includes("a password is required") || remountFullError.includes("command not allowed") ||
-                remountFullError.includes("unable to open /run/sudo") || remountFullError.includes("terminal is required")) {
+                remountFullError.includes("unable to open /run/sudo") || remountFullError.includes("terminal is required") ||
+                remountFullError.toLowerCase().includes("permission denied")) {
               if (!password) {
                 return res.status(401).json({
                   success: false,
