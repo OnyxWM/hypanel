@@ -357,9 +357,11 @@ export class ServerInstance extends EventEmitter {
     handleLogOutput(message, defaultLevel) {
         const lines = message.split("\n").filter((line) => line.trim());
         for (const line of lines) {
+            // Strip ANSI escape codes before processing
+            const cleanedLine = this.stripAnsiCodes(line);
             let level = defaultLevel;
             // Try to parse log level from the message
-            const lowerLine = line.toLowerCase();
+            const lowerLine = cleanedLine.toLowerCase();
             if (lowerLine.includes("error") || lowerLine.includes("exception")) {
                 level = "error";
             }
@@ -370,38 +372,46 @@ export class ServerInstance extends EventEmitter {
             this.checkAuthRequirements(lowerLine);
             // Player tracking is now done exclusively via /who command polling
             // No longer parsing player join/leave events from logs to avoid false positives
-            // Log to file
+            // Log to file (use cleaned line)
             if (level === "error") {
-                this.logger.error(line);
+                this.logger.error(cleanedLine);
             }
             else if (level === "warning") {
-                this.logger.warn(line);
+                this.logger.warn(cleanedLine);
             }
             else {
-                this.logger.info(line);
+                this.logger.info(cleanedLine);
             }
-            // Store in database
+            // Store in database (use cleaned line)
             insertConsoleLog({
                 serverId: this.id,
                 timestamp: new Date(),
                 level,
-                message: line,
+                message: cleanedLine,
             });
-            // Emit log event
+            // Emit log event (use cleaned line)
             this.emit("log", {
                 id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
                 timestamp: new Date(),
                 level,
-                message: line,
+                message: cleanedLine,
             });
         }
     }
     /**
      * Strip ANSI escape codes from a string
+     * Handles all ANSI escape sequences including color codes, cursor movements, etc.
      */
     stripAnsiCodes(str) {
-        // Remove ANSI escape codes: \x1b[...m or \u001b[...m
-        return str.replace(/\u001b\[[0-9;]*m/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+        // Remove ANSI escape codes:
+        // - \u001b[ or \x1b[ followed by optional parameters and a command character
+        // - Common command characters: m (formatting/colors), H (cursor), J (erase), K (erase line), etc.
+        // - Also handles CSI (Control Sequence Introducer) codes
+        return str
+            .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '') // Unicode escape sequences
+            .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') // Hex escape sequences
+            .replace(/\u001b\[[0-9;]*m/g, '') // Unicode formatting codes (backward compatibility)
+            .replace(/\x1b\[[0-9;]*m/g, ''); // Hex formatting codes (backward compatibility)
     }
     /**
      * Parse player join/leave events from log lines

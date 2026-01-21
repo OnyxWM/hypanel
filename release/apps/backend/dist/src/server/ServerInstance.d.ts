@@ -19,6 +19,7 @@ export declare class ServerInstance extends EventEmitter {
     private handleLogOutput;
     /**
      * Strip ANSI escape codes from a string
+     * Handles all ANSI escape sequences including color codes, cursor movements, etc.
      */
     private stripAnsiCodes;
     /**
