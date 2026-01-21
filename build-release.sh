@@ -188,21 +188,33 @@ if [[ -f "$SCRIPT_DIR/package.json" ]]; then
     cp "$SCRIPT_DIR/package.json" "$RELEASE_DIR/"
 fi
 
+# Remove macOS extended attributes from release directory files if on macOS
+if [[ "$(uname)" == "Darwin" ]]; then
+    log "Removing macOS extended attributes from release files..."
+    xattr -rc "$RELEASE_DIR" 2>/dev/null || true
+fi
+
 # Create tarball
 log "Creating tarball: $TARBALL_NAME"
 cd "$SCRIPT_DIR"
-tar -czf "$TARBALL_PATH" -C "$RELEASE_DIR" .
+
+# On macOS, use flags to prevent including extended attributes in the archive
+if [[ "$(uname)" == "Darwin" ]]; then
+    COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -czf "$TARBALL_PATH" -C "$RELEASE_DIR" .
+else
+    tar -czf "$TARBALL_PATH" -C "$RELEASE_DIR" .
+fi
 
 # Verify tarball was created
 if [[ ! -f "$TARBALL_PATH" ]]; then
     error "Failed to create tarball"
 fi
 
-# Remove macOS extended attributes from tarball if on macOS
+# Remove macOS extended attributes from tarball file itself if on macOS
 if [[ "$(uname)" == "Darwin" ]]; then
     if xattr -l "$TARBALL_PATH" 2>/dev/null | grep -q "com.apple.provenance"; then
         xattr -d com.apple.provenance "$TARBALL_PATH" 2>/dev/null || true
-        log "Removed macOS extended attribute from tarball"
+        log "Removed macOS extended attribute from tarball file"
     fi
 fi
 

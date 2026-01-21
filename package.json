@@ -1,6 +1,6 @@
 {
   "name": "hypanel-root",
-  "version": "staging-v0.3.1",
+  "version": "0.3.1",
   "private": true,
   "scripts": {
     "webpanel": "cd apps/webpanel && npm run dev",

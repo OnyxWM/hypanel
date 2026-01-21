@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "staging-v0.3.1",
+  "version": "0.3.1",
   "type": "module",
   "private": true,
   "main": "dist/index.js",
