@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Test-Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Servers", href: "/servers", icon: Server },
   { name: "Console", href: "/console", icon: Terminal },
   { name: "Players", href: "/players", icon: Users },

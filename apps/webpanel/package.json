@@ -1,7 +1,7 @@
 {
   "name": "hypanel",
   "private": true,
-  "version": "0.3.2-staging",
+  "version": "0.3.3-staging",
   "type": "module",
   "scripts": {
     "dev": "vite",

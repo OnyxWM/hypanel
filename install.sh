@@ -358,8 +358,8 @@ download_and_install_hypanel() {
         # Determine which API endpoint to use based on channel
         local api_endpoint
         if [[ "$CHANNEL" == "staging" ]]; then
-            log "Fetching staging release from GitHub..."
-            api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases/tags/staging"
+            log "Fetching latest beta release from GitHub..."
+            api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases?per_page=100"
         else
             log "Fetching latest release from GitHub..."
             api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases/latest"
@@ -373,19 +373,35 @@ download_and_install_hypanel() {
             error "Failed to fetch release info from GitHub API. Repository may not be published yet."
         fi
 
+        # For staging, filter for -beta tags and get the latest
+        if [[ "$CHANNEL" == "staging" ]]; then
+            # Filter releases for tags ending in -beta, exclude drafts, sort by published_at descending
+            release_info=$(echo "$release_info" | jq -r '
+                [.[] | select(.draft == false) | select(.tag_name | endswith("-beta"))] 
+                | sort_by(.published_at) 
+                | reverse 
+                | .[0]
+            ')
+            
+            if [[ -z "$release_info" ]] || [[ "$release_info" == "null" ]]; then
+                error "No beta releases found. Please ensure a release with tag ending in '-beta' exists."
+            fi
+        fi
+
         # Extract the .tar.gz asset URL
         download_url=$(echo "$release_info" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1)
         
         if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
             if [[ "$CHANNEL" == "staging" ]]; then
-                error "Failed to find .tar.gz asset in staging release. Please ensure a release with tag 'staging' and a .tar.gz asset exists."
+                error "Failed to find .tar.gz asset in beta release. Please ensure a release with tag ending in '-beta' and a .tar.gz asset exists."
             else
                 error "Failed to find .tar.gz asset in latest release. Please ensure a release with a .tar.gz asset exists."
             fi
         fi
         
         if [[ "$CHANNEL" == "staging" ]]; then
-            log "Downloading staging release from: $download_url"
+            local beta_tag=$(echo "$release_info" | jq -r '.tag_name // "unknown"')
+            log "Downloading beta release $beta_tag from: $download_url"
         else
             log "Downloading latest release from: $download_url"
         fi
