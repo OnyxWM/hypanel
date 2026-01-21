@@ -14,7 +14,7 @@ const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 /**
  * Get the GitHub API URL for checking releases based on the configured channel.
  * Checks HYPANEL_UPDATE_CHANNEL or CHANNEL environment variables.
- * @returns Object with the API URL and the channel name used
+ * @returns Object with the API URL, channel name, and whether to filter for beta releases
  */
 function getGitHubReleaseUrl() {
     const channel = (process.env.HYPANEL_UPDATE_CHANNEL || process.env.CHANNEL || "stable")
@@ -22,13 +22,15 @@ function getGitHubReleaseUrl() {
         .trim();
     if (channel === "staging") {
         return {
-            url: "https://api.github.com/repos/OnyxWm/hypanel/releases/tags/staging",
+            url: "https://api.github.com/repos/OnyxWm/hypanel/releases?per_page=100",
             channel: "staging",
+            filterBeta: true,
         };
     }
     return {
         url: "https://api.github.com/repos/OnyxWm/hypanel/releases/latest",
         channel: "stable",
+        filterBeta: false,
     };
 }
 export function createSystemRoutes(serverManager) {
@@ -192,7 +194,7 @@ export function createSystemRoutes(serverManager) {
                 return res.json(cachedData);
             }
             // Fetch latest release from GitHub API based on configured channel
-            const { url: githubApiUrl, channel } = getGitHubReleaseUrl();
+            const { url: githubApiUrl, channel, filterBeta } = getGitHubReleaseUrl();
             // Build headers with optional GitHub token
             const headers = {
                 "Accept": "application/vnd.github+json",
@@ -241,7 +243,7 @@ export function createSystemRoutes(serverManager) {
                     if (response.status === 404) {
                         // No releases found
                         const errorMessage = channel === "staging"
-                            ? `No staging release found. Please ensure a release with tag 'staging' exists.`
+                            ? `No beta releases found. Please ensure a release with tag ending in '-beta' exists.`
                             : "No releases found";
                         const errorData = {
                             currentVersion,
@@ -259,7 +261,41 @@ export function createSystemRoutes(serverManager) {
                     }
                     throw new Error(`GitHub API returned ${response.status}`);
                 }
-                latestRelease = await response.json();
+                // For staging, filter releases for -beta tags
+                if (filterBeta) {
+                    const releases = await response.json();
+                    // Filter for releases with tags ending in -beta, exclude drafts
+                    const betaReleases = releases
+                        .filter((release) => {
+                        const tagName = release.tag_name?.toLowerCase() || "";
+                        return tagName.endsWith("-beta") && !release.draft;
+                    })
+                        .sort((a, b) => {
+                        // Sort by published_at descending (most recent first)
+                        const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
+                        const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+                        return dateB - dateA;
+                    });
+                    if (betaReleases.length === 0) {
+                        const errorData = {
+                            currentVersion,
+                            latestVersion: currentVersion,
+                            updateAvailable: false,
+                            error: "No beta releases found. Please ensure a release with tag ending in '-beta' exists.",
+                        };
+                        // Cache 404 for 1 hour
+                        updateCheckCache = {
+                            data: errorData,
+                            timestamp: now,
+                            expiresAt: now + CACHE_DURATION_MS,
+                        };
+                        return res.json(errorData);
+                    }
+                    latestRelease = betaReleases[0];
+                }
+                else {
+                    latestRelease = await response.json();
+                }
             }
             catch (error) {
                 // Network error or API failure
@@ -284,7 +320,7 @@ export function createSystemRoutes(serverManager) {
             const latestVersion = latestRelease.tag_name?.replace(/^v/, "") || latestRelease.tag_name || "";
             const releaseUrl = latestRelease.html_url || `https://github.com/OnyxWm/hypanel/releases/tag/${latestRelease.tag_name}`;
             const releaseNotes = latestRelease.body || "";
-            // Compare versions
+            // Compare versions (handles -beta suffixes properly)
             const comparison = compareVersions(currentVersion, latestVersion);
             const updateAvailable = comparison < 0; // Current version is less than latest
             const responseData = {
@@ -401,7 +437,7 @@ export function createSystemRoutes(serverManager) {
                 }
             };
             // Step 1: Verify an update is available
-            const { url: githubApiUrl, channel } = getGitHubReleaseUrl();
+            const { url: githubApiUrl, channel, filterBeta } = getGitHubReleaseUrl();
             console.log(`Checking for available ${channel} updates...`);
             const headers = {
                 "Accept": "application/vnd.github+json",
@@ -416,7 +452,7 @@ export function createSystemRoutes(serverManager) {
                 const response = await fetch(githubApiUrl, { headers });
                 if (!response.ok) {
                     const errorMessage = response.status === 404 && channel === "staging"
-                        ? `Staging release not found. Please ensure a release with tag 'staging' exists.`
+                        ? `No beta releases found. Please ensure a release with tag ending in '-beta' exists.`
                         : `Failed to fetch ${channel} release info: ${response.status}`;
                     return res.status(500).json({
                         success: false,
@@ -424,7 +460,33 @@ export function createSystemRoutes(serverManager) {
                         message: `Could not check for ${channel} updates`,
                     });
                 }
-                latestRelease = await response.json();
+                // For staging, filter releases for -beta tags
+                if (filterBeta) {
+                    const releases = await response.json();
+                    // Filter for releases with tags ending in -beta, exclude drafts
+                    const betaReleases = releases
+                        .filter((release) => {
+                        const tagName = release.tag_name?.toLowerCase() || "";
+                        return tagName.endsWith("-beta") && !release.draft;
+                    })
+                        .sort((a, b) => {
+                        // Sort by published_at descending (most recent first)
+                        const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
+                        const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+                        return dateB - dateA;
+                    });
+                    if (betaReleases.length === 0) {
+                        return res.status(500).json({
+                            success: false,
+                            error: "No beta releases found. Please ensure a release with tag ending in '-beta' exists.",
+                            message: "Could not find beta release to update to",
+                        });
+                    }
+                    latestRelease = betaReleases[0];
+                }
+                else {
+                    latestRelease = await response.json();
+                }
             }
             catch (error) {
                 console.error(`Failed to fetch ${channel} release:`, error);
