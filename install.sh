@@ -642,9 +642,11 @@ create_systemd_service() {
     log "Creating systemd service"
     
     # Build ReadWritePaths dynamically, only including paths that exist
+    # Include /opt/hypanel itself to allow updates to write files during installation
     local read_write_paths=(
         "$HYPANEL_SERVERS_DIR"
         "$HYPANEL_LOG_DIR"
+        "$HYPANEL_INSTALL_DIR"
         "$HYPANEL_INSTALL_DIR/data"
         "$HYPANEL_INSTALL_DIR/apps/backend/data"
     )

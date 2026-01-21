@@ -677,20 +677,26 @@ export function createSystemRoutes(serverManager) {
                         // Find the mount point - check /opt/hypanel, /opt, or root
                         let mountPoint = null;
                         try {
-                            const mountCheck = await execAsync(`mount | grep " ${HYPANEL_INSTALL_DIR} " || mount | grep " /opt " || mount | grep " / " | head -1`);
-                            const mountLine = mountCheck.stdout.trim();
-                            if (mountLine.includes(` ${HYPANEL_INSTALL_DIR} `)) {
-                                mountPoint = HYPANEL_INSTALL_DIR;
-                            }
-                            else if (mountLine.includes(' /opt ')) {
-                                mountPoint = '/opt';
+                            // Use findmnt to get the actual mount point for /opt/hypanel
+                            const findmntCheck = await execAsync(`findmnt -n -o TARGET "${HYPANEL_INSTALL_DIR}" 2>/dev/null || findmnt -n -o TARGET "/opt" 2>/dev/null || echo ""`);
+                            const foundMountPoint = findmntCheck.stdout.trim();
+                            if (foundMountPoint) {
+                                mountPoint = foundMountPoint;
                             }
                             else {
-                                mountPoint = '/';
+                                // Fallback: check mount output for /opt
+                                const mountCheck = await execAsync(`mount | grep " /opt " | head -1 || mount | grep " / " | head -1`);
+                                const mountLine = mountCheck.stdout.trim();
+                                if (mountLine.includes(' /opt ')) {
+                                    mountPoint = '/opt';
+                                }
+                                else {
+                                    mountPoint = '/';
+                                }
                             }
                         }
                         catch {
-                            // If we can't find the mount, try common mount points
+                            // If we can't find the mount, try /opt first, then root
                             mountPoint = '/opt';
                         }
                         if (mountPoint) {
