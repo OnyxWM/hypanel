@@ -639,7 +639,12 @@ EOF
 }
 
 create_systemd_service() {
-    log "Creating systemd service"
+    # Check if service file already exists
+    if [[ -f "$HYPANEL_SERVICE_FILE" ]]; then
+        log "Updating existing systemd service"
+    else
+        log "Creating systemd service"
+    fi
     
     # Build ReadWritePaths dynamically, only including paths that exist
     # Include /opt/hypanel itself to allow updates to write files during installation
@@ -703,7 +708,11 @@ EOF
     systemctl daemon-reload
     systemctl enable hypanel
     
-    log "systemd service created and enabled"
+    if systemctl is-active --quiet hypanel 2>/dev/null; then
+        log "systemd service updated (service is running, restart to apply changes)"
+    else
+        log "systemd service created/updated and enabled"
+    fi
 }
 
 configure_systemd_integration_permissions() {
