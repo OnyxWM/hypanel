@@ -103,7 +103,9 @@ export function UpdateProgressModal({
               <p className="text-lg font-medium">{config.label}</p>
               {state === "success" && currentVersion && latestVersion && (
                 <p className="text-sm text-muted-foreground">
-                  Updated from {currentVersion} to {latestVersion}
+                  {currentVersion === latestVersion 
+                    ? `Server on latest version (${currentVersion})`
+                    : `Updated from ${currentVersion} to ${latestVersion}`}
                 </p>
               )}
               {state === "error" && error && (
