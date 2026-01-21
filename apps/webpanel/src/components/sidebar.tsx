@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Servers", href: "/servers", icon: Server },
+  { name: "test-Servers", href: "/servers", icon: Server },
   { name: "Console", href: "/console", icon: Terminal },
   { name: "Players", href: "/players", icon: Users },
   { name: "Backups", href: "/backups", icon: HardDrive },
