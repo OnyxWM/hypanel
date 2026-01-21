@@ -15,6 +15,7 @@ interface GitHubRelease {
   tag_name: string;
   html_url: string;
   body: string | null;
+  published_at: string;
   assets?: Array<{
     name: string;
     browser_download_url: string;
@@ -32,6 +33,7 @@ interface UpdateCheckCache {
     rateLimitRemaining?: number;
     rateLimitReset?: number;
     error?: string;
+    publishedAt?: number; // For staging releases: timestamp of when the release was published
   };
   timestamp: number;
   expiresAt: number;
@@ -40,6 +42,31 @@ interface UpdateCheckCache {
 // In-memory cache for GitHub release data
 let updateCheckCache: UpdateCheckCache | null = null;
 const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Get the GitHub API URL for checking releases based on the configured channel.
+ * Checks HYPANEL_UPDATE_CHANNEL or CHANNEL environment variables.
+ * @returns Object with the API URL, channel name, and whether to filter for beta releases
+ */
+function getGitHubReleaseUrl(): { url: string; channel: string; filterBeta: boolean } {
+  const channel = (process.env.HYPANEL_UPDATE_CHANNEL || process.env.CHANNEL || "stable")
+    .toLowerCase()
+    .trim();
+  
+  if (channel === "staging") {
+    return {
+      url: "https://api.github.com/repos/OnyxWm/hypanel/releases?per_page=100",
+      channel: "staging",
+      filterBeta: true,
+    };
+  }
+  
+  return {
+    url: "https://api.github.com/repos/OnyxWm/hypanel/releases/latest",
+    channel: "stable",
+    filterBeta: false,
+  };
+}
 
 export function createSystemRoutes(serverManager: ServerManager): Router {
   const router = Router();
@@ -228,8 +255,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         return res.json(cachedData);
       }
 
-      // Fetch latest release from GitHub API
-      const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+      // Fetch latest release from GitHub API based on configured channel
+      const { url: githubApiUrl, channel, filterBeta } = getGitHubReleaseUrl();
       
       // Build headers with optional GitHub token
       const headers: Record<string, string> = {
@@ -287,11 +314,14 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
 
           if (response.status === 404) {
             // No releases found
+            const errorMessage = channel === "staging"
+              ? `No beta releases found. Please ensure a release with tag ending in '-beta' exists.`
+              : "No releases found";
             const errorData = {
               currentVersion,
               latestVersion: currentVersion,
               updateAvailable: false,
-              error: "No releases found",
+              error: errorMessage,
             };
 
             // Cache 404 for 1 hour
@@ -307,16 +337,54 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
           throw new Error(`GitHub API returned ${response.status}`);
         }
 
-        latestRelease = await response.json() as GitHubRelease;
+        // For staging, filter releases for -beta tags
+        if (filterBeta) {
+          const releases = await response.json() as GitHubRelease[];
+          
+          // Filter for releases with tags ending in -beta, exclude drafts
+          const betaReleases = releases
+            .filter((release) => {
+              const tagName = release.tag_name?.toLowerCase() || "";
+              return tagName.endsWith("-beta") && !(release as any).draft;
+            })
+            .sort((a, b) => {
+              // Sort by published_at descending (most recent first)
+              const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
+              const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+              return dateB - dateA;
+            });
+
+          if (betaReleases.length === 0) {
+            const errorData = {
+              currentVersion,
+              latestVersion: currentVersion,
+              updateAvailable: false,
+              error: "No beta releases found. Please ensure a release with tag ending in '-beta' exists.",
+            };
+
+            // Cache 404 for 1 hour
+            updateCheckCache = {
+              data: errorData,
+              timestamp: now,
+              expiresAt: now + CACHE_DURATION_MS,
+            };
+
+            return res.json(errorData);
+          }
+
+          latestRelease = betaReleases[0]!;
+        } else {
+          latestRelease = await response.json() as GitHubRelease;
+        }
       } catch (error) {
         // Network error or API failure
-        console.error("Failed to fetch latest release from GitHub:", error);
+        console.error(`Failed to fetch ${channel} release from GitHub:`, error);
         
         const errorData = {
           currentVersion,
           latestVersion: currentVersion,
           updateAvailable: false,
-          error: "Failed to check for updates. Please try again later.",
+          error: `Failed to check for ${channel} updates. Please try again later.`,
           rateLimitRemaining,
           rateLimitReset,
         };
@@ -336,7 +404,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       const releaseUrl = latestRelease.html_url || `https://github.com/OnyxWm/hypanel/releases/tag/${latestRelease.tag_name}`;
       const releaseNotes = latestRelease.body || "";
 
-      // Compare versions
+      // Compare versions (handles -beta suffixes properly)
       const comparison = compareVersions(currentVersion, latestVersion);
       const updateAvailable = comparison < 0; // Current version is less than latest
 
@@ -460,8 +528,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       };
 
       // Step 1: Verify an update is available
-      console.log("Checking for available updates...");
-      const githubApiUrl = "https://api.github.com/repos/OnyxWm/hypanel/releases/latest";
+      const { url: githubApiUrl, channel, filterBeta } = getGitHubReleaseUrl();
+      console.log(`Checking for available ${channel} updates...`);
       
       const headers: Record<string, string> = {
         "Accept": "application/vnd.github+json",
@@ -477,18 +545,50 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       try {
         const response = await fetch(githubApiUrl, { headers });
         if (!response.ok) {
+          const errorMessage = response.status === 404 && channel === "staging"
+            ? `No beta releases found. Please ensure a release with tag ending in '-beta' exists.`
+            : `Failed to fetch ${channel} release info: ${response.status}`;
           return res.status(500).json({
             success: false,
-            error: `Failed to fetch release info: ${response.status}`,
-            message: "Could not check for updates",
+            error: errorMessage,
+            message: `Could not check for ${channel} updates`,
           });
         }
-        latestRelease = await response.json() as GitHubRelease;
+
+        // For staging, filter releases for -beta tags
+        if (filterBeta) {
+          const releases = await response.json() as GitHubRelease[];
+          
+          // Filter for releases with tags ending in -beta, exclude drafts
+          const betaReleases = releases
+            .filter((release) => {
+              const tagName = release.tag_name?.toLowerCase() || "";
+              return tagName.endsWith("-beta") && !(release as any).draft;
+            })
+            .sort((a, b) => {
+              // Sort by published_at descending (most recent first)
+              const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
+              const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+              return dateB - dateA;
+            });
+
+          if (betaReleases.length === 0) {
+            return res.status(500).json({
+              success: false,
+              error: "No beta releases found. Please ensure a release with tag ending in '-beta' exists.",
+              message: "Could not find beta release to update to",
+            });
+          }
+
+          latestRelease = betaReleases[0]!;
+        } else {
+          latestRelease = await response.json() as GitHubRelease;
+        }
       } catch (error) {
-        console.error("Failed to fetch latest release:", error);
+        console.error(`Failed to fetch ${channel} release:`, error);
         return res.status(500).json({
           success: false,
-          error: "Failed to fetch latest release from GitHub",
+          error: `Failed to fetch ${channel} release from GitHub`,
           message: error instanceof Error ? error.message : String(error),
         });
       }
@@ -500,11 +600,11 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         return res.status(400).json({
           success: false,
           error: "No update available",
-          message: `Already running latest version: ${currentVersion}`,
+          message: `Already running latest ${channel} version: ${currentVersion}`,
         });
       }
 
-      console.log(`Update available: ${currentVersion} -> ${latestVersion}`);
+      console.log(`${channel.charAt(0).toUpperCase() + channel.slice(1)} update available: ${currentVersion} -> ${latestVersion}`);
 
       // Step 2: Stop all servers
       console.log("Stopping all servers...");
@@ -648,7 +748,8 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
                                   testFullError.includes("a password is required") || 
                                   testFullError.includes("command not allowed") ||
                                   testFullError.includes("unable to open /run/sudo") || 
-                                  testFullError.includes("terminal is required");
+                                  testFullError.includes("terminal is required") ||
+                                  testFullError.toLowerCase().includes("permission denied");
           
           if (isPasswordError) {
             console.log("Password requirement detected! Returning 401 with requiresPassword: true");
@@ -684,17 +785,24 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
             // Find the mount point - check /opt/hypanel, /opt, or root
             let mountPoint = null;
             try {
-              const mountCheck = await execAsync(`mount | grep " ${HYPANEL_INSTALL_DIR} " || mount | grep " /opt " || mount | grep " / " | head -1`);
-              const mountLine = mountCheck.stdout.trim();
-              if (mountLine.includes(` ${HYPANEL_INSTALL_DIR} `)) {
-                mountPoint = HYPANEL_INSTALL_DIR;
-              } else if (mountLine.includes(' /opt ')) {
-                mountPoint = '/opt';
+              // Use findmnt to get the actual mount point for /opt/hypanel
+              const findmntCheck = await execAsync(`findmnt -n -o TARGET "${HYPANEL_INSTALL_DIR}" 2>/dev/null || findmnt -n -o TARGET "/opt" 2>/dev/null || echo ""`);
+              const foundMountPoint = findmntCheck.stdout.trim();
+              
+              if (foundMountPoint) {
+                mountPoint = foundMountPoint;
               } else {
-                mountPoint = '/';
+                // Fallback: check mount output for /opt
+                const mountCheck = await execAsync(`mount | grep " /opt " | head -1 || mount | grep " / " | head -1`);
+                const mountLine = mountCheck.stdout.trim();
+                if (mountLine.includes(' /opt ')) {
+                  mountPoint = '/opt';
+                } else {
+                  mountPoint = '/';
+                }
               }
             } catch {
-              // If we can't find the mount, try common mount points
+              // If we can't find the mount, try /opt first, then root
               mountPoint = '/opt';
             }
             
@@ -717,9 +825,23 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
             const remountFullError = `${remountErrorMsg} ${remountErrorStdout} ${remountErrorStderr}`;
             
             // Check if it's a password requirement
-            if (remountFullError.includes("password") || remountFullError.includes("Password required") || 
-                remountFullError.includes("a password is required") || remountFullError.includes("command not allowed") ||
-                remountFullError.includes("unable to open /run/sudo") || remountFullError.includes("terminal is required")) {
+            // Distinguish between actual sudo password errors and mount operation errors
+            const isActualPasswordError = remountFullError.includes("incorrect password") ||
+                                         remountFullError.includes("sorry") ||
+                                         remountFullError.includes("authentication failure");
+            
+            const isPasswordRequired = remountFullError.includes("password") || 
+                                       remountFullError.includes("Password required") || 
+                                       remountFullError.includes("a password is required") || 
+                                       remountFullError.includes("command not allowed") ||
+                                       remountFullError.includes("unable to open /run/sudo") || 
+                                       remountFullError.includes("terminal is required");
+            
+            // "Permission denied" from mount when password is provided usually means operation is restricted, not password issue
+            const isPermissionDenied = remountFullError.toLowerCase().includes("permission denied");
+            
+            // If we have actual password errors, treat as password issue
+            if (isActualPasswordError) {
               if (!password) {
                 return res.status(401).json({
                   success: false,
@@ -736,6 +858,31 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
                 });
               }
             }
+            
+            // If password required indicators (but not permission denied when password is provided)
+            if (isPasswordRequired && !(isPermissionDenied && password)) {
+              if (!password) {
+                return res.status(401).json({
+                  success: false,
+                  error: "Password required",
+                  message: "Sudo password is required to remount the filesystem as read-write. Please provide your password.",
+                  requiresPassword: true,
+                });
+              }
+            }
+            
+            // Permission denied without password - could be password requirement
+            if (isPermissionDenied && !password) {
+              return res.status(401).json({
+                success: false,
+                error: "Password required",
+                message: "Sudo password is required to remount the filesystem as read-write. Please provide your password.",
+                requiresPassword: true,
+              });
+            }
+            
+            // Permission denied WITH password - operation is restricted, not a password issue
+            // Let it fall through to show the actual filesystem error
           }
         }
 

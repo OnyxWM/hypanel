@@ -358,8 +358,8 @@ download_and_install_hypanel() {
         # Determine which API endpoint to use based on channel
         local api_endpoint
         if [[ "$CHANNEL" == "staging" ]]; then
-            log "Fetching staging release from GitHub..."
-            api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases/tags/staging"
+            log "Fetching latest beta release from GitHub..."
+            api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases?per_page=100"
         else
             log "Fetching latest release from GitHub..."
             api_endpoint="https://api.github.com/repos/OnyxWm/hypanel/releases/latest"
@@ -373,19 +373,35 @@ download_and_install_hypanel() {
             error "Failed to fetch release info from GitHub API. Repository may not be published yet."
         fi
 
+        # For staging, filter for -beta tags and get the latest
+        if [[ "$CHANNEL" == "staging" ]]; then
+            # Filter releases for tags ending in -beta, exclude drafts, sort by published_at descending
+            release_info=$(echo "$release_info" | jq -r '
+                [.[] | select(.draft == false) | select(.tag_name | endswith("-beta"))] 
+                | sort_by(.published_at) 
+                | reverse 
+                | .[0]
+            ')
+            
+            if [[ -z "$release_info" ]] || [[ "$release_info" == "null" ]]; then
+                error "No beta releases found. Please ensure a release with tag ending in '-beta' exists."
+            fi
+        fi
+
         # Extract the .tar.gz asset URL
         download_url=$(echo "$release_info" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n1)
         
         if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
             if [[ "$CHANNEL" == "staging" ]]; then
-                error "Failed to find .tar.gz asset in staging release. Please ensure a release with tag 'staging' and a .tar.gz asset exists."
+                error "Failed to find .tar.gz asset in beta release. Please ensure a release with tag ending in '-beta' and a .tar.gz asset exists."
             else
                 error "Failed to find .tar.gz asset in latest release. Please ensure a release with a .tar.gz asset exists."
             fi
         fi
         
         if [[ "$CHANNEL" == "staging" ]]; then
-            log "Downloading staging release from: $download_url"
+            local beta_tag=$(echo "$release_info" | jq -r '.tag_name // "unknown"')
+            log "Downloading beta release $beta_tag from: $download_url"
         else
             log "Downloading latest release from: $download_url"
         fi
@@ -579,6 +595,7 @@ create_config_files() {
     
     local env_file="$HYPANEL_CONFIG_DIR/hypanel.env"
     if [[ ! -f "$env_file" ]]; then
+        # Create new environment file
         cat > "$env_file" << EOF
 # hypanel Environment Configuration
 NODE_ENV=production
@@ -587,21 +604,54 @@ LOGS_DIR=$HYPANEL_LOG_DIR
 SERVERS_DIR=$HYPANEL_SERVERS_DIR
 DATABASE_PATH=$HYPANEL_INSTALL_DIR/data/hypanel.db
 EOF
+        # Add update channel if CHANNEL is set during installation
+        if [[ -n "$CHANNEL" ]]; then
+            local channel_normalized=$(echo "$CHANNEL" | tr '[:upper:]' '[:lower:]' | xargs)
+            echo "HYPANEL_UPDATE_CHANNEL=$channel_normalized" >> "$env_file"
+            log "Added HYPANEL_UPDATE_CHANNEL=$channel_normalized to environment file"
+        fi
         chmod 640 "$env_file"
         chown root:root "$env_file"
         log "Created environment file: $env_file"
     else
         log "Environment file already exists: $env_file"
+        # Update or add HYPANEL_UPDATE_CHANNEL if CHANNEL is provided during installation
+        if [[ -n "$CHANNEL" ]]; then
+            local channel_normalized=$(echo "$CHANNEL" | tr '[:upper:]' '[:lower:]' | xargs)
+            # Check if HYPANEL_UPDATE_CHANNEL is already set
+            if grep -q "^HYPANEL_UPDATE_CHANNEL=" "$env_file" 2>/dev/null; then
+                # Update existing value
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    # macOS uses different sed syntax
+                    sed -i '' "s|^HYPANEL_UPDATE_CHANNEL=.*|HYPANEL_UPDATE_CHANNEL=$channel_normalized|" "$env_file"
+                else
+                    # Linux sed syntax
+                    sed -i "s|^HYPANEL_UPDATE_CHANNEL=.*|HYPANEL_UPDATE_CHANNEL=$channel_normalized|" "$env_file"
+                fi
+                log "Updated HYPANEL_UPDATE_CHANNEL=$channel_normalized in environment file"
+            else
+                # Add new line
+                echo "HYPANEL_UPDATE_CHANNEL=$channel_normalized" >> "$env_file"
+                log "Added HYPANEL_UPDATE_CHANNEL=$channel_normalized to environment file"
+            fi
+        fi
     fi
 }
 
 create_systemd_service() {
-    log "Creating systemd service"
+    # Check if service file already exists
+    if [[ -f "$HYPANEL_SERVICE_FILE" ]]; then
+        log "Updating existing systemd service"
+    else
+        log "Creating systemd service"
+    fi
     
     # Build ReadWritePaths dynamically, only including paths that exist
+    # Include /opt/hypanel itself to allow updates to write files during installation
     local read_write_paths=(
         "$HYPANEL_SERVERS_DIR"
         "$HYPANEL_LOG_DIR"
+        "$HYPANEL_INSTALL_DIR"
         "$HYPANEL_INSTALL_DIR/data"
         "$HYPANEL_INSTALL_DIR/apps/backend/data"
     )
@@ -658,7 +708,11 @@ EOF
     systemctl daemon-reload
     systemctl enable hypanel
     
-    log "systemd service created and enabled"
+    if systemctl is-active --quiet hypanel 2>/dev/null; then
+        log "systemd service updated (service is running, restart to apply changes)"
+    else
+        log "systemd service created/updated and enabled"
+    fi
 }
 
 configure_systemd_integration_permissions() {

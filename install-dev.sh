@@ -293,7 +293,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=/home/hypanel /home/hypanel/hytale /var/log/hypanel /opt/hypanel/data /opt/hypanel/apps/backend/data /run/faillock
+ReadWritePaths=/home/hypanel /home/hypanel/hytale /var/log/hypanel /opt/hypanel /opt/hypanel/data /opt/hypanel/apps/backend/data /run/faillock
 
 [Install]
 WantedBy=multi-user.target

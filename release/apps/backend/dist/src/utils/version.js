@@ -31,14 +31,23 @@ export function getCurrentVersion() {
 }
 /**
  * Compare two version strings (simple comparison, assumes semantic versioning)
+ * Handles pre-release suffixes like -beta, -alpha, etc.
  * Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal
  */
 export function compareVersions(v1, v2) {
     // Remove 'v' prefix if present
     const cleanV1 = v1.replace(/^v/, "");
     const cleanV2 = v2.replace(/^v/, "");
-    const parts1 = cleanV1.split(".").map(Number);
-    const parts2 = cleanV2.split(".").map(Number);
+    // Split version into base and suffix (e.g., "0.3.2-beta" -> ["0.3.2", "-beta"])
+    const splitV1 = cleanV1.split(/-/);
+    const splitV2 = cleanV2.split(/-/);
+    const baseV1 = splitV1[0] || cleanV1;
+    const baseV2 = splitV2[0] || cleanV2;
+    const suffixV1 = splitV1.length > 1 ? splitV1.slice(1).join("-") : null;
+    const suffixV2 = splitV2.length > 1 ? splitV2.slice(1).join("-") : null;
+    // Compare base versions
+    const parts1 = baseV1.split(".").map(Number);
+    const parts2 = baseV2.split(".").map(Number);
     // Pad shorter version with zeros
     const maxLength = Math.max(parts1.length, parts2.length);
     while (parts1.length < maxLength)
@@ -50,6 +59,19 @@ export function compareVersions(v1, v2) {
             return 1;
         if (parts1[i] < parts2[i])
             return -1;
+    }
+    // Base versions are equal, compare suffixes
+    // Version without suffix > version with suffix (e.g., "0.3.2" > "0.3.2-beta")
+    if (suffixV1 === null && suffixV2 !== null)
+        return 1;
+    if (suffixV1 !== null && suffixV2 === null)
+        return -1;
+    // Both have suffixes - if same suffix, they're equal
+    if (suffixV1 === suffixV2)
+        return 0;
+    // Different suffixes - compare alphabetically
+    if (suffixV1 && suffixV2) {
+        return suffixV1 > suffixV2 ? 1 : -1;
     }
     return 0;
 }

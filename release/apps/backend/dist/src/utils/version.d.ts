@@ -4,6 +4,7 @@
 export declare function getCurrentVersion(): string;
 /**
  * Compare two version strings (simple comparison, assumes semantic versioning)
+ * Handles pre-release suffixes like -beta, -alpha, etc.
  * Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal
  */
 export declare function compareVersions(v1: string, v2: string): number;
