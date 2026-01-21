@@ -818,10 +818,23 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
             const remountFullError = `${remountErrorMsg} ${remountErrorStdout} ${remountErrorStderr}`;
             
             // Check if it's a password requirement
-            if (remountFullError.includes("password") || remountFullError.includes("Password required") || 
-                remountFullError.includes("a password is required") || remountFullError.includes("command not allowed") ||
-                remountFullError.includes("unable to open /run/sudo") || remountFullError.includes("terminal is required") ||
-                remountFullError.toLowerCase().includes("permission denied")) {
+            // Distinguish between actual sudo password errors and mount operation errors
+            const isActualPasswordError = remountFullError.includes("incorrect password") ||
+                                         remountFullError.includes("sorry") ||
+                                         remountFullError.includes("authentication failure");
+            
+            const isPasswordRequired = remountFullError.includes("password") || 
+                                       remountFullError.includes("Password required") || 
+                                       remountFullError.includes("a password is required") || 
+                                       remountFullError.includes("command not allowed") ||
+                                       remountFullError.includes("unable to open /run/sudo") || 
+                                       remountFullError.includes("terminal is required");
+            
+            // "Permission denied" from mount when password is provided usually means operation is restricted, not password issue
+            const isPermissionDenied = remountFullError.toLowerCase().includes("permission denied");
+            
+            // If we have actual password errors, treat as password issue
+            if (isActualPasswordError) {
               if (!password) {
                 return res.status(401).json({
                   success: false,
@@ -838,6 +851,31 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
                 });
               }
             }
+            
+            // If password required indicators (but not permission denied when password is provided)
+            if (isPasswordRequired && !(isPermissionDenied && password)) {
+              if (!password) {
+                return res.status(401).json({
+                  success: false,
+                  error: "Password required",
+                  message: "Sudo password is required to remount the filesystem as read-write. Please provide your password.",
+                  requiresPassword: true,
+                });
+              }
+            }
+            
+            // Permission denied without password - could be password requirement
+            if (isPermissionDenied && !password) {
+              return res.status(401).json({
+                success: false,
+                error: "Password required",
+                message: "Sudo password is required to remount the filesystem as read-write. Please provide your password.",
+                requiresPassword: true,
+              });
+            }
+            
+            // Permission denied WITH password - operation is restricted, not a password issue
+            // Let it fall through to show the actual filesystem error
           }
         }
 
