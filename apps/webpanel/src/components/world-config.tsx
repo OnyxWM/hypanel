@@ -37,6 +37,15 @@ interface SpawnProvider {
   SpawnProvider?: SpawnProvider
 }
 
+interface Death {
+  RespawnController?: {
+    Type?: "HomeOrSpawnPoint"
+  }
+  ItemsLossMode?: "None" | "All" | "Configured"
+  ItemsAmountLossPercentage?: number
+  ItemsDurabilityLossPercentage?: number
+}
+
 interface WorldConfig {
   UUID?: string
   DisplayName?: string | null
@@ -54,7 +63,7 @@ interface WorldConfig {
   IsUnloadingChunks?: boolean
   GameplayConfig?: string
   GameMode?: string | null
-  Death?: Record<string, any> | null
+  Death?: Death | null
   DaytimeDurationSeconds?: number | null
   NighttimeDurationSeconds?: number | null
   ClientEffects?: {
@@ -120,6 +129,33 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
     }
   }
 
+  const sanitizeValue = (value: any): any => {
+    // Handle NaN
+    if (typeof value === "number" && isNaN(value)) {
+      return null
+    }
+    // Handle arrays
+    if (Array.isArray(value)) {
+      const sanitized = value.map(sanitizeValue).filter(v => v !== undefined)
+      return sanitized.length > 0 ? sanitized : undefined
+    }
+    // Handle objects
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const sanitized: any = {}
+      let hasValues = false
+      for (const [key, val] of Object.entries(value)) {
+        const cleaned = sanitizeValue(val)
+        if (cleaned !== undefined) {
+          sanitized[key] = cleaned
+          hasValues = true
+        }
+      }
+      return hasValues ? sanitized : undefined
+    }
+    // Return value as-is (including null)
+    return value
+  }
+
   const handleSave = async () => {
     if (!config) return
 
@@ -128,51 +164,90 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
       setError(null)
       setSuccess(null)
 
-      // Send all editable fields
-      const updateData: any = {
-        UUID: config.UUID,
-        DisplayName: config.DisplayName,
-        Version: config.Version,
-        IsTicking: config.IsTicking,
-        IsBlockTicking: config.IsBlockTicking,
-        IsPvpEnabled: config.IsPvpEnabled,
-        IsFallDamageEnabled: config.IsFallDamageEnabled,
-        IsGameTimePaused: config.IsGameTimePaused,
-        GameTime: config.GameTime,
-        ForcedWeather: config.ForcedWeather,
-        IsSpawningNPC: config.IsSpawningNPC,
-        Seed: config.Seed,
-        SaveNewChunks: config.SaveNewChunks,
-        IsUnloadingChunks: config.IsUnloadingChunks,
-        GameplayConfig: config.GameplayConfig,
-        GameMode: config.GameMode,
-        Death: config.Death,
-        DaytimeDurationSeconds: config.DaytimeDurationSeconds,
-        NighttimeDurationSeconds: config.NighttimeDurationSeconds,
-        ClientEffects: config.ClientEffects,
-        IsSavingPlayers: config.IsSavingPlayers,
-        IsSavingChunks: config.IsSavingChunks,
-        IsSpawnMarkersEnabled: config.IsSpawnMarkersEnabled,
-        IsAllNPCFrozen: config.IsAllNPCFrozen,
-        IsCompassUpdating: config.IsCompassUpdating,
-        IsObjectiveMarkersEnabled: config.IsObjectiveMarkersEnabled,
-        DeleteOnUniverseStart: config.DeleteOnUniverseStart,
-        DeleteOnRemove: config.DeleteOnRemove,
-        ResourceStorage: config.ResourceStorage,
-        WorldGen: config.WorldGen,
-        WorldMap: config.WorldMap,
-        ChunkStorage: config.ChunkStorage,
-        ChunkConfig: config.ChunkConfig,
-        SpawnProvider: config.SpawnProvider,
+      // Send all editable fields - only include fields that are defined
+      const updateData: any = {}
+      
+      // Helper to add field only if it's defined
+      const addIfDefined = (key: string, value: any) => {
+        if (value !== undefined) {
+          updateData[key] = value
+        }
       }
 
-      await apiClient.updateWorldConfig(serverId, world, updateData)
+      // Skip UUID - it's auto-generated and read-only, and may be in MongoDB Binary format
+      // addIfDefined("UUID", config.UUID)
+      addIfDefined("DisplayName", config.DisplayName)
+      addIfDefined("Version", config.Version)
+      addIfDefined("IsTicking", config.IsTicking)
+      addIfDefined("IsBlockTicking", config.IsBlockTicking)
+      addIfDefined("IsPvpEnabled", config.IsPvpEnabled)
+      addIfDefined("IsFallDamageEnabled", config.IsFallDamageEnabled)
+      addIfDefined("IsGameTimePaused", config.IsGameTimePaused)
+      addIfDefined("GameTime", config.GameTime)
+      addIfDefined("ForcedWeather", config.ForcedWeather)
+      addIfDefined("IsSpawningNPC", config.IsSpawningNPC)
+      addIfDefined("Seed", config.Seed)
+      addIfDefined("SaveNewChunks", config.SaveNewChunks)
+      addIfDefined("IsUnloadingChunks", config.IsUnloadingChunks)
+      addIfDefined("GameplayConfig", config.GameplayConfig)
+      addIfDefined("GameMode", config.GameMode)
+      addIfDefined("Death", config.Death)
+      addIfDefined("DaytimeDurationSeconds", config.DaytimeDurationSeconds)
+      addIfDefined("NighttimeDurationSeconds", config.NighttimeDurationSeconds)
+      addIfDefined("ClientEffects", config.ClientEffects)
+      addIfDefined("IsSavingPlayers", config.IsSavingPlayers)
+      addIfDefined("IsSavingChunks", config.IsSavingChunks)
+      addIfDefined("IsSpawnMarkersEnabled", config.IsSpawnMarkersEnabled)
+      addIfDefined("IsAllNPCFrozen", config.IsAllNPCFrozen)
+      addIfDefined("IsCompassUpdating", config.IsCompassUpdating)
+      addIfDefined("IsObjectiveMarkersEnabled", config.IsObjectiveMarkersEnabled)
+      addIfDefined("DeleteOnUniverseStart", config.DeleteOnUniverseStart)
+      addIfDefined("DeleteOnRemove", config.DeleteOnRemove)
+      addIfDefined("ResourceStorage", config.ResourceStorage)
+      addIfDefined("WorldGen", config.WorldGen)
+      addIfDefined("WorldMap", config.WorldMap)
+      addIfDefined("ChunkStorage", config.ChunkStorage)
+      addIfDefined("ChunkConfig", config.ChunkConfig)
+      addIfDefined("SpawnProvider", config.SpawnProvider)
+
+      // Sanitize the data to remove NaN values
+      const sanitizedData = sanitizeValue(updateData)
+
+      // Remove undefined values to avoid validation issues
+      const cleanedData = Object.fromEntries(
+        Object.entries(sanitizedData).filter(([_, value]) => value !== undefined)
+      )
+
+      console.log("Sending world config update:", cleanedData)
+      await apiClient.updateWorldConfig(serverId, world, cleanedData)
       setSuccess("World config updated successfully")
       
       // Reload config to get latest state
       await loadConfig()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save world config")
+      console.error("World config save error:", err)
+      let errorMessage = "Failed to save world config"
+      if (err instanceof Error) {
+        errorMessage = err.message
+        // Check if there are validation details in the error
+        const errorObj = err as any
+        if (errorObj.details) {
+          try {
+            const details = Array.isArray(errorObj.details) 
+              ? errorObj.details.map((d: any) => {
+                  const path = Array.isArray(d.path) ? d.path.join('.') : d.path || 'unknown'
+                  return `${path}: ${d.message}`
+                }).join('; ')
+              : JSON.stringify(errorObj.details)
+            errorMessage = `Validation error: ${details}`
+            console.error("Validation details:", errorObj.details)
+          } catch {
+            // If we can't parse details, use the message as-is
+            errorMessage = `Validation error: ${err.message}`
+          }
+        }
+      }
+      setError(errorMessage)
     } finally {
       setIsSaving(false)
     }
@@ -221,6 +296,46 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
   const handleSpawnProviderChange = (value: SpawnProvider | null) => {
     if (!config) return
     setConfig({ ...config, SpawnProvider: value })
+  }
+
+  const getDefaultDeath = (): Death => ({
+    RespawnController: {
+      Type: "HomeOrSpawnPoint"
+    },
+    ItemsLossMode: "Configured",
+    ItemsAmountLossPercentage: 10.0,
+    ItemsDurabilityLossPercentage: 10.0
+  })
+
+  const handleDeathChange = (value: Death | null) => {
+    if (!config) return
+    setConfig({ ...config, Death: value })
+  }
+
+  const handleDeathNestedChange = (field: string, value: any) => {
+    if (!config) return
+    const currentDeath = config.Death || getDefaultDeath()
+    setConfig({
+      ...config,
+      Death: {
+        ...currentDeath,
+        [field]: value,
+      },
+    })
+  }
+
+  const handleDeathRespawnControllerChange = (value: "HomeOrSpawnPoint") => {
+    if (!config) return
+    const currentDeath = config.Death || getDefaultDeath()
+    setConfig({
+      ...config,
+      Death: {
+        ...currentDeath,
+        RespawnController: {
+          Type: value,
+        },
+      },
+    })
   }
 
   const handleSpawnPointChange = (
@@ -309,7 +424,26 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
             <div className="space-y-2">
               <Label>UUID</Label>
               <Input
-                value={config.UUID || ""}
+                value={(() => {
+                  if (!config.UUID) return ""
+                  // Handle MongoDB Binary format
+                  if (typeof config.UUID === "object" && (config.UUID as any).$binary) {
+                    try {
+                      // Decode base64 binary to hex (browser-compatible)
+                      const binary = (config.UUID as any).$binary
+                      const binaryString = atob(binary)
+                      let hex = ""
+                      for (let i = 0; i < binaryString.length; i++) {
+                        const char = binaryString.charCodeAt(i).toString(16).padStart(2, "0")
+                        hex += char
+                      }
+                      return hex
+                    } catch {
+                      return "Binary UUID"
+                    }
+                  }
+                  return String(config.UUID)
+                })()}
                 disabled
                 className="bg-muted"
                 placeholder="Auto-generated"
@@ -632,15 +766,15 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                 <div className="space-y-2">
                   <Label>Game Mode</Label>
                   <Select
-                    value={config.GameMode || ""}
-                    onValueChange={(value) => handleInputChange("GameMode", value === "" ? null : value)}
+                    value={config.GameMode || "__inherit__"}
+                    onValueChange={(value) => handleInputChange("GameMode", value === "__inherit__" ? null : value)}
                     disabled={!canEdit}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Inherits from server" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Inherit from server</SelectItem>
+                      <SelectItem value="__inherit__">Inherit from server</SelectItem>
                       <SelectItem value="Adventure">Adventure</SelectItem>
                       <SelectItem value="Creative">Creative</SelectItem>
                     </SelectContent>
@@ -660,39 +794,122 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   <Input
                     type="number"
                     value={config.DaytimeDurationSeconds ?? ""}
-                    onChange={(e) => handleInputChange("DaytimeDurationSeconds", e.target.value ? parseInt(e.target.value) : null)}
+                    onChange={(e) => {
+                      const value = e.target.value.trim()
+                      if (value === "") {
+                        handleInputChange("DaytimeDurationSeconds", null)
+                      } else {
+                        const parsed = parseInt(value, 10)
+                        handleInputChange("DaytimeDurationSeconds", isNaN(parsed) ? null : parsed)
+                      }
+                    }}
                     disabled={!canEdit}
-                    placeholder="Override daytime duration"
+                    placeholder="600 (default)"
                   />
+                  <p className="text-xs text-muted-foreground">Default: 600 seconds</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Nighttime Duration (seconds)</Label>
                   <Input
                     type="number"
                     value={config.NighttimeDurationSeconds ?? ""}
-                    onChange={(e) => handleInputChange("NighttimeDurationSeconds", e.target.value ? parseInt(e.target.value) : null)}
-                    disabled={!canEdit}
-                    placeholder="Override nighttime duration"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Death Configuration (JSON)</Label>
-                  <textarea
-                    value={config.Death ? JSON.stringify(config.Death, null, 2) : ""}
                     onChange={(e) => {
-                      try {
-                        const parsed = e.target.value ? JSON.parse(e.target.value) : null
-                        handleInputChange("Death", parsed)
-                      } catch {
-                        // Invalid JSON, ignore
+                      const value = e.target.value.trim()
+                      if (value === "") {
+                        handleInputChange("NighttimeDurationSeconds", null)
+                      } else {
+                        const parsed = parseInt(value, 10)
+                        handleInputChange("NighttimeDurationSeconds", isNaN(parsed) ? null : parsed)
                       }
                     }}
                     disabled={!canEdit}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[100px]"
-                    placeholder="{}"
+                    placeholder="300 (default)"
                   />
-                  <p className="text-xs text-muted-foreground">Inline death configuration overrides (takes precedence over GameplayConfig)</p>
+                  <p className="text-xs text-muted-foreground">Default: 300 seconds</p>
                 </div>
+              </div>
+            </div>
+
+            {/* Death */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Death</h4>
+              <div className="space-y-4 pl-4 border-l-2">
+                <div className="space-y-2">
+                  <Label>Respawn Controller Type</Label>
+                  <Select
+                    value={config.Death?.RespawnController?.Type || "HomeOrSpawnPoint"}
+                    onValueChange={(value) => {
+                      if (!config.Death) {
+                        handleDeathChange(getDefaultDeath())
+                      }
+                      handleDeathRespawnControllerChange(value as "HomeOrSpawnPoint")
+                    }}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="HomeOrSpawnPoint" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="HomeOrSpawnPoint">HomeOrSpawnPoint</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Items Loss Mode</Label>
+                  <Select
+                    value={config.Death?.ItemsLossMode || "Configured"}
+                    onValueChange={(value) => {
+                      handleDeathNestedChange("ItemsLossMode", value as "None" | "All" | "Configured")
+                    }}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Configured" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="None">None - Item loss is disabled</SelectItem>
+                      <SelectItem value="All">All - All items are dropped</SelectItem>
+                      <SelectItem value="Configured">Configured - Item loss is set manually</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Sets the death penalty mode</p>
+                </div>
+                {config.Death?.ItemsLossMode === "Configured" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Items Amount Loss Percentage</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={config.Death?.ItemsAmountLossPercentage ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value.trim()
+                          const parsed = value === "" ? undefined : parseFloat(value)
+                          handleDeathNestedChange("ItemsAmountLossPercentage", isNaN(parsed as number) ? undefined : parsed)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="10.0"
+                      />
+                      <p className="text-xs text-muted-foreground">Sets how many items are lost on death</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Items Durability Loss Percentage</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={config.Death?.ItemsDurabilityLossPercentage ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value.trim()
+                          const parsed = value === "" ? undefined : parseFloat(value)
+                          handleDeathNestedChange("ItemsDurabilityLossPercentage", isNaN(parsed as number) ? undefined : parsed)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="10.0"
+                      />
+                      <p className="text-xs text-muted-foreground">Sets how much item durability is lowered on death</p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -913,9 +1130,9 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
             <div className="space-y-2">
               <Label>Spawn Provider Type</Label>
               <Select
-                value={config.SpawnProvider?.Type || ""}
+                value={config.SpawnProvider?.Type || "__none__"}
                 onValueChange={(value) => {
-                  if (value === "") {
+                  if (value === "__none__") {
                     handleSpawnProviderChange(null)
                   } else {
                     const newProvider: SpawnProvider = { Type: value as "Global" | "Individual" | "FitToHeightMap" }
@@ -935,7 +1152,7 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="__none__">None</SelectItem>
                   <SelectItem value="Global">Global</SelectItem>
                   <SelectItem value="Individual">Individual</SelectItem>
                   <SelectItem value="FitToHeightMap">FitToHeightMap</SelectItem>
