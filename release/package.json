@@ -1,6 +1,6 @@
 {
   "name": "hypanel-root",
-  "version": "0.3.4-beta",
+  "version": "0.3.4",
   "private": true,
   "scripts": {
     "webpanel": "cd apps/webpanel && npm run dev",
