@@ -141,7 +141,23 @@ const hytaleConfigSchema = z.object({
         Path: z.string().optional(),
     }).optional(),
 }).partial();
+const box2DSchema = z.object({
+    Min: z.array(z.number()).length(2).optional(),
+    Max: z.array(z.number()).length(2).optional(),
+}).optional().nullable();
+const spawnPointSchema = z.object({
+    Position: z.array(z.number()).length(3).optional(),
+    Rotation: z.array(z.number()).length(3).optional(),
+}).optional();
+const spawnProviderSchema = z.lazy(() => z.object({
+    Type: z.enum(["Global", "Individual", "FitToHeightMap"]).optional(),
+    SpawnPoint: spawnPointSchema.optional(),
+    SpawnPoints: z.array(spawnPointSchema).optional(),
+    SpawnProvider: spawnProviderSchema.optional(),
+}).optional().nullable());
 const worldConfigSchema = z.object({
+    UUID: z.string().optional(),
+    DisplayName: z.string().nullable().optional(),
     Version: z.number().int().optional(),
     IsTicking: z.boolean().optional(),
     IsBlockTicking: z.boolean().optional(),
@@ -149,11 +165,16 @@ const worldConfigSchema = z.object({
     IsFallDamageEnabled: z.boolean().optional(),
     IsGameTimePaused: z.boolean().optional(),
     GameTime: z.string().optional(),
+    ForcedWeather: z.string().nullable().optional(),
     IsSpawningNPC: z.boolean().optional(),
     Seed: z.number().int().optional(),
     SaveNewChunks: z.boolean().optional(),
     IsUnloadingChunks: z.boolean().optional(),
     GameplayConfig: z.string().optional(),
+    GameMode: z.string().nullable().optional(),
+    Death: z.record(z.any()).nullable().optional(),
+    DaytimeDurationSeconds: z.number().int().nullable().optional(),
+    NighttimeDurationSeconds: z.number().int().nullable().optional(),
     ClientEffects: z.object({
         SunHeightPercent: z.number().optional(),
         SunAngleDegrees: z.number().optional(),
@@ -177,6 +198,7 @@ const worldConfigSchema = z.object({
     WorldGen: z.object({
         Type: z.string(),
         Name: z.string().optional(),
+        Path: z.string().optional(),
     }).optional(),
     WorldMap: z.object({
         Type: z.string(),
@@ -184,7 +206,11 @@ const worldConfigSchema = z.object({
     ChunkStorage: z.object({
         Type: z.string(),
     }).optional(),
-    ChunkConfig: z.record(z.any()).optional(),
+    ChunkConfig: z.object({
+        PregenerateRegion: box2DSchema,
+        KeepLoadedRegion: box2DSchema,
+    }).optional(),
+    SpawnProvider: spawnProviderSchema,
 }).partial();
 const worldNameSchema = z.object({
     world: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, "World name can only contain letters, numbers, underscores, and hyphens"),
