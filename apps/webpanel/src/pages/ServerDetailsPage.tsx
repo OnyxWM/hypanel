@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react"
+import type { WorldConfigRef } from "@/components/world-config"
 import { useLocation, useNavigate, useParams, useSearchParams, Link } from "react-router-dom"
-import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key, RefreshCw, Upload, Trash2, Users, Cpu, HardDrive, Clock, Download } from "lucide-react"
+import { ArrowLeft, Play, Square, RotateCcw, Settings, Copy, Key, RefreshCw, Upload, Trash2, Users, Cpu, HardDrive, Clock, Download, Save } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { StatsCard } from "@/components/stats-card"
@@ -8,7 +9,6 @@ import { ResourceChart } from "@/components/resource-chart"
 import { ServerConsole } from "@/components/server-console"
 import { ServerConfig } from "@/components/server-config"
 import { ServerSettings } from "@/components/server-settings"
-import { WorldList } from "@/components/world-list"
 import { WorldConfig } from "@/components/world-config"
 import { AuthGuidance } from "@/components/auth-guidance"
 import { PlayerList } from "@/components/player-list"
@@ -40,7 +40,10 @@ export default function ServerDetailsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null)
+  const [worlds, setWorlds] = useState<string[]>([])
+  const [isWorldConfigSaving, setIsWorldConfigSaving] = useState(false)
   const modFileInputRef = useRef<HTMLInputElement | null>(null)
+  const worldConfigRef = useRef<WorldConfigRef>(null)
   const [updateModalOpen, setUpdateModalOpen] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateProgressState>("checking")
   const [updateError, setUpdateError] = useState<string | undefined>(undefined)
@@ -65,6 +68,22 @@ export default function ServerDetailsPage() {
     }
   }
 
+  const loadWorlds = async () => {
+    if (!id) return
+    try {
+      const data = await apiClient.getWorlds(id)
+      setWorlds(data)
+      // Auto-select first world (prefer "default" if it exists)
+      if (data.length > 0) {
+        const defaultWorld = data.find(w => w === "default") || data[0]
+        setSelectedWorld((prev) => prev || defaultWorld)
+      }
+    } catch (err) {
+      // Silently fail - worlds might not exist yet
+      console.error("Failed to load worlds:", err)
+    }
+  }
+
   useEffect(() => {
     if (!id) return
 
@@ -73,6 +92,7 @@ export default function ServerDetailsPage() {
     loadStats()
     loadPlayers()
     loadMods()
+    loadWorlds()
 
     // Set up WebSocket for real-time updates
     wsClient.connect()
@@ -700,35 +720,74 @@ export default function ServerDetailsPage() {
             </TabsContent>
 
             <TabsContent value="worlds" className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="lg:col-span-1">
-                  <WorldList 
-                    serverId={server.id}
-                    onWorldSelect={setSelectedWorld}
-                    selectedWorld={selectedWorld || undefined}
-                  />
+              {/* Worlds Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-medium">Worlds</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Configure world settings for your server
+                  </p>
                 </div>
-                <div className="lg:col-span-2">
-                  {selectedWorld ? (
+                {selectedWorld && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={async () => {
+                        try {
+                          await worldConfigRef.current?.save()
+                        } catch (err) {
+                          console.error("Failed to save world config:", err)
+                        }
+                      }}
+                      disabled={isWorldConfigSaving || (server.status !== "offline" && server.status !== "stopping")}
+                      className="flex items-center gap-2"
+                    >
+                      {isWorldConfigSaving ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" />
+                          Save Config
+                        </>
+                      )}
+                    </Button>
+                    <Button 
+                      onClick={() => worldConfigRef.current?.reload()} 
+                      variant="outline" 
+                      disabled={isWorldConfigSaving}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reload
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* World Tabs */}
+              {selectedWorld ? (
+                <Tabs value={selectedWorld} onValueChange={setSelectedWorld}>
+                  <TabsList>
+                    {worlds.map((world) => (
+                      <TabsTrigger key={world} value={world}>{world}</TabsTrigger>
+                    ))}
+                  </TabsList>
+                  <TabsContent value={selectedWorld} className="mt-4">
                     <WorldConfig 
+                      ref={worldConfigRef}
                       serverId={server.id}
                       serverStatus={server.status}
                       world={selectedWorld}
+                      onSavingChange={setIsWorldConfigSaving}
                     />
-                  ) : (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">World Configuration</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-center py-8">
-                          <p className="text-muted-foreground">Select a world from the list to view and edit its configuration</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <div className="flex items-center justify-center py-12">
+                  <p className="text-muted-foreground">No worlds available</p>
                 </div>
-              </div>
+              )}
             </TabsContent>
 
             <TabsContent value="mods">

@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react"
-import { Save, RefreshCw, AlertCircle, Plus, Trash2 } from "lucide-react"
+import { useState, useEffect, forwardRef, useImperativeHandle, useCallback } from "react"
+import { AlertCircle, CheckCircle, Plus, Trash2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -18,6 +18,14 @@ interface WorldConfigProps {
   serverId: string
   serverStatus: string
   world: string
+  onSavingChange?: (isSaving: boolean) => void
+}
+
+export interface WorldConfigRef {
+  save: () => Promise<void>
+  reload: () => Promise<void>
+  isSaving: boolean
+  canEdit: boolean
 }
 
 interface Box2D {
@@ -104,30 +112,36 @@ interface WorldConfig {
   SpawnProvider?: SpawnProvider | null
 }
 
-export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps) {
+export const WorldConfig = forwardRef<WorldConfigRef, WorldConfigProps>(({ serverId, serverStatus, world, onSavingChange }, ref) => {
   const [config, setConfig] = useState<WorldConfig | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadConfig()
-  }, [serverId, world])
-
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async (preserveSuccess = false, showLoading = true) => {
     try {
-      setIsLoading(true)
+      if (showLoading) {
+        setIsLoading(true)
+      }
       setError(null)
-      setSuccess(null)
+      if (!preserveSuccess) {
+        setSuccess(null)
+      }
       const data = await apiClient.getWorldConfig(serverId, world)
       setConfig(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load world config")
     } finally {
-      setIsLoading(false)
+      if (showLoading) {
+        setIsLoading(false)
+      }
     }
-  }
+  }, [serverId, world])
+
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
 
   const sanitizeValue = (value: any): any => {
     // Handle NaN
@@ -156,11 +170,12 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
     return value
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!config) return
 
     try {
       setIsSaving(true)
+      if (onSavingChange) onSavingChange(true)
       setError(null)
       setSuccess(null)
 
@@ -220,10 +235,12 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
 
       console.log("Sending world config update:", cleanedData)
       await apiClient.updateWorldConfig(serverId, world, cleanedData)
-      setSuccess("World config updated successfully")
       
-      // Reload config to get latest state
-      await loadConfig()
+      // Reload config to get latest state (preserve success message, don't show loading)
+      await loadConfig(true, false)
+      
+      // Set success message after reload so it doesn't get cleared
+      setSuccess("World config saved successfully")
     } catch (err) {
       console.error("World config save error:", err)
       let errorMessage = "Failed to save world config"
@@ -250,8 +267,9 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
       setError(errorMessage)
     } finally {
       setIsSaving(false)
+      if (onSavingChange) onSavingChange(false)
     }
-  }
+  }, [config, serverId, world, onSavingChange, loadConfig])
 
   const handleInputChange = (field: string, value: any) => {
     if (!config) return
@@ -353,37 +371,33 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
 
   const canEdit = serverStatus === "offline" || serverStatus === "stopping"
 
+  // Expose handlers via ref
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    reload: loadConfig,
+    get isSaving() { return isSaving },
+    get canEdit() { return canEdit },
+  }), [isSaving, canEdit, serverStatus, handleSave, loadConfig])
+
   if (isLoading) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">World Config: {world}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <p className="text-sm text-muted-foreground">Loading world config...</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center py-8">
+        <p className="text-sm text-muted-foreground">Loading world config...</p>
+      </div>
     )
   }
 
   if (!config) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">World Config: {world}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 py-4 text-destructive">
-            <AlertCircle className="h-4 w-4" />
-            <p className="text-sm">World config not found</p>
-          </div>
-          <Button onClick={loadConfig} variant="outline" size="sm">
-            Retry
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center gap-4 py-8">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertCircle className="h-4 w-4" />
+          <p className="text-sm">World config not found</p>
+        </div>
+        <Button onClick={() => loadConfig()} variant="outline" size="sm">
+          Retry
+        </Button>
+      </div>
     )
   }
 
@@ -408,13 +422,14 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
       )}
 
       {success && (
-        <Alert className="border-green-200 bg-green-50 text-green-800">
+        <Alert variant="success">
+          <CheckCircle className="h-4 w-4" />
           <AlertDescription>{success}</AlertDescription>
         </Alert>
       )}
 
       {/* Config form */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-4">
         {/* 1. World Identity */}
         <Card>
           <CardHeader>
@@ -913,41 +928,7 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
               </div>
             </div>
 
-            {/* Time & Weather */}
-            <div>
-              <h4 className="text-sm font-semibold mb-3">Time & Weather</h4>
-              <div className="space-y-4 pl-4 border-l-2">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={config.IsGameTimePaused || false}
-                    onChange={(e) => handleInputChange("IsGameTimePaused", e.target.checked)}
-                    disabled={!canEdit}
-                    className="rounded border-gray-300"
-                  />
-                  <Label>Game Time Paused</Label>
-                </div>
-                <div className="space-y-2">
-                  <Label>Game Time (ISO-8601)</Label>
-                  <Input
-                    value={config.GameTime || ""}
-                    onChange={(e) => handleInputChange("GameTime", e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="1970-01-01T05:30:00Z"
-                  />
-                  <p className="text-xs text-muted-foreground">Current time of day (default: 5:30 AM)</p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Forced Weather</Label>
-                  <Input
-                    value={config.ForcedWeather || ""}
-                    onChange={(e) => handleInputChange("ForcedWeather", e.target.value || null)}
-                    disabled={!canEdit}
-                    placeholder="Force specific weather type"
-                  />
-                </div>
-              </div>
-            </div>
+
           </CardContent>
         </Card>
 
@@ -1029,8 +1010,46 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                 />
               </div>
             </div>
+
+            {/* Time & Weather */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Time & Weather</h4>
+              <div className="space-y-4 pl-4 border-l-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={config.IsGameTimePaused || false}
+                    onChange={(e) => handleInputChange("IsGameTimePaused", e.target.checked)}
+                    disabled={!canEdit}
+                    className="rounded border-gray-300"
+                  />
+                  <Label>Game Time Paused</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label>Game Time (ISO-8601)</Label>
+                  <Input
+                    value={config.GameTime || ""}
+                    onChange={(e) => handleInputChange("GameTime", e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="1970-01-01T05:30:00Z"
+                  />
+                  <p className="text-xs text-muted-foreground">Current time of day (default: 5:30 AM)</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Forced Weather</Label>
+                  <Input
+                    value={config.ForcedWeather || ""}
+                    onChange={(e) => handleInputChange("ForcedWeather", e.target.value || null)}
+                    disabled={!canEdit}
+                    placeholder="Force specific weather type"
+                  />
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
+
+        
 
         {/* 6. Tick Settings */}
         <Card>
@@ -1613,32 +1632,11 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
             </Alert>
           </CardContent>
         </Card>
+
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={handleSave}
-          disabled={isSaving || !canEdit}
-          className="flex items-center gap-2"
-        >
-          {isSaving ? (
-            <>
-              <RefreshCw className="h-4 w-4 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <Save className="h-4 w-4" />
-              Save Config
-            </>
-          )}
-        </Button>
-        <Button onClick={loadConfig} variant="outline" disabled={isSaving}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Reload
-        </Button>
-      </div>
     </div>
   )
-}
+})
+
+WorldConfig.displayName = "WorldConfig"
