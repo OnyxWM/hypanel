@@ -2,7 +2,7 @@
   <img src="apps/webpanel/public/newlogo.png" alt="Hypanel Logo" width="200">
 </div>
 
-# Hypanel
+# Hypanel - Self-Hosted Hytale Server Manager 
 
 A Linux server manager tool for Hytale servers that allows you to create, install, update, and delete Hytale servers in a web GUI. Manage your servers with ease through a modern web interface.
 

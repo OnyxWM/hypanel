@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.3.5-beta",
+  "version": "0.3.5",
   "type": "module",
   "private": true,
   "main": "dist/index.js",
