@@ -469,6 +469,8 @@ export class ServerManager extends EventEmitter {
     bindAddress?: string;
     autostart?: boolean;
     backupEnabled?: boolean;
+    backupFrequency?: number;
+    backupMaxCount?: number;
     aotCacheEnabled?: boolean;
   }>): Promise<Server> {
     logConfigOperation(id, "validation", "Starting server config update");
@@ -913,6 +915,8 @@ export class ServerManager extends EventEmitter {
     let maxMemory = dbServer.maxMemory || 0;
     let maxPlayers = dbServer.maxPlayers || 0;
     let backupEnabled: boolean | undefined = undefined;
+    let backupFrequency: number | undefined = undefined;
+    let backupMaxCount: number | undefined = undefined;
     let aotCacheEnabled: boolean | undefined = undefined;
     if (!instance) {
       try {
@@ -924,6 +928,8 @@ export class ServerManager extends EventEmitter {
           maxMemory = config.maxMemory || 0;
           maxPlayers = config.maxPlayers || 0;
           backupEnabled = config.backupEnabled;
+          backupFrequency = config.backupFrequency;
+          backupMaxCount = config.backupMaxCount;
           aotCacheEnabled = config.aotCacheEnabled;
         }
       } catch (error) {
@@ -940,6 +946,8 @@ export class ServerManager extends EventEmitter {
         maxMemory,
         maxPlayers: hytaleMaxPlayers ?? maxPlayers,
         backupEnabled,
+        backupFrequency,
+        backupMaxCount,
         aotCacheEnabled,
         uptime: 0,
         // Replace "0.0.0.0" with actual server IP for display
@@ -962,6 +970,8 @@ export class ServerManager extends EventEmitter {
       maxMemory: config.maxMemory,
       maxPlayers: hytaleMaxPlayers ?? config.maxPlayers,
       backupEnabled: config.backupEnabled,
+      backupFrequency: config.backupFrequency,
+      backupMaxCount: config.backupMaxCount,
       aotCacheEnabled: config.aotCacheEnabled,
       uptime,
       // Clear stats if server is offline

@@ -34,6 +34,8 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
   const [ramGb, setRamGb] = useState(4)
   const [port, setPort] = useState(5520)
   const [backupEnabled, setBackupEnabled] = useState(true)
+  const [backupFrequency, setBackupFrequency] = useState(30)
+  const [backupMaxCount, setBackupMaxCount] = useState(5)
   const [aotCacheEnabled, setAotCacheEnabled] = useState(false)
 
   const [isLoading, setIsLoading] = useState(true)
@@ -54,6 +56,8 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
       setRamGb(mbToGbRounded(s.maxMemory))
       setPort(s.port || 5520)
       setBackupEnabled(s.backupEnabled ?? true)
+      setBackupFrequency(s.backupFrequency ?? 30)
+      setBackupMaxCount(s.backupMaxCount ?? 5)
       setAotCacheEnabled(s.aotCacheEnabled ?? false)
       setSuccess(false)
     } catch (err) {
@@ -74,15 +78,19 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
     const nextMaxMemory = gbToMb(ramGb)
     const nextPort = port
     const nextBackupEnabled = backupEnabled
+    const nextBackupFrequency = backupFrequency
+    const nextBackupMaxCount = backupMaxCount
     const nextAotCacheEnabled = aotCacheEnabled
     return (
       nextName !== original.name ||
       nextMaxMemory !== original.maxMemory ||
       nextPort !== original.port ||
       nextBackupEnabled !== (original.backupEnabled ?? true) ||
+      nextBackupFrequency !== (original.backupFrequency ?? 30) ||
+      nextBackupMaxCount !== (original.backupMaxCount ?? 5) ||
       nextAotCacheEnabled !== (original.aotCacheEnabled ?? false)
     )
-  }, [original, title, ramGb, port, backupEnabled, aotCacheEnabled])
+  }, [original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled])
 
   const handleReset = () => {
     if (!original) return
@@ -90,6 +98,8 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
     setRamGb(mbToGbRounded(original.maxMemory))
     setPort(original.port || 5520)
     setBackupEnabled(original.backupEnabled ?? true)
+    setBackupFrequency(original.backupFrequency ?? 30)
+    setBackupMaxCount(original.backupMaxCount ?? 5)
     setAotCacheEnabled(original.aotCacheEnabled ?? false)
     setError(null)
     setSuccess(false)
@@ -108,6 +118,8 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
         maxMemory: gbToMb(ramGb),
         port,
         backupEnabled,
+        backupFrequency,
+        backupMaxCount,
         aotCacheEnabled,
       })
 
@@ -268,6 +280,32 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
                 Enable backups
               </Label>
             </div>
+            {backupEnabled && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="backupFrequency">Backup Frequency (minutes)</Label>
+                  <Input
+                    id="backupFrequency"
+                    type="number"
+                    min={1}
+                    value={backupFrequency}
+                    onChange={(e) => setBackupFrequency(Math.max(1, parseInt(e.target.value) || 30))}
+                    disabled={!canEdit}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="backupMaxCount">Max Backups Stored</Label>
+                  <Input
+                    id="backupMaxCount"
+                    type="number"
+                    min={1}
+                    value={backupMaxCount}
+                    onChange={(e) => setBackupMaxCount(Math.max(1, parseInt(e.target.value) || 5))}
+                    disabled={!canEdit}
+                  />
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 

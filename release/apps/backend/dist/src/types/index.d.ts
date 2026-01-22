@@ -11,6 +11,8 @@ export interface Server {
     maxMemory: number;
     autostart?: boolean;
     backupEnabled?: boolean;
+    backupFrequency?: number;
+    backupMaxCount?: number;
     aotCacheEnabled?: boolean;
     uptime: number;
     ip: string;
@@ -47,6 +49,8 @@ export interface ServerConfig {
     identityToken?: string;
     bindAddress?: string;
     backupEnabled?: boolean;
+    backupFrequency?: number;
+    backupMaxCount?: number;
     aotCacheEnabled?: boolean;
 }
 export interface ServerStats {

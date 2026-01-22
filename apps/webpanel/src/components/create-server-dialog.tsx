@@ -23,6 +23,8 @@ interface CreateServerDialogProps {
     maxMemory: number
     port?: number
     backupEnabled?: boolean
+    backupFrequency?: number
+    backupMaxCount?: number
     aotCacheEnabled?: boolean
   }) => Promise<void>
 }
@@ -33,6 +35,8 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
   const [maxMemory, setMaxMemory] = useState(4)
   const [port, setPort] = useState(5520)
   const [backupEnabled, setBackupEnabled] = useState(true)
+  const [backupFrequency, setBackupFrequency] = useState(30)
+  const [backupMaxCount, setBackupMaxCount] = useState(5)
   const [aotCacheEnabled, setAotCacheEnabled] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -45,6 +49,8 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
         maxMemory,
         port,
         backupEnabled,
+        backupFrequency,
+        backupMaxCount,
         aotCacheEnabled,
       })
       setOpen(false)
@@ -52,6 +58,8 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
       setMaxMemory(4)
       setPort(5520)
       setBackupEnabled(true)
+      setBackupFrequency(30)
+      setBackupMaxCount(5)
       setAotCacheEnabled(true)
     } finally {
       setIsLoading(false)
@@ -114,6 +122,32 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
                 Enable Backups
               </Label>
             </div>
+            {backupEnabled && (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="backupFrequency">Backup Frequency (minutes)</Label>
+                  <Input
+                    id="backupFrequency"
+                    type="number"
+                    min={1}
+                    value={backupFrequency}
+                    onChange={(e) => setBackupFrequency(Math.max(1, parseInt(e.target.value) || 30))}
+                    className="bg-secondary/50 backdrop-blur-sm border-border/50"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="backupMaxCount">Max Backups Stored</Label>
+                  <Input
+                    id="backupMaxCount"
+                    type="number"
+                    min={1}
+                    value={backupMaxCount}
+                    onChange={(e) => setBackupMaxCount(Math.max(1, parseInt(e.target.value) || 5))}
+                    className="bg-secondary/50 backdrop-blur-sm border-border/50"
+                  />
+                </div>
+              </>
+            )}
             <div className="flex items-center space-x-2">
               <Checkbox
                 id="aotCacheEnabled"

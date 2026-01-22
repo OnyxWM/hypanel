@@ -148,6 +148,8 @@ export default function ServersPage() {
     maxMemory: number
     port?: number
     backupEnabled?: boolean
+    backupFrequency?: number
+    backupMaxCount?: number
     aotCacheEnabled?: boolean
   }) => {
     const serverPath = `hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
@@ -163,6 +165,8 @@ export default function ServersPage() {
         bindAddress: "0.0.0.0",
         ip: "0.0.0.0",
         backupEnabled: data.backupEnabled,
+        backupFrequency: data.backupFrequency,
+        backupMaxCount: data.backupMaxCount,
         aotCacheEnabled: data.aotCacheEnabled,
       })
       setServers((prev) => [...prev, newServer])

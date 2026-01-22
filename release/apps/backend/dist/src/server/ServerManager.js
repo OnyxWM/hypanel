@@ -776,6 +776,8 @@ export class ServerManager extends EventEmitter {
         let maxMemory = dbServer.maxMemory || 0;
         let maxPlayers = dbServer.maxPlayers || 0;
         let backupEnabled = undefined;
+        let backupFrequency = undefined;
+        let backupMaxCount = undefined;
         let aotCacheEnabled = undefined;
         if (!instance) {
             try {
@@ -787,6 +789,8 @@ export class ServerManager extends EventEmitter {
                     maxMemory = config.maxMemory || 0;
                     maxPlayers = config.maxPlayers || 0;
                     backupEnabled = config.backupEnabled;
+                    backupFrequency = config.backupFrequency;
+                    backupMaxCount = config.backupMaxCount;
                     aotCacheEnabled = config.aotCacheEnabled;
                 }
             }
@@ -803,6 +807,8 @@ export class ServerManager extends EventEmitter {
                 maxMemory,
                 maxPlayers: hytaleMaxPlayers ?? maxPlayers,
                 backupEnabled,
+                backupFrequency,
+                backupMaxCount,
                 aotCacheEnabled,
                 uptime: 0,
                 // Replace "0.0.0.0" with actual server IP for display
@@ -822,6 +828,8 @@ export class ServerManager extends EventEmitter {
             maxMemory: config.maxMemory,
             maxPlayers: hytaleMaxPlayers ?? config.maxPlayers,
             backupEnabled: config.backupEnabled,
+            backupFrequency: config.backupFrequency,
+            backupMaxCount: config.backupMaxCount,
             aotCacheEnabled: config.aotCacheEnabled,
             uptime,
             // Clear stats if server is offline

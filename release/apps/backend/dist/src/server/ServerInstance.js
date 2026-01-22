@@ -148,9 +148,11 @@ export class ServerInstance extends EventEmitter {
                 this.logger.warn(`Failed to ensure backup directory exists (${serverBackupDir}): ${e instanceof Error ? e.message : String(e)}`);
             }
             args.push("--backup-dir", serverBackupDir);
-            // Add --backup flag only if backups are enabled
+            // Add --backup flag and backup settings only if backups are enabled
             if (this.config.backupEnabled === true) {
                 args.push("--backup");
+                args.push("--backup-frequency", String(this.config.backupFrequency ?? 30));
+                args.push("--backup-max-count", String(this.config.backupMaxCount ?? 5));
             }
             // Add optional session tokens
             if (this.config.sessionToken) {
