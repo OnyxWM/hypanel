@@ -13,6 +13,8 @@ export interface Server {
   maxMemory: number
   autostart?: boolean
   backupEnabled?: boolean
+  backupFrequency?: number
+  backupMaxCount?: number
   aotCacheEnabled?: boolean
   uptime: number
   ip: string

@@ -141,6 +141,8 @@ export class ApiClient {
     identityToken?: string
     bindAddress?: string
     backupEnabled?: boolean
+    backupFrequency?: number
+    backupMaxCount?: number
     aotCacheEnabled?: boolean
   }): Promise<Server> {
     return this.request<Server>("/api/servers", {
@@ -171,6 +173,8 @@ export class ApiClient {
       identityToken?: string
       bindAddress?: string
       backupEnabled?: boolean
+      backupFrequency?: number
+      backupMaxCount?: number
       aotCacheEnabled?: boolean
     }>
   ): Promise<Server> {

@@ -195,9 +195,11 @@ export class ServerInstance extends EventEmitter {
 
       args.push("--backup-dir", serverBackupDir);
       
-      // Add --backup flag only if backups are enabled
+      // Add --backup flag and backup settings only if backups are enabled
       if (this.config.backupEnabled === true) {
         args.push("--backup");
+        args.push("--backup-frequency", String(this.config.backupFrequency ?? 30));
+        args.push("--backup-max-count", String(this.config.backupMaxCount ?? 5));
       }
       
       // Add optional session tokens
