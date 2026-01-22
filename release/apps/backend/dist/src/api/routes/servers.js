@@ -103,6 +103,8 @@ const createServerSchema = z.object({
     bindAddress: z.string().default("0.0.0.0"),
     autostart: z.boolean().default(false),
     backupEnabled: z.boolean().default(true),
+    backupFrequency: z.number().int().positive().default(30).optional(),
+    backupMaxCount: z.number().int().positive().default(5).optional(),
     aotCacheEnabled: z.boolean().default(false),
 });
 const serverIdSchema = z.object({

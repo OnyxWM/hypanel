@@ -31,6 +31,8 @@ export declare class ServerManager extends EventEmitter {
         bindAddress?: string;
         autostart?: boolean;
         backupEnabled?: boolean;
+        backupFrequency?: number;
+        backupMaxCount?: number;
         aotCacheEnabled?: boolean;
     }>): Promise<Server>;
     deleteServer(id: string): Promise<void>;
