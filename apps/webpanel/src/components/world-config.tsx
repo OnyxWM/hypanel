@@ -1,19 +1,62 @@
-import { useState, useEffect } from "react"
-import { Save, RefreshCw, AlertCircle } from "lucide-react"
+import { useState, useEffect, forwardRef, useImperativeHandle, useCallback } from "react"
+import { AlertCircle, CheckCircle, Plus, Trash2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { apiClient } from "@/lib/api-client"
 
 interface WorldConfigProps {
   serverId: string
   serverStatus: string
   world: string
+  onSavingChange?: (isSaving: boolean) => void
+}
+
+export interface WorldConfigRef {
+  save: () => Promise<void>
+  reload: () => Promise<void>
+  isSaving: boolean
+  canEdit: boolean
+}
+
+interface Box2D {
+  Min?: [number, number]
+  Max?: [number, number]
+}
+
+interface SpawnPoint {
+  Position?: [number, number, number]
+  Rotation?: [number, number, number]
+}
+
+interface SpawnProvider {
+  Type?: "Global" | "Individual" | "FitToHeightMap"
+  SpawnPoint?: SpawnPoint
+  SpawnPoints?: SpawnPoint[]
+  SpawnProvider?: SpawnProvider
+}
+
+interface Death {
+  RespawnController?: {
+    Type?: "HomeOrSpawnPoint"
+  }
+  ItemsLossMode?: "None" | "All" | "Configured"
+  ItemsAmountLossPercentage?: number
+  ItemsDurabilityLossPercentage?: number
 }
 
 interface WorldConfig {
+  UUID?: string
+  DisplayName?: string | null
   Version?: number
   IsTicking?: boolean
   IsBlockTicking?: boolean
@@ -21,11 +64,16 @@ interface WorldConfig {
   IsFallDamageEnabled?: boolean
   IsGameTimePaused?: boolean
   GameTime?: string
+  ForcedWeather?: string | null
   IsSpawningNPC?: boolean
   Seed?: number
   SaveNewChunks?: boolean
   IsUnloadingChunks?: boolean
   GameplayConfig?: string
+  GameMode?: string | null
+  Death?: Death | null
+  DaytimeDurationSeconds?: number | null
+  NighttimeDurationSeconds?: number | null
   ClientEffects?: {
     SunHeightPercent?: number
     SunAngleDegrees?: number
@@ -49,6 +97,7 @@ interface WorldConfig {
   WorldGen?: {
     Type?: string
     Name?: string
+    Path?: string
   }
   WorldMap?: {
     Type?: string
@@ -56,83 +105,171 @@ interface WorldConfig {
   ChunkStorage?: {
     Type?: string
   }
-  ChunkConfig?: Record<string, any>
+  ChunkConfig?: {
+    PregenerateRegion?: Box2D | null
+    KeepLoadedRegion?: Box2D | null
+  }
+  SpawnProvider?: SpawnProvider | null
 }
 
-export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps) {
+export const WorldConfig = forwardRef<WorldConfigRef, WorldConfigProps>(({ serverId, serverStatus, world, onSavingChange }, ref) => {
   const [config, setConfig] = useState<WorldConfig | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadConfig()
-  }, [serverId, world])
-
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async (preserveSuccess = false, showLoading = true) => {
     try {
-      setIsLoading(true)
+      if (showLoading) {
+        setIsLoading(true)
+      }
       setError(null)
-      setSuccess(null)
+      if (!preserveSuccess) {
+        setSuccess(null)
+      }
       const data = await apiClient.getWorldConfig(serverId, world)
       setConfig(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load world config")
     } finally {
-      setIsLoading(false)
+      if (showLoading) {
+        setIsLoading(false)
+      }
     }
+  }, [serverId, world])
+
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
+
+  const sanitizeValue = (value: any): any => {
+    // Handle NaN
+    if (typeof value === "number" && isNaN(value)) {
+      return null
+    }
+    // Handle arrays
+    if (Array.isArray(value)) {
+      const sanitized = value.map(sanitizeValue).filter(v => v !== undefined)
+      return sanitized.length > 0 ? sanitized : undefined
+    }
+    // Handle objects
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const sanitized: any = {}
+      let hasValues = false
+      for (const [key, val] of Object.entries(value)) {
+        const cleaned = sanitizeValue(val)
+        if (cleaned !== undefined) {
+          sanitized[key] = cleaned
+          hasValues = true
+        }
+      }
+      return hasValues ? sanitized : undefined
+    }
+    // Return value as-is (including null)
+    return value
   }
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!config) return
 
     try {
       setIsSaving(true)
+      if (onSavingChange) onSavingChange(true)
       setError(null)
       setSuccess(null)
 
-      // Send all editable fields
-      const updateData: any = {
-        Version: config.Version,
-        IsTicking: config.IsTicking,
-        IsBlockTicking: config.IsBlockTicking,
-        IsPvpEnabled: config.IsPvpEnabled,
-        IsFallDamageEnabled: config.IsFallDamageEnabled,
-        IsGameTimePaused: config.IsGameTimePaused,
-        GameTime: config.GameTime,
-        IsSpawningNPC: config.IsSpawningNPC,
-        Seed: config.Seed,
-        SaveNewChunks: config.SaveNewChunks,
-        IsUnloadingChunks: config.IsUnloadingChunks,
-        GameplayConfig: config.GameplayConfig,
-        ClientEffects: config.ClientEffects,
-        IsSavingPlayers: config.IsSavingPlayers,
-        IsSavingChunks: config.IsSavingChunks,
-        IsSpawnMarkersEnabled: config.IsSpawnMarkersEnabled,
-        IsAllNPCFrozen: config.IsAllNPCFrozen,
-        IsCompassUpdating: config.IsCompassUpdating,
-        IsObjectiveMarkersEnabled: config.IsObjectiveMarkersEnabled,
-        DeleteOnUniverseStart: config.DeleteOnUniverseStart,
-        DeleteOnRemove: config.DeleteOnRemove,
-        ResourceStorage: config.ResourceStorage,
-        WorldGen: config.WorldGen,
-        WorldMap: config.WorldMap,
-        ChunkStorage: config.ChunkStorage,
-        ChunkConfig: config.ChunkConfig,
+      // Send all editable fields - only include fields that are defined
+      const updateData: any = {}
+      
+      // Helper to add field only if it's defined
+      const addIfDefined = (key: string, value: any) => {
+        if (value !== undefined) {
+          updateData[key] = value
+        }
       }
 
-      await apiClient.updateWorldConfig(serverId, world, updateData)
-      setSuccess("World config updated successfully")
+      // Skip UUID - it's auto-generated and read-only, and may be in MongoDB Binary format
+      // addIfDefined("UUID", config.UUID)
+      addIfDefined("DisplayName", config.DisplayName)
+      addIfDefined("Version", config.Version)
+      addIfDefined("IsTicking", config.IsTicking)
+      addIfDefined("IsBlockTicking", config.IsBlockTicking)
+      addIfDefined("IsPvpEnabled", config.IsPvpEnabled)
+      addIfDefined("IsFallDamageEnabled", config.IsFallDamageEnabled)
+      addIfDefined("IsGameTimePaused", config.IsGameTimePaused)
+      addIfDefined("GameTime", config.GameTime)
+      addIfDefined("ForcedWeather", config.ForcedWeather)
+      addIfDefined("IsSpawningNPC", config.IsSpawningNPC)
+      addIfDefined("Seed", config.Seed)
+      addIfDefined("SaveNewChunks", config.SaveNewChunks)
+      addIfDefined("IsUnloadingChunks", config.IsUnloadingChunks)
+      addIfDefined("GameplayConfig", config.GameplayConfig)
+      addIfDefined("GameMode", config.GameMode)
+      addIfDefined("Death", config.Death)
+      addIfDefined("DaytimeDurationSeconds", config.DaytimeDurationSeconds)
+      addIfDefined("NighttimeDurationSeconds", config.NighttimeDurationSeconds)
+      addIfDefined("ClientEffects", config.ClientEffects)
+      addIfDefined("IsSavingPlayers", config.IsSavingPlayers)
+      addIfDefined("IsSavingChunks", config.IsSavingChunks)
+      addIfDefined("IsSpawnMarkersEnabled", config.IsSpawnMarkersEnabled)
+      addIfDefined("IsAllNPCFrozen", config.IsAllNPCFrozen)
+      addIfDefined("IsCompassUpdating", config.IsCompassUpdating)
+      addIfDefined("IsObjectiveMarkersEnabled", config.IsObjectiveMarkersEnabled)
+      addIfDefined("DeleteOnUniverseStart", config.DeleteOnUniverseStart)
+      addIfDefined("DeleteOnRemove", config.DeleteOnRemove)
+      addIfDefined("ResourceStorage", config.ResourceStorage)
+      addIfDefined("WorldGen", config.WorldGen)
+      addIfDefined("WorldMap", config.WorldMap)
+      addIfDefined("ChunkStorage", config.ChunkStorage)
+      addIfDefined("ChunkConfig", config.ChunkConfig)
+      addIfDefined("SpawnProvider", config.SpawnProvider)
+
+      // Sanitize the data to remove NaN values
+      const sanitizedData = sanitizeValue(updateData)
+
+      // Remove undefined values to avoid validation issues
+      const cleanedData = Object.fromEntries(
+        Object.entries(sanitizedData).filter(([_, value]) => value !== undefined)
+      )
+
+      console.log("Sending world config update:", cleanedData)
+      await apiClient.updateWorldConfig(serverId, world, cleanedData)
       
-      // Reload config to get latest state
-      await loadConfig()
+      // Reload config to get latest state (preserve success message, don't show loading)
+      await loadConfig(true, false)
+      
+      // Set success message after reload so it doesn't get cleared
+      setSuccess("World config saved successfully")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save world config")
+      console.error("World config save error:", err)
+      let errorMessage = "Failed to save world config"
+      if (err instanceof Error) {
+        errorMessage = err.message
+        // Check if there are validation details in the error
+        const errorObj = err as any
+        if (errorObj.details) {
+          try {
+            const details = Array.isArray(errorObj.details) 
+              ? errorObj.details.map((d: any) => {
+                  const path = Array.isArray(d.path) ? d.path.join('.') : d.path || 'unknown'
+                  return `${path}: ${d.message}`
+                }).join('; ')
+              : JSON.stringify(errorObj.details)
+            errorMessage = `Validation error: ${details}`
+            console.error("Validation details:", errorObj.details)
+          } catch {
+            // If we can't parse details, use the message as-is
+            errorMessage = `Validation error: ${err.message}`
+          }
+        }
+      }
+      setError(errorMessage)
     } finally {
       setIsSaving(false)
+      if (onSavingChange) onSavingChange(false)
     }
-  }
+  }, [config, serverId, world, onSavingChange, loadConfig])
 
   const handleInputChange = (field: string, value: any) => {
     if (!config) return
@@ -150,39 +287,117 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
     })
   }
 
+  const handleChunkConfigChange = (field: "PregenerateRegion" | "KeepLoadedRegion", value: Box2D | null) => {
+    if (!config) return
+    setConfig({
+      ...config,
+      ChunkConfig: {
+        ...config.ChunkConfig,
+        [field]: value,
+      },
+    })
+  }
+
+  const handleBox2DChange = (
+    region: Box2D | null | undefined,
+    coord: "Min" | "Max",
+    index: 0 | 1,
+    value: number | undefined
+  ): Box2D | null => {
+    const newRegion = region || { Min: [0, 0], Max: [0, 0] }
+    const newCoord = newRegion[coord] || [0, 0]
+    const updatedCoord: [number, number] = [...newCoord] as [number, number]
+    updatedCoord[index] = value ?? 0
+    return { ...newRegion, [coord]: updatedCoord }
+  }
+
+  const handleSpawnProviderChange = (value: SpawnProvider | null) => {
+    if (!config) return
+    setConfig({ ...config, SpawnProvider: value })
+  }
+
+  const getDefaultDeath = (): Death => ({
+    RespawnController: {
+      Type: "HomeOrSpawnPoint"
+    },
+    ItemsLossMode: "Configured",
+    ItemsAmountLossPercentage: 10.0,
+    ItemsDurabilityLossPercentage: 10.0
+  })
+
+  const handleDeathChange = (value: Death | null) => {
+    if (!config) return
+    setConfig({ ...config, Death: value })
+  }
+
+  const handleDeathNestedChange = (field: string, value: any) => {
+    if (!config) return
+    const currentDeath = config.Death || getDefaultDeath()
+    setConfig({
+      ...config,
+      Death: {
+        ...currentDeath,
+        [field]: value,
+      },
+    })
+  }
+
+  const handleDeathRespawnControllerChange = (value: "HomeOrSpawnPoint") => {
+    if (!config) return
+    const currentDeath = config.Death || getDefaultDeath()
+    setConfig({
+      ...config,
+      Death: {
+        ...currentDeath,
+        RespawnController: {
+          Type: value,
+        },
+      },
+    })
+  }
+
+  const handleSpawnPointChange = (
+    spawnPoint: SpawnPoint | undefined,
+    field: "Position" | "Rotation",
+    index: 0 | 1 | 2,
+    value: number | undefined
+  ): SpawnPoint => {
+    const point = spawnPoint || { Position: [0, 0, 0], Rotation: [0, 0, 0] }
+    const arr = point[field] || [0, 0, 0]
+    const updated: [number, number, number] = [...arr] as [number, number, number]
+    updated[index] = value ?? 0
+    return { ...point, [field]: updated }
+  }
+
   const canEdit = serverStatus === "offline" || serverStatus === "stopping"
+
+  // Expose handlers via ref
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    reload: loadConfig,
+    get isSaving() { return isSaving },
+    get canEdit() { return canEdit },
+  }), [isSaving, canEdit, serverStatus, handleSave, loadConfig])
 
   if (isLoading) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">World Config: {world}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <p className="text-sm text-muted-foreground">Loading world config...</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center py-8">
+        <p className="text-sm text-muted-foreground">Loading world config...</p>
+      </div>
     )
   }
 
   if (!config) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">World Config: {world}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 py-4 text-destructive">
-            <AlertCircle className="h-4 w-4" />
-            <p className="text-sm">World config not found</p>
-          </div>
-          <Button onClick={loadConfig} variant="outline" size="sm">
-            Retry
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center gap-4 py-8">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertCircle className="h-4 w-4" />
+          <p className="text-sm">World config not found</p>
+        </div>
+        <Button onClick={() => loadConfig()} variant="outline" size="sm">
+          Retry
+        </Button>
+      </div>
     )
   }
 
@@ -207,312 +422,517 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
       )}
 
       {success && (
-        <Alert className="border-green-200 bg-green-50 text-green-800">
+        <Alert variant="success">
+          <CheckCircle className="h-4 w-4" />
           <AlertDescription>{success}</AlertDescription>
         </Alert>
       )}
 
       {/* Config form */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Basic Settings */}
+      <div className="grid gap-6 md:grid-cols-4">
+        {/* 1. World Identity */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Basic Settings</CardTitle>
+            <CardTitle className="text-base">World Identity</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Version</Label>
+              <Label>UUID</Label>
               <Input
-                type="number"
-                value={config.Version || ""}
-                onChange={(e) => handleInputChange("Version", e.target.value ? parseInt(e.target.value) : undefined)}
-                disabled={!canEdit}
+                value={(() => {
+                  if (!config.UUID) return ""
+                  // Handle MongoDB Binary format
+                  if (typeof config.UUID === "object" && (config.UUID as any).$binary) {
+                    try {
+                      // Decode base64 binary to hex (browser-compatible)
+                      const binary = (config.UUID as any).$binary
+                      const binaryString = atob(binary)
+                      let hex = ""
+                      for (let i = 0; i < binaryString.length; i++) {
+                        const char = binaryString.charCodeAt(i).toString(16).padStart(2, "0")
+                        hex += char
+                      }
+                      return hex
+                    } catch {
+                      return "Binary UUID"
+                    }
+                  }
+                  return String(config.UUID)
+                })()}
+                disabled
+                className="bg-muted"
+                placeholder="Auto-generated"
               />
+              <p className="text-xs text-muted-foreground">Unique identifier for this world</p>
             </div>
-
             <div className="space-y-2">
-              <Label>PvP Enabled</Label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={config.IsPvpEnabled ? "true" : "false"}
-                onChange={(e) => handleInputChange("IsPvpEnabled", e.target.value === "true")}
+              <Label>Display Name</Label>
+              <Input
+                value={config.DisplayName || ""}
+                onChange={(e) => handleInputChange("DisplayName", e.target.value || null)}
                 disabled={!canEdit}
-              >
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Fall Damage</Label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={config.IsFallDamageEnabled !== false ? "true" : "false"}
-                onChange={(e) => handleInputChange("IsFallDamageEnabled", e.target.value === "true")}
-                disabled={!canEdit}
-              >
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>NPC Spawning</Label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={config.IsSpawningNPC !== false ? "true" : "false"}
-                onChange={(e) => handleInputChange("IsSpawningNPC", e.target.value === "true")}
-                disabled={!canEdit}
-              >
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
+                placeholder="Player-facing name"
+              />
+              <p className="text-xs text-muted-foreground">Player-facing name of the world</p>
             </div>
           </CardContent>
         </Card>
 
-        {/* Ticking Settings */}
+        {/* 2. World Generation */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Ticking Settings</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsTicking !== false}
-                onChange={(e) => handleInputChange("IsTicking", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Ticking</Label>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsBlockTicking !== false}
-                onChange={(e) => handleInputChange("IsBlockTicking", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Block Ticking</Label>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Time Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Time Settings</CardTitle>
+            <CardTitle className="text-base">World Generation</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Game Time (ISO-8601)</Label>
-              <Input
-                value={config.GameTime || ""}
-                onChange={(e) => handleInputChange("GameTime", e.target.value)}
-                disabled={!canEdit}
-                placeholder="0001-01-01T08:00:00Z"
-              />
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsGameTimePaused || false}
-                onChange={(e) => handleInputChange("IsGameTimePaused", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Game Time Paused</Label>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Gameplay Config</Label>
-              <Input
-                value={config.GameplayConfig || ""}
-                onChange={(e) => handleInputChange("GameplayConfig", e.target.value)}
-                disabled={!canEdit}
-                placeholder="Default"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* World Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">World Settings</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>World Seed</Label>
+              <Label>Seed</Label>
               <Input
                 type="number"
                 value={config.Seed || ""}
                 onChange={(e) => handleInputChange("Seed", e.target.value ? parseInt(e.target.value) : undefined)}
                 disabled={!canEdit}
+                placeholder="Current time"
               />
             </div>
-
             <div className="space-y-2">
               <Label>World Gen Type</Label>
-              <Input
+              <Select
                 value={config.WorldGen?.Type || ""}
-                onChange={(e) => handleNestedChange("WorldGen", "Type", e.target.value)}
+                onValueChange={(value) => handleNestedChange("WorldGen", "Type", value)}
                 disabled={!canEdit}
-                placeholder="Hytale"
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Hytale" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Hytale">Hytale</SelectItem>
+                  <SelectItem value="Flat">Flat</SelectItem>
+                  <SelectItem value="Void">Void</SelectItem>
+                  <SelectItem value="Dummy">Dummy</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-
-            <div className="space-y-2">
-              <Label>World Gen Name</Label>
-              <Input
-                value={config.WorldGen?.Name || ""}
-                onChange={(e) => handleNestedChange("WorldGen", "Name", e.target.value)}
-                disabled={!canEdit}
-                placeholder="Default"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>World Map Type</Label>
-              <Input
-                value={config.WorldMap?.Type || ""}
-                onChange={(e) => handleNestedChange("WorldMap", "Type", e.target.value)}
-                disabled={!canEdit}
-                placeholder="WorldGen"
-              />
-            </div>
-
+            {config.WorldGen?.Type === "Hytale" && (
+              <>
+                <div className="space-y-2">
+                  <Label>World Gen Name</Label>
+                  <Input
+                    value={config.WorldGen?.Name || ""}
+                    onChange={(e) => handleNestedChange("WorldGen", "Name", e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Default"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>World Gen Path</Label>
+                  <Input
+                    value={config.WorldGen?.Path || ""}
+                    onChange={(e) => handleNestedChange("WorldGen", "Path", e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Server default"
+                  />
+                </div>
+              </>
+            )}
             <div className="space-y-2">
               <Label>Chunk Storage Type</Label>
-              <Input
+              <Select
                 value={config.ChunkStorage?.Type || ""}
-                onChange={(e) => handleNestedChange("ChunkStorage", "Type", e.target.value)}
+                onValueChange={(value) => handleNestedChange("ChunkStorage", "Type", value)}
                 disabled={!canEdit}
-                placeholder="Hytale"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Resource Storage Type</Label>
-              <Input
-                value={config.ResourceStorage?.Type || ""}
-                onChange={(e) => handleNestedChange("ResourceStorage", "Type", e.target.value)}
-                disabled={!canEdit}
-                placeholder="Hytale"
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Hytale" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Hytale">Hytale</SelectItem>
+                  <SelectItem value="IndexedStorage">IndexedStorage</SelectItem>
+                  <SelectItem value="Empty">Empty</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
 
-        {/* Saving Settings */}
-        <Card>
+        {/* 3. Chunk Configuration */}
+        <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Saving Settings</CardTitle>
+            <CardTitle className="text-base">Chunk Configuration</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsSavingPlayers !== false}
-                onChange={(e) => handleInputChange("IsSavingPlayers", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Saving Players</Label>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsSavingChunks !== false}
-                onChange={(e) => handleInputChange("IsSavingChunks", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Saving Chunks</Label>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.SaveNewChunks !== false}
-                onChange={(e) => handleInputChange("SaveNewChunks", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Save New Chunks</Label>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsUnloadingChunks !== false}
-                onChange={(e) => handleInputChange("IsUnloadingChunks", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Unloading Chunks</Label>
+          <CardContent className="space-y-6">
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm font-semibold">Pregenerate Region</Label>
+                <p className="text-xs text-muted-foreground mb-2">Region to pregenerate when world starts</p>
+                <div className="grid gap-4 md:grid-cols-2 border rounded-md p-4">
+                  <div>
+                    <Label className="text-xs">Min Coordinates [x, z]</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.PregenerateRegion?.Min?.[0] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.PregenerateRegion,
+                            "Min",
+                            0,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("PregenerateRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="x1"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.PregenerateRegion?.Min?.[1] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.PregenerateRegion,
+                            "Min",
+                            1,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("PregenerateRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="z1"
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Max Coordinates [x, z]</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.PregenerateRegion?.Max?.[0] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.PregenerateRegion,
+                            "Max",
+                            0,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("PregenerateRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="x2"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.PregenerateRegion?.Max?.[1] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.PregenerateRegion,
+                            "Max",
+                            1,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("PregenerateRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="z2"
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleChunkConfigChange("PregenerateRegion", null)}
+                    disabled={!canEdit}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+              <div>
+                <Label className="text-sm font-semibold">Keep Loaded Region</Label>
+                <p className="text-xs text-muted-foreground mb-2">Region of chunks that will never be unloaded</p>
+                <div className="grid gap-4 md:grid-cols-2 border rounded-md p-4">
+                  <div>
+                    <Label className="text-xs">Min Coordinates [x, z]</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.KeepLoadedRegion?.Min?.[0] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.KeepLoadedRegion,
+                            "Min",
+                            0,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("KeepLoadedRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="x1"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.KeepLoadedRegion?.Min?.[1] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.KeepLoadedRegion,
+                            "Min",
+                            1,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("KeepLoadedRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="z1"
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Max Coordinates [x, z]</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.KeepLoadedRegion?.Max?.[0] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.KeepLoadedRegion,
+                            "Max",
+                            0,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("KeepLoadedRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="x2"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.ChunkConfig?.KeepLoadedRegion?.Max?.[1] ?? ""}
+                        onChange={(e) => {
+                          const newRegion = handleBox2DChange(
+                            config.ChunkConfig?.KeepLoadedRegion,
+                            "Max",
+                            1,
+                            e.target.value ? parseInt(e.target.value) : undefined
+                          )
+                          handleChunkConfigChange("KeepLoadedRegion", newRegion)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="z2"
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleChunkConfigChange("KeepLoadedRegion", null)}
+                    disabled={!canEdit}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Visual/UI Settings */}
-        <Card>
+        {/* 4. Gameplay Settings */}
+        <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Visual/UI Settings</CardTitle>
+            <CardTitle className="text-base">Gameplay Settings</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsSpawnMarkersEnabled !== false}
-                onChange={(e) => handleInputChange("IsSpawnMarkersEnabled", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Spawn Markers Enabled</Label>
+          <CardContent className="space-y-6">
+            {/* Combat & Damage */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Combat & Damage</h4>
+              <div className="space-y-4 pl-4 border-l-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={config.IsPvpEnabled || false}
+                    onChange={(e) => handleInputChange("IsPvpEnabled", e.target.checked)}
+                    disabled={!canEdit}
+                    className="rounded border-gray-300"
+                  />
+                  <Label>PvP Enabled</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={config.IsFallDamageEnabled !== false}
+                    onChange={(e) => handleInputChange("IsFallDamageEnabled", e.target.checked)}
+                    disabled={!canEdit}
+                    className="rounded border-gray-300"
+                  />
+                  <Label>Fall Damage Enabled</Label>
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsAllNPCFrozen || false}
-                onChange={(e) => handleInputChange("IsAllNPCFrozen", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is All NPC Frozen</Label>
+            {/* Game Mode */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Game Mode</h4>
+              <div className="space-y-4 pl-4 border-l-2">
+                <div className="space-y-2">
+                  <Label>Game Mode</Label>
+                  <Select
+                    value={config.GameMode || "__inherit__"}
+                    onValueChange={(value) => handleInputChange("GameMode", value === "__inherit__" ? null : value)}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Inherits from server" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__inherit__">Inherit from server</SelectItem>
+                      <SelectItem value="Adventure">Adventure</SelectItem>
+                      <SelectItem value="Creative">Creative</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Gameplay Config</Label>
+                  <Input
+                    value={config.GameplayConfig || ""}
+                    onChange={(e) => handleInputChange("GameplayConfig", e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Default"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Daytime Duration (seconds)</Label>
+                  <Input
+                    type="number"
+                    value={config.DaytimeDurationSeconds ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value.trim()
+                      if (value === "") {
+                        handleInputChange("DaytimeDurationSeconds", null)
+                      } else {
+                        const parsed = parseInt(value, 10)
+                        handleInputChange("DaytimeDurationSeconds", isNaN(parsed) ? null : parsed)
+                      }
+                    }}
+                    disabled={!canEdit}
+                    placeholder="600 (default)"
+                  />
+                  <p className="text-xs text-muted-foreground">Default: 600 seconds</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Nighttime Duration (seconds)</Label>
+                  <Input
+                    type="number"
+                    value={config.NighttimeDurationSeconds ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value.trim()
+                      if (value === "") {
+                        handleInputChange("NighttimeDurationSeconds", null)
+                      } else {
+                        const parsed = parseInt(value, 10)
+                        handleInputChange("NighttimeDurationSeconds", isNaN(parsed) ? null : parsed)
+                      }
+                    }}
+                    disabled={!canEdit}
+                    placeholder="300 (default)"
+                  />
+                  <p className="text-xs text-muted-foreground">Default: 300 seconds</p>
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsCompassUpdating !== false}
-                onChange={(e) => handleInputChange("IsCompassUpdating", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Compass Updating</Label>
+            {/* Death */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Death</h4>
+              <div className="space-y-4 pl-4 border-l-2">
+                <div className="space-y-2">
+                  <Label>Respawn Controller Type</Label>
+                  <Select
+                    value={config.Death?.RespawnController?.Type || "HomeOrSpawnPoint"}
+                    onValueChange={(value) => {
+                      if (!config.Death) {
+                        handleDeathChange(getDefaultDeath())
+                      }
+                      handleDeathRespawnControllerChange(value as "HomeOrSpawnPoint")
+                    }}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="HomeOrSpawnPoint" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="HomeOrSpawnPoint">HomeOrSpawnPoint</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Items Loss Mode</Label>
+                  <Select
+                    value={config.Death?.ItemsLossMode || "Configured"}
+                    onValueChange={(value) => {
+                      handleDeathNestedChange("ItemsLossMode", value as "None" | "All" | "Configured")
+                    }}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Configured" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="None">None - Item loss is disabled</SelectItem>
+                      <SelectItem value="All">All - All items are dropped</SelectItem>
+                      <SelectItem value="Configured">Configured - Item loss is set manually</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Sets the death penalty mode</p>
+                </div>
+                {config.Death?.ItemsLossMode === "Configured" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Items Amount Loss Percentage</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={config.Death?.ItemsAmountLossPercentage ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value.trim()
+                          const parsed = value === "" ? undefined : parseFloat(value)
+                          handleDeathNestedChange("ItemsAmountLossPercentage", isNaN(parsed as number) ? undefined : parsed)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="10.0"
+                      />
+                      <p className="text-xs text-muted-foreground">Sets how many items are lost on death</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Items Durability Loss Percentage</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={config.Death?.ItemsDurabilityLossPercentage ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value.trim()
+                          const parsed = value === "" ? undefined : parseFloat(value)
+                          handleDeathNestedChange("ItemsDurabilityLossPercentage", isNaN(parsed as number) ? undefined : parsed)
+                        }}
+                        disabled={!canEdit}
+                        placeholder="10.0"
+                      />
+                      <p className="text-xs text-muted-foreground">Sets how much item durability is lowered on death</p>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={config.IsObjectiveMarkersEnabled !== false}
-                onChange={(e) => handleInputChange("IsObjectiveMarkersEnabled", e.target.checked)}
-                disabled={!canEdit}
-                className="rounded border-gray-300"
-              />
-              <Label>Is Objective Markers Enabled</Label>
-            </div>
+
           </CardContent>
         </Card>
 
-        {/* Client Effects */}
+        {/* 5. Client Effects */}
         <Card className="md:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Client Effects</CardTitle>
@@ -529,7 +949,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   disabled={!canEdit}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Sun Angle Degrees</Label>
                 <Input
@@ -540,7 +959,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   disabled={!canEdit}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Bloom Intensity</Label>
                 <Input
@@ -551,7 +969,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   disabled={!canEdit}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Bloom Power</Label>
                 <Input
@@ -562,7 +979,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   disabled={!canEdit}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Sun Intensity</Label>
                 <Input
@@ -573,7 +989,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   disabled={!canEdit}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Sunshaft Intensity</Label>
                 <Input
@@ -584,7 +999,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                   disabled={!canEdit}
                 />
               </div>
-
               <div className="space-y-2">
                 <Label>Sunshaft Scale Factor</Label>
                 <Input
@@ -596,36 +1010,600 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
                 />
               </div>
             </div>
+
+            {/* Time & Weather */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Time & Weather</h4>
+              <div className="space-y-4 pl-4 border-l-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={config.IsGameTimePaused || false}
+                    onChange={(e) => handleInputChange("IsGameTimePaused", e.target.checked)}
+                    disabled={!canEdit}
+                    className="rounded border-gray-300"
+                  />
+                  <Label>Game Time Paused</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label>Game Time (ISO-8601)</Label>
+                  <Input
+                    value={config.GameTime || ""}
+                    onChange={(e) => handleInputChange("GameTime", e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="1970-01-01T05:30:00Z"
+                  />
+                  <p className="text-xs text-muted-foreground">Current time of day (default: 5:30 AM)</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Forced Weather</Label>
+                  <Input
+                    value={config.ForcedWeather || ""}
+                    onChange={(e) => handleInputChange("ForcedWeather", e.target.value || null)}
+                    disabled={!canEdit}
+                    placeholder="Force specific weather type"
+                  />
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        {/* Chunk Config */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Chunk Config (JSON - Read Only)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <textarea
-              value={JSON.stringify(config.ChunkConfig || {}, null, 2)}
-              disabled
-              className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm font-mono min-h-[100px]"
-            />
-          </CardContent>
-        </Card>
+        
 
-        {/* Danger Zone */}
-        <Card className="md:col-span-2 border-destructive">
+        {/* 6. Tick Settings */}
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base text-destructive">Danger Zone</CardTitle>
+            <CardTitle className="text-base">Tick Settings</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                These settings can cause permanent data loss. Use with extreme caution.
-              </AlertDescription>
-            </Alert>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsTicking !== false}
+                onChange={(e) => handleInputChange("IsTicking", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Is Ticking</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsBlockTicking !== false}
+                onChange={(e) => handleInputChange("IsBlockTicking", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Is Block Ticking</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">Disable ticking for lobby or hub worlds where dynamic block behavior isn't needed. This improves performance.</p>
+          </CardContent>
+        </Card>
 
+        {/* 7. Entity & Spawning */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Entity & Spawning</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsSpawningNPC !== false}
+                onChange={(e) => handleInputChange("IsSpawningNPC", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>NPC Spawning</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsSpawnMarkersEnabled !== false}
+                onChange={(e) => handleInputChange("IsSpawnMarkersEnabled", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Spawn Markers Enabled</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsAllNPCFrozen || false}
+                onChange={(e) => handleInputChange("IsAllNPCFrozen", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>All NPC Frozen</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsObjectiveMarkersEnabled !== false}
+                onChange={(e) => handleInputChange("IsObjectiveMarkersEnabled", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Objective Markers Enabled</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsCompassUpdating !== false}
+                onChange={(e) => handleInputChange("IsCompassUpdating", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Compass Updating</Label>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Spawn Provider */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">Spawn Provider</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Spawn Provider Type</Label>
+              <Select
+                value={config.SpawnProvider?.Type || "__none__"}
+                onValueChange={(value) => {
+                  if (value === "__none__") {
+                    handleSpawnProviderChange(null)
+                  } else {
+                    const newProvider: SpawnProvider = { Type: value as "Global" | "Individual" | "FitToHeightMap" }
+                    if (value === "Global") {
+                      newProvider.SpawnPoint = { Position: [0, 100, 0], Rotation: [0, 0, 0] }
+                    } else if (value === "Individual") {
+                      newProvider.SpawnPoints = [{ Position: [0, 100, 0], Rotation: [0, 0, 0] }]
+                    } else if (value === "FitToHeightMap") {
+                      newProvider.SpawnProvider = { Type: "Global", SpawnPoint: { Position: [0, -1, 0], Rotation: [0, 0, 0] } }
+                    }
+                    handleSpawnProviderChange(newProvider)
+                  }
+                }}
+                disabled={!canEdit}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  <SelectItem value="Global">Global</SelectItem>
+                  <SelectItem value="Individual">Individual</SelectItem>
+                  <SelectItem value="FitToHeightMap">FitToHeightMap</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {config.SpawnProvider?.Type === "Global" && config.SpawnProvider.SpawnPoint && (
+              <div className="border rounded-md p-4 space-y-4">
+                <h5 className="text-sm font-semibold">Spawn Point</h5>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label className="text-xs">Position [x, y, z]</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        type="number"
+                        value={config.SpawnProvider.SpawnPoint.Position?.[0] ?? ""}
+                        onChange={(e) => {
+                          const updated = handleSpawnPointChange(
+                            config.SpawnProvider?.SpawnPoint,
+                            "Position",
+                            0,
+                            e.target.value ? parseFloat(e.target.value) : undefined
+                          )
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoint: updated })
+                        }}
+                        disabled={!canEdit}
+                        placeholder="x"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.SpawnProvider.SpawnPoint.Position?.[1] ?? ""}
+                        onChange={(e) => {
+                          const updated = handleSpawnPointChange(
+                            config.SpawnProvider?.SpawnPoint,
+                            "Position",
+                            1,
+                            e.target.value ? parseFloat(e.target.value) : undefined
+                          )
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoint: updated })
+                        }}
+                        disabled={!canEdit}
+                        placeholder="y"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.SpawnProvider.SpawnPoint.Position?.[2] ?? ""}
+                        onChange={(e) => {
+                          const updated = handleSpawnPointChange(
+                            config.SpawnProvider?.SpawnPoint,
+                            "Position",
+                            2,
+                            e.target.value ? parseFloat(e.target.value) : undefined
+                          )
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoint: updated })
+                        }}
+                        disabled={!canEdit}
+                        placeholder="z"
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Rotation [x, y, z]</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        type="number"
+                        value={config.SpawnProvider.SpawnPoint.Rotation?.[0] ?? ""}
+                        onChange={(e) => {
+                          const updated = handleSpawnPointChange(
+                            config.SpawnProvider?.SpawnPoint,
+                            "Rotation",
+                            0,
+                            e.target.value ? parseFloat(e.target.value) : undefined
+                          )
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoint: updated })
+                        }}
+                        disabled={!canEdit}
+                        placeholder="x"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.SpawnProvider.SpawnPoint.Rotation?.[1] ?? ""}
+                        onChange={(e) => {
+                          const updated = handleSpawnPointChange(
+                            config.SpawnProvider?.SpawnPoint,
+                            "Rotation",
+                            1,
+                            e.target.value ? parseFloat(e.target.value) : undefined
+                          )
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoint: updated })
+                        }}
+                        disabled={!canEdit}
+                        placeholder="y"
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={config.SpawnProvider.SpawnPoint.Rotation?.[2] ?? ""}
+                        onChange={(e) => {
+                          const updated = handleSpawnPointChange(
+                            config.SpawnProvider?.SpawnPoint,
+                            "Rotation",
+                            2,
+                            e.target.value ? parseFloat(e.target.value) : undefined
+                          )
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoint: updated })
+                        }}
+                        disabled={!canEdit}
+                        placeholder="z"
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {config.SpawnProvider?.Type === "Individual" && config.SpawnProvider.SpawnPoints && (
+              <div className="border rounded-md p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-sm font-semibold">Spawn Points</h5>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                      points.push({ Position: [0, 100, 0], Rotation: [0, 0, 0] })
+                      handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                    }}
+                    disabled={!canEdit}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Point
+                  </Button>
+                </div>
+                {config.SpawnProvider.SpawnPoints.map((point, index) => (
+                  <div key={index} className="border rounded-md p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">Spawn Point {index + 1}</Label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                          points.splice(index, 1)
+                          handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                        }}
+                        disabled={!canEdit || (config.SpawnProvider?.SpawnPoints?.length ?? 0) === 1}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <Label className="text-xs">Position [x, y, z]</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            type="number"
+                            value={point.Position?.[0] ?? ""}
+                            onChange={(e) => {
+                              const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                              const updated = handleSpawnPointChange(points[index], "Position", 0, e.target.value ? parseFloat(e.target.value) : undefined)
+                              points[index] = updated
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="x"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={point.Position?.[1] ?? ""}
+                            onChange={(e) => {
+                              const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                              const updated = handleSpawnPointChange(points[index], "Position", 1, e.target.value ? parseFloat(e.target.value) : undefined)
+                              points[index] = updated
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="y"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={point.Position?.[2] ?? ""}
+                            onChange={(e) => {
+                              const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                              const updated = handleSpawnPointChange(points[index], "Position", 2, e.target.value ? parseFloat(e.target.value) : undefined)
+                              points[index] = updated
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="z"
+                            className="flex-1"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Rotation [x, y, z]</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            type="number"
+                            value={point.Rotation?.[0] ?? ""}
+                            onChange={(e) => {
+                              const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                              const updated = handleSpawnPointChange(points[index], "Rotation", 0, e.target.value ? parseFloat(e.target.value) : undefined)
+                              points[index] = updated
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="x"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={point.Rotation?.[1] ?? ""}
+                            onChange={(e) => {
+                              const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                              const updated = handleSpawnPointChange(points[index], "Rotation", 1, e.target.value ? parseFloat(e.target.value) : undefined)
+                              points[index] = updated
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="y"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={point.Rotation?.[2] ?? ""}
+                            onChange={(e) => {
+                              const points = [...(config.SpawnProvider?.SpawnPoints || [])]
+                              const updated = handleSpawnPointChange(points[index], "Rotation", 2, e.target.value ? parseFloat(e.target.value) : undefined)
+                              points[index] = updated
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnPoints: points })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="z"
+                            className="flex-1"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {config.SpawnProvider?.Type === "FitToHeightMap" && (
+              <div className="border rounded-md p-4 space-y-4">
+                <h5 className="text-sm font-semibold">Nested Spawn Provider</h5>
+                <div className="space-y-2">
+                  <Label>Nested Provider Type</Label>
+                  <Select
+                    value={config.SpawnProvider.SpawnProvider?.Type || ""}
+                    onValueChange={(value) => {
+                      const nested: SpawnProvider = { Type: value as "Global" | "Individual" }
+                      if (value === "Global") {
+                        nested.SpawnPoint = { Position: [0, -1, 0], Rotation: [0, 0, 0] }
+                      } else if (value === "Individual") {
+                        nested.SpawnPoints = [{ Position: [0, -1, 0], Rotation: [0, 0, 0] }]
+                      }
+                      handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: nested })
+                    }}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Global">Global</SelectItem>
+                      <SelectItem value="Individual">Individual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {config.SpawnProvider.SpawnProvider?.Type === "Global" && config.SpawnProvider.SpawnProvider.SpawnPoint && (
+                  <div className="pl-4 border-l-2 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <Label className="text-xs">Position [x, y, z]</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            type="number"
+                            value={config.SpawnProvider.SpawnProvider.SpawnPoint.Position?.[0] ?? ""}
+                            onChange={(e) => {
+                              const nested = config.SpawnProvider?.SpawnProvider
+                              if (!nested) return
+                              const updated = handleSpawnPointChange(nested.SpawnPoint, "Position", 0, e.target.value ? parseFloat(e.target.value) : undefined)
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: { ...nested, SpawnPoint: updated } })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="x"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={config.SpawnProvider.SpawnProvider.SpawnPoint.Position?.[1] ?? ""}
+                            onChange={(e) => {
+                              const nested = config.SpawnProvider?.SpawnProvider
+                              if (!nested) return
+                              const updated = handleSpawnPointChange(nested.SpawnPoint, "Position", 1, e.target.value ? parseFloat(e.target.value) : undefined)
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: { ...nested, SpawnPoint: updated } })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="y"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={config.SpawnProvider.SpawnProvider.SpawnPoint.Position?.[2] ?? ""}
+                            onChange={(e) => {
+                              const nested = config.SpawnProvider?.SpawnProvider
+                              if (!nested) return
+                              const updated = handleSpawnPointChange(nested.SpawnPoint, "Position", 2, e.target.value ? parseFloat(e.target.value) : undefined)
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: { ...nested, SpawnPoint: updated } })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="z"
+                            className="flex-1"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Rotation [x, y, z]</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            type="number"
+                            value={config.SpawnProvider.SpawnProvider.SpawnPoint.Rotation?.[0] ?? ""}
+                            onChange={(e) => {
+                              const nested = config.SpawnProvider?.SpawnProvider
+                              if (!nested) return
+                              const updated = handleSpawnPointChange(nested.SpawnPoint, "Rotation", 0, e.target.value ? parseFloat(e.target.value) : undefined)
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: { ...nested, SpawnPoint: updated } })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="x"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={config.SpawnProvider.SpawnProvider.SpawnPoint.Rotation?.[1] ?? ""}
+                            onChange={(e) => {
+                              const nested = config.SpawnProvider?.SpawnProvider
+                              if (!nested) return
+                              const updated = handleSpawnPointChange(nested.SpawnPoint, "Rotation", 1, e.target.value ? parseFloat(e.target.value) : undefined)
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: { ...nested, SpawnPoint: updated } })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="y"
+                            className="flex-1"
+                          />
+                          <Input
+                            type="number"
+                            value={config.SpawnProvider.SpawnProvider.SpawnPoint.Rotation?.[2] ?? ""}
+                            onChange={(e) => {
+                              const nested = config.SpawnProvider?.SpawnProvider
+                              if (!nested) return
+                              const updated = handleSpawnPointChange(nested.SpawnPoint, "Rotation", 2, e.target.value ? parseFloat(e.target.value) : undefined)
+                              handleSpawnProviderChange({ ...config.SpawnProvider, SpawnProvider: { ...nested, SpawnPoint: updated } })
+                            }}
+                            disabled={!canEdit}
+                            placeholder="z"
+                            className="flex-1"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 8. Persistence */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">Persistence</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsSavingPlayers !== false}
+                onChange={(e) => handleInputChange("IsSavingPlayers", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Is Saving Players</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsSavingChunks !== false}
+                onChange={(e) => handleInputChange("IsSavingChunks", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Is Saving Chunks</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.SaveNewChunks !== false}
+                onChange={(e) => handleInputChange("SaveNewChunks", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Save New Chunks</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={config.IsUnloadingChunks !== false}
+                onChange={(e) => handleInputChange("IsUnloadingChunks", e.target.checked)}
+                disabled={!canEdit}
+                className="rounded border-gray-300"
+              />
+              <Label>Is Unloading Chunks</Label>
+            </div>
+            <div className="space-y-2">
+              <Label>Resource Storage Type</Label>
+              <Input
+                value={config.ResourceStorage?.Type || ""}
+                onChange={(e) => handleNestedChange("ResourceStorage", "Type", e.target.value)}
+                disabled={!canEdit}
+                placeholder="Default"
+              />
+            </div>
             <div className="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -636,7 +1614,6 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
               />
               <Label>Delete on Universe Start</Label>
             </div>
-
             <div className="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -647,34 +1624,19 @@ export function WorldConfig({ serverId, serverStatus, world }: WorldConfigProps)
               />
               <Label>Delete on Remove</Label>
             </div>
+            <Alert variant="destructive" className="mt-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Disabling IsSavingChunks means all world changes are lost on restart. Only use for temporary worlds.
+              </AlertDescription>
+            </Alert>
           </CardContent>
         </Card>
+
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={handleSave}
-          disabled={isSaving || !canEdit}
-          className="flex items-center gap-2"
-        >
-          {isSaving ? (
-            <>
-              <RefreshCw className="h-4 w-4 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <Save className="h-4 w-4" />
-              Save Config
-            </>
-          )}
-        </Button>
-        <Button onClick={loadConfig} variant="outline" disabled={isSaving}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Reload
-        </Button>
-      </div>
     </div>
   )
-}
+})
+
+WorldConfig.displayName = "WorldConfig"

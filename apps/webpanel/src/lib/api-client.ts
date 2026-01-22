@@ -71,8 +71,14 @@ export class ApiClient {
       const errorData = await response.json().catch(() => ({ error: response.statusText }))
       // For 401 errors, preserve the full error object (including requiresPassword)
       if (response.status === 401) {
-        const error = new Error(errorData.error || errorData.message || `HTTP ${response.status}`) as Error & { requiresPassword?: boolean }
+        const error = new Error(errorData.error || errorData.message || `HTTP ${response.status}`) as Error & { requiresPassword?: boolean; details?: any }
         error.requiresPassword = errorData.requiresPassword
+        throw error
+      }
+      // For validation errors (400), preserve the details
+      if (response.status === 400 && errorData.details) {
+        const error = new Error(errorData.error || errorData.message || `HTTP ${response.status}`) as Error & { details?: any }
+        error.details = errorData.details
         throw error
       }
       throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`)
