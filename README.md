@@ -90,6 +90,14 @@ For external connections outside of your home network, you will need to configur
 
 **Note**: Port forwarding configuration varies by router manufacturer. Consult your router's documentation or admin interface for specific instructions on how to set up port forwarding.
 
+## Documentation
+
+For comprehensive documentation, guides, and detailed information about Hypanel, visit:
+
+**https://docs.hypanel.app**
+
+The documentation site includes detailed guides, API references, troubleshooting tips, and more.
+
 ## Uninstallation
 
 To completely remove Hypanel from your system, run the uninstall script:
