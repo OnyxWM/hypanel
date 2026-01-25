@@ -26,6 +26,19 @@ info() {
     echo -e "${BLUE}[INFO]${NC} $*"
 }
 
+# Function to add plaintext password
+add_plaintext_password() {
+    if grep -q "^# HYPANEL_PASSWORD=" .env; then
+        sed -i.bak "s|^# HYPANEL_PASSWORD=.*|HYPANEL_PASSWORD=$PASSWORD|" .env
+        rm -f .env.bak
+    else
+        sed -i.bak "/^HYPANEL_AUTH_METHOD=ENV/a\\
+HYPANEL_PASSWORD=$PASSWORD" .env
+        rm -f .env.bak
+    fi
+    log "Plaintext password added to .env file (NOT RECOMMENDED for production)."
+}
+
 # Check if .env file exists
 if [[ -f .env ]]; then
     warn ".env file already exists. Skipping .env setup."
@@ -105,28 +118,32 @@ HYPANEL_PASSWORD_HASH=$HASH" .env
             else
                 # Try to install bcrypt temporarily
                 warn "bcrypt not found. Attempting to install..."
-                if cd apps/backend && npm install bcrypt --no-save 2>/dev/null; then
-                    HASH=$(node -e "const bcrypt = require('bcrypt'); bcrypt.hash('$PASSWORD', 10).then(h => console.log(h)).catch(() => process.exit(1));" 2>/dev/null)
-                    cd ../..
-                    
-                    if [[ -n "$HASH" ]] && [[ "$HASH" =~ ^\$2[aby]\$ ]]; then
-                        if grep -q "^# HYPANEL_PASSWORD_HASH=" .env; then
-                            sed -i.bak "s|^# HYPANEL_PASSWORD_HASH=.*|HYPANEL_PASSWORD_HASH=$HASH|" .env
-                            rm -f .env.bak
-                        else
-                            sed -i.bak "/^HYPANEL_AUTH_METHOD=ENV/a\\
+                if [[ -d "apps/backend" ]]; then
+                    if (cd apps/backend && npm install bcrypt --no-save 2>/dev/null); then
+                        HASH=$(cd apps/backend && node -e "const bcrypt = require('bcrypt'); bcrypt.hash('$PASSWORD', 10).then(h => console.log(h)).catch(() => process.exit(1));" 2>/dev/null)
+                        
+                        if [[ -n "$HASH" ]] && [[ "$HASH" =~ ^\$2[aby]\$ ]]; then
+                            if grep -q "^# HYPANEL_PASSWORD_HASH=" .env; then
+                                sed -i.bak "s|^# HYPANEL_PASSWORD_HASH=.*|HYPANEL_PASSWORD_HASH=$HASH|" .env
+                                rm -f .env.bak
+                            else
+                                sed -i.bak "/^HYPANEL_AUTH_METHOD=ENV/a\\
 HYPANEL_PASSWORD_HASH=$HASH" .env
-                            rm -f .env.bak
+                                rm -f .env.bak
+                            fi
+                            log "Password hash generated and added to .env file."
+                        else
+                            warn "Failed to generate bcrypt hash. Falling back to plaintext password (NOT RECOMMENDED for production)."
+                            add_plaintext_password
                         fi
-                        log "Password hash generated and added to .env file."
                     else
-                        warn "Failed to generate bcrypt hash. Falling back to plaintext password (NOT RECOMMENDED for production)."
+                        warn "Could not install bcrypt. Using plaintext password (NOT RECOMMENDED for production)."
+                        warn "You can generate a hash later using:"
+                        warn "  node -e \"const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 10).then(h => console.log(h));\""
                         add_plaintext_password
                     fi
                 else
-                    warn "Could not install bcrypt. Using plaintext password (NOT RECOMMENDED for production)."
-                    warn "You can generate a hash later using:"
-                    warn "  node -e \"const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 10).then(h => console.log(h));\""
+                    warn "apps/backend directory not found. Using plaintext password (NOT RECOMMENDED for production)."
                     add_plaintext_password
                 fi
             fi
@@ -144,19 +161,6 @@ HYPANEL_PASSWORD_HASH=$HASH" .env
         warn "The application will not start without a password configured."
     fi
 fi
-
-# Function to add plaintext password
-add_plaintext_password() {
-    if grep -q "^# HYPANEL_PASSWORD=" .env; then
-        sed -i.bak "s|^# HYPANEL_PASSWORD=.*|HYPANEL_PASSWORD=$PASSWORD|" .env
-        rm -f .env.bak
-    else
-        sed -i.bak "/^HYPANEL_AUTH_METHOD=ENV/a\\
-HYPANEL_PASSWORD=$PASSWORD" .env
-        rm -f .env.bak
-    fi
-    log "Plaintext password added to .env file (NOT RECOMMENDED for production)."
-}
 
 # Create necessary directories
 log "Creating data directories..."
