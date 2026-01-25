@@ -107,10 +107,16 @@ Hypanel can also be installed and run using Docker, which provides an isolated e
 git clone <repository-url>
 cd hypanel
 
-# 2. Run the setup script (prompts for password and configures everything)
+# 2. Run the setup script (one-time setup: creates .env, directories, etc.)
 ./setup-docker.sh
 
-# 3. Start Hypanel
+# 3. Build the Docker image
+# On macOS (especially Colima):
+./build-docker.sh
+# On Linux:
+docker-compose build
+
+# 4. Start Hypanel
 docker-compose up -d
 ```
 
@@ -126,7 +132,7 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    cd hypanel
    ```
 
-2. **Run the setup script**:
+2. **Run the setup script** (one-time setup):
    ```bash
    ./setup-docker.sh
    ```
@@ -134,17 +140,25 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    The script will:
    - Create `.env` file from `.env.example`
    - Prompt you for a password and generate a bcrypt hash
-   - Create necessary data directories
+   - Create necessary data directories (`data/`, `servers/`, `logs/`, `backup/`)
    - Set proper permissions
+   - Check and configure Docker buildx (for macOS/Colima)
 
-3. **Build and start Hypanel**:
+3. **Build the Docker image**:
    ```bash
-   # On macOS, use buildx for cross-platform builds:
+   # On macOS (especially with Colima), use the helper script:
+   ./build-docker.sh
+   
+   # Or manually with buildx:
    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
-   docker-compose up -d
    
    # On Linux, regular build works:
-   docker-compose up -d --build
+   docker-compose build
+   ```
+
+4. **Start Hypanel**:
+   ```bash
+   docker-compose up -d
    ```
 
 4. **Access the web panel**: Visit `http://localhost:3000` in your browser and login
@@ -163,14 +177,26 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    # Edit .env and set HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD
    ```
 
-3. **Build and start Hypanel**:
+3. **Create data directories**:
    ```bash
-   # On macOS, use buildx for cross-platform builds:
+   mkdir -p data servers logs backup
+   ```
+
+4. **Build the Docker image**:
+   ```bash
+   # On macOS (especially with Colima), use the helper script:
+   ./build-docker.sh
+   
+   # Or manually with buildx:
    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
-   docker-compose up -d
    
    # On Linux, regular build works:
-   docker-compose up -d --build
+   docker-compose build
+   ```
+
+5. **Start Hypanel**:
+   ```bash
+   docker-compose up -d
    ```
 
 See `.env.example` for all configuration options and password hash generation instructions.
@@ -232,6 +258,9 @@ docker-compose logs --tail=100
 docker-compose down
 
 # Rebuild container after code changes
+# On macOS/Colima:
+./build-docker.sh && docker-compose up -d
+# On Linux:
 docker-compose up -d --build
 
 # Access container shell
@@ -263,8 +292,10 @@ docker-compose exec hypanel bash
 - Ensure firewall allows connections to ports 3000 and 3001
 
 **Build fails on macOS with QEMU errors:**
-- Use Docker buildx: `DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build`
+- Use the helper script: `./build-docker.sh` (handles Colima automatically)
+- Or use Docker buildx: `DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build`
 - Or build directly: `docker buildx build --platform linux/amd64 -t hypanel:latest .`
+- For Colima: Set up buildx builder: `docker buildx create --name hypanel-builder --use && docker buildx inspect --bootstrap`
 - Verify buildx is available: `docker buildx version`
 - See [TESTING_DOCKER.md](./TESTING_DOCKER.md) for detailed macOS build instructions
 

@@ -53,22 +53,31 @@ Build the image (this may take several minutes on first build):
 docker-compose build
 ```
 
-**For macOS users (especially Apple Silicon):**
+**For macOS users (especially Apple Silicon and Colima):**
 
 If you encounter QEMU errors like `qemu-x86_64: Could not open '/lib64/ld-linux-x86-64.so.2'`, use Docker buildx for cross-platform builds:
 
 ```bash
-# Option 1: Use buildx with docker-compose (recommended)
+# Option 1: Use the helper script (easiest, handles Colima automatically)
+./build-docker.sh
+
+# Option 2: Use buildx with docker-compose (recommended)
 DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
 
-# Option 2: Build directly with buildx for linux/amd64 (production target)
+# Option 3: Build directly with buildx for linux/amd64 (production target)
 docker buildx build --platform linux/amd64 -t hypanel:latest .
 
-# Option 3: Build for native architecture (faster on Apple Silicon, for testing only)
+# Option 4: Build for native architecture (faster on Apple Silicon, for testing only)
 docker buildx build --platform linux/arm64 -t hypanel:arm64 .
 ```
 
 **Note:** The `docker-compose.yml` file is configured to build for `linux/amd64` by default (required for production). Docker buildx handles cross-platform emulation automatically.
+
+**For Colima users:** The `build-docker.sh` script automatically detects Colima and sets up buildx if needed. If you see "Docker Compose requires buildx plugin to be installed", run:
+```bash
+docker buildx create --name hypanel-builder --use
+docker buildx inspect --bootstrap
+```
 
 **Troubleshooting build issues:**
 - If build fails, check logs: `docker-compose build --no-cache 2>&1 | tee build.log`
@@ -278,30 +287,37 @@ docker-compose logs
 - Check `docker-compose.yml` has correct env vars
 - View logs: `docker-compose logs | grep -i auth`
 
-### Issue: "qemu-x86_64: Could not open '/lib64/ld-linux-x86-64.so.2'" (macOS)
+### Issue: "qemu-x86_64: Could not open '/lib64/ld-linux-x86-64.so.2'" (macOS/Colima)
 **Solution:** This error occurs when building for `linux/amd64` on macOS without proper QEMU emulation. Use one of these approaches:
 
-1. **Use Docker buildx (recommended):**
+1. **Use the helper script (easiest for Colima):**
+   ```bash
+   ./build-docker.sh
+   docker-compose up -d
+   ```
+
+2. **Use Docker buildx with docker-compose:**
    ```bash
    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
    ```
 
-2. **Build directly with buildx:**
+3. **Build directly with buildx:**
    ```bash
    docker buildx build --platform linux/amd64 -t hypanel:latest .
    docker-compose up -d
    ```
 
-3. **Verify buildx is available:**
+4. **For Colima - Set up buildx builder:**
+   ```bash
+   docker buildx create --name hypanel-builder --use
+   docker buildx inspect --bootstrap
+   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
+   ```
+
+5. **Verify buildx is available:**
    ```bash
    docker buildx version
    docker buildx ls
-   ```
-
-4. **Create a new buildx builder if needed:**
-   ```bash
-   docker buildx create --name mybuilder --use
-   docker buildx inspect --bootstrap
    ```
 
 The `docker-compose.yml` file includes `platform: linux/amd64` to ensure consistent builds across platforms.

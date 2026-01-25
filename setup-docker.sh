@@ -189,11 +189,39 @@ fi
 # Set basic permissions
 chmod -R 755 data servers logs backup 2>/dev/null || true
 
+# Check for Docker buildx (required for cross-platform builds on macOS)
+log "Checking Docker buildx support..."
+if docker buildx version &>/dev/null; then
+    log "Docker buildx is available."
+    
+    # Check if using Colima
+    if docker context ls 2>/dev/null | grep -q colima || docker info 2>/dev/null | grep -q colima; then
+        warn "Detected Colima. Ensuring buildx is properly configured..."
+        # Create buildx builder if it doesn't exist
+        if ! docker buildx ls | grep -q "hypanel-builder"; then
+            if docker buildx create --name hypanel-builder --use &>/dev/null; then
+                docker buildx inspect --bootstrap &>/dev/null || true
+                log "Created buildx builder 'hypanel-builder'."
+            fi
+        fi
+    fi
+else
+    warn "Docker buildx not found. Cross-platform builds may fail on macOS."
+    warn "Install Docker Desktop or configure buildx for your Docker setup."
+fi
+
 log "Setup complete!"
 echo
 info "Next steps:"
 echo "  1. Review .env file and adjust settings if needed"
-echo "  2. Start Hypanel with: docker-compose up -d"
+echo "  2. Build and start Hypanel:"
+if docker buildx version &>/dev/null; then
+    echo "     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose up -d --build"
+    echo "     (or: docker-compose up -d --build if buildx is configured)"
+else
+    echo "     docker-compose up -d --build"
+    echo "     (Note: On macOS, you may need Docker buildx for cross-platform builds)"
+fi
 echo "  3. View logs with: docker-compose logs -f"
 echo "  4. Access web panel at: http://localhost:3000"
 echo
