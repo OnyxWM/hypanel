@@ -92,9 +92,11 @@ async function readDockerLogs(input: {
   if (input.cursor && input.cursor.trim() !== "") {
     // Try to parse as timestamp (first part before any colon)
     const cursorParts = input.cursor.split(":");
-    const ts = Number.parseInt(cursorParts[0], 10);
-    if (Number.isFinite(ts) && ts > 0) {
-      cursorTimestamp = ts;
+    if (cursorParts.length > 0 && cursorParts[0]) {
+      const ts = Number.parseInt(cursorParts[0], 10);
+      if (Number.isFinite(ts) && ts > 0) {
+        cursorTimestamp = ts;
+      }
     }
   }
 
@@ -106,7 +108,7 @@ async function readDockerLogs(input: {
     
     for (const file of files) {
       const match = file.match(logFilePattern);
-      if (match) {
+      if (match && match[1]) {
         logFiles.push({
           path: path.join(logsDir, file),
           date: match[1],
@@ -131,7 +133,7 @@ async function readDockerLogs(input: {
       
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
-        if (!line.trim()) continue;
+        if (!line || !line.trim()) continue;
         
         try {
           const logEntry = JSON.parse(line) as any;
