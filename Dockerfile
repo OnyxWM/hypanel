@@ -97,15 +97,18 @@ ARG JAVA_VERSION=25.0.1+8
 ARG TARGETARCH
 
 # Set architecture for Java download
-# Note: The + in version must be URL-encoded as %2B in the GitHub URL
+# Note: The + in version must be URL-encoded as %2B in the GitHub URL path
+# But the filename uses underscore (_) instead of plus (+)
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
         JAVA_ARCH=aarch64; \
     else \
         JAVA_ARCH=x64; \
     fi && \
-    # URL-encode the + sign in version for GitHub URL
+    # URL-encode the + sign in version for GitHub URL path
     JAVA_VERSION_ENCODED=$(echo "${JAVA_VERSION}" | sed 's/+/%2B/g') && \
-    JAVA_URL="https://github.com/adoptium/temurin25-binaries/releases/download/jdk-${JAVA_VERSION_ENCODED}/OpenJDK25U-jdk_${JAVA_ARCH}_linux_hotspot_${JAVA_VERSION}.tar.gz" && \
+    # Convert + to _ for filename (matches install.sh format)
+    JAVA_VERSION_FILENAME=$(echo "${JAVA_VERSION}" | sed 's/+/_/g') && \
+    JAVA_URL="https://github.com/adoptium/temurin25-binaries/releases/download/jdk-${JAVA_VERSION_ENCODED}/OpenJDK25U-jdk_${JAVA_ARCH}_linux_hotspot_${JAVA_VERSION_FILENAME}.tar.gz" && \
     JAVA_TAR="/tmp/jdk-25.tar.gz" && \
     curl -fsSL "$JAVA_URL" -o "$JAVA_TAR" && \
     # TODO: Add SHA-256 checksum verification here
