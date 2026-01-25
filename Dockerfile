@@ -144,8 +144,32 @@ RUN DOWNLOADER_DIR="/opt/hytale-downloader" && \
     chown root:root "$DOWNLOADER_BIN"
 
 # Create hypanel user (UID 1000, GID 1000)
-RUN groupadd -g 1000 hypanel && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash hypanel
+# Handle case where GID/UID 1000 might already exist
+RUN if getent group 1000 > /dev/null 2>&1; then \
+        # GID 1000 exists, check if it's hypanel
+        EXISTING_GROUP=$(getent group 1000 | cut -d: -f1) && \
+        if [ "$EXISTING_GROUP" != "hypanel" ]; then \
+            # Different group owns GID 1000, create hypanel without specifying GID
+            groupadd hypanel || true; \
+        fi; \
+    else \
+        # GID 1000 doesn't exist, create hypanel with GID 1000
+        groupadd -g 1000 hypanel; \
+    fi && \
+    if getent passwd 1000 > /dev/null 2>&1; then \
+        # UID 1000 exists, check if it's hypanel
+        EXISTING_USER=$(getent passwd 1000 | cut -d: -f1) && \
+        if [ "$EXISTING_USER" != "hypanel" ]; then \
+            # Different user owns UID 1000, create hypanel without specifying UID
+            useradd -g hypanel -m -s /bin/bash hypanel || true; \
+        else \
+            # hypanel already exists with UID 1000, ensure it's in correct group
+            usermod -g hypanel -s /bin/bash hypanel 2>/dev/null || true; \
+        fi; \
+    else \
+        # UID 1000 doesn't exist, create hypanel with UID 1000
+        useradd -u 1000 -g hypanel -m -s /bin/bash hypanel; \
+    fi
 
 # Set up PAM configuration for authentication (optional, for PAM auth mode)
 # Note: This is kept for compatibility, but PAM auth requires authenticate-pam package
