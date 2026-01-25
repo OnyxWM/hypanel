@@ -6,6 +6,7 @@ This guide walks you through testing the Docker installation of Hypanel.
 
 - Docker 20.10+ and Docker Compose 2.0+ installed
 - Ports 3000 and 3001 available on your system
+- Port 5520 (or your configured game server port) available for game server connections
 
 ## Step 1: Install Backend Dependencies (for password hash generation)
 
@@ -92,6 +93,18 @@ Start the container:
 ```bash
 docker-compose up -d
 ```
+
+**Note on Networking:**
+
+Hypanel uses **host networking mode** (`network_mode: host` in `docker-compose.yml`) to allow game servers to be accessible from the network. This means:
+
+- The container shares the host's network stack directly
+- All ports are directly accessible on the host's IP address
+- Game servers must bind to `0.0.0.0` (not `127.0.0.1` or `localhost`) to accept connections from outside the container
+  - ✅ Good: `0.0.0.0:5520` - accessible from network
+  - ❌ Bad: `127.0.0.1:5520` or `localhost:5520` - only accessible from container
+- Hypanel automatically configures servers to bind to `0.0.0.0` by default
+- You may need to configure your firewall to allow connections to game server ports
 
 ## Step 6: Check Container Status
 
@@ -321,6 +334,33 @@ docker-compose logs
    ```
 
 The `docker-compose.yml` file includes `platform: linux/amd64` to ensure consistent builds across platforms.
+
+### Issue: "Cannot connect to game server from network"
+**Solution:** This is usually a networking or firewall issue:
+
+1. **Verify host networking is enabled:**
+   - Check that `docker-compose.yml` has `network_mode: host`
+   - Restart the container: `docker-compose restart`
+
+2. **Verify server binding:**
+   - Game servers must bind to `0.0.0.0` (not `127.0.0.1` or `localhost`)
+   - Hypanel automatically configures this - check server config in web panel
+   - ✅ Good: `0.0.0.0:5520` - accessible from network
+   - ❌ Bad: `127.0.0.1:5520` or `localhost:5520` - only accessible from container
+
+3. **Check firewall settings:**
+   - UFW (Ubuntu/Debian): `sudo ufw allow 5520/tcp` (replace 5520 with your server port)
+   - firewalld (CentOS/RHEL): `sudo firewall-cmd --add-port=5520/tcp --permanent && sudo firewall-cmd --reload`
+   - Verify firewall status: `sudo ufw status` or `sudo firewall-cmd --list-ports`
+
+4. **Test connectivity:**
+   - From host: `telnet localhost 5520` or `nc -zv localhost 5520`
+   - From network: `telnet <your-server-ip> 5520` or `nc -zv <your-server-ip> 5520`
+   - Check if port is listening: `sudo netstat -tlnp | grep 5520` or `sudo ss -tlnp | grep 5520`
+
+5. **Verify container networking:**
+   - Check container is using host network: `docker inspect hypanel | grep -A 5 NetworkMode`
+   - Should show: `"NetworkMode": "host"`
 
 ## Clean Up
 

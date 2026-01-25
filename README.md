@@ -274,6 +274,25 @@ docker-compose exec hypanel bash
 - **Isolated environment**: All dependencies are contained within the Docker image
 - **Easier updates**: Rebuild the container to update the application
 
+### Docker Networking
+
+Hypanel uses **host networking mode** to allow game servers to be accessible from the network. This means:
+
+- The container shares the host's network stack directly
+- All ports (web panel: 3000, 3001; game servers: 5520, etc.) are directly accessible on the host's IP address
+- No port mapping is required for game server ports
+- Better network performance (no NAT overhead)
+
+**Important for Game Servers:**
+
+- Game servers **must bind to `0.0.0.0`** (not `127.0.0.1` or `localhost`) to accept connections from outside the container
+  - ✅ Good: `0.0.0.0:5520` - accessible from network
+  - ❌ Bad: `127.0.0.1:5520` or `localhost:5520` - only accessible from container
+- Hypanel automatically configures servers to bind to `0.0.0.0` by default
+- You may need to configure your firewall to allow connections to game server ports (e.g., port 5520)
+  - **UFW (Ubuntu/Debian)**: `sudo ufw allow 5520/tcp`
+  - **firewalld (CentOS/RHEL)**: `sudo firewall-cmd --add-port=5520/tcp --permanent && sudo firewall-cmd --reload`
+
 ### Troubleshooting
 
 **Permission issues with volumes:**
@@ -290,6 +309,14 @@ docker-compose exec hypanel bash
 - Verify the container is running: `docker-compose ps`
 - Check port mappings in `docker-compose.yml`
 - Ensure firewall allows connections to ports 3000 and 3001
+
+**Can't connect to game server from network:**
+- Verify the server is binding to `0.0.0.0` (not `127.0.0.1`) - Hypanel configures this automatically
+- Check that the firewall allows connections to the game server port (default: 5520)
+  - UFW: `sudo ufw allow 5520/tcp`
+  - firewalld: `sudo firewall-cmd --add-port=5520/tcp --permanent && sudo firewall-cmd --reload`
+- Verify the container is using host networking mode (`network_mode: host` in `docker-compose.yml`)
+- Test connectivity: `telnet <your-server-ip> 5520` or `nc -zv <your-server-ip> 5520`
 
 **Build fails on macOS with QEMU errors:**
 - Use the helper script: `./build-docker.sh` (handles Colima automatically)
