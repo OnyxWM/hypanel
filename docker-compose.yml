@@ -12,13 +12,8 @@ services:
     init: true
     user: "${PUID:-1000}:${PGID:-1000}"
     network_mode: host  # Use host networking to allow game server ports (e.g., 5520) to be accessible from the network
-    
-    # Note: When using host networking, the ports section below is ignored.
+    # Note: When using host networking, port mappings are not allowed and not needed.
     # All ports (3000, 3001, and game server ports like 5520) are directly accessible on the host.
-    # Keeping this section for documentation purposes.
-    ports:
-      - "${PORT:-3000}:${PORT:-3000}"
-      - "${WS_PORT:-3001}:${WS_PORT:-3001}"
     
     volumes:
       - ./data:/opt/hypanel/apps/backend/data

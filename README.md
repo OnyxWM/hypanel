@@ -267,6 +267,19 @@ docker-compose up -d --build
 docker-compose exec hypanel bash
 ```
 
+**Note:** If you encounter a `KeyError: 'ContainerConfig'` error when switching to host networking mode, you need to remove the old container first:
+
+```bash
+# Stop and remove the old container
+docker-compose down
+
+# Remove the old container manually if needed
+docker rm -f hypanel
+
+# Then start fresh
+docker-compose up -d
+```
+
 ### Differences from Linux Installation
 
 - **Authentication**: Docker uses ENV mode by default (password from environment variable), while Linux installation uses PAM (system user password)

@@ -335,6 +335,20 @@ docker-compose logs
 
 The `docker-compose.yml` file includes `platform: linux/amd64` to ensure consistent builds across platforms.
 
+### Issue: "KeyError: 'ContainerConfig'" when switching to host networking
+**Solution:** This error occurs with older docker-compose versions (1.29.2) when switching from bridge to host networking. Remove the old container first:
+
+```bash
+# Stop and remove the old container
+docker-compose down
+
+# Remove the old container manually if needed
+docker rm -f hypanel
+
+# Then start fresh
+docker-compose up -d
+```
+
 ### Issue: "Cannot connect to game server from network"
 **Solution:** This is usually a networking or firewall issue:
 
