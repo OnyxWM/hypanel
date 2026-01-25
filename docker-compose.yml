@@ -8,6 +8,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    platform: linux/amd64  # Runtime platform (required for cross-platform builds on macOS)
     container_name: hypanel
     restart: unless-stopped
     init: true

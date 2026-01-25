@@ -98,6 +98,7 @@ Hypanel can also be installed and run using Docker, which provides an isolated e
 
 - **Docker** 20.10+ and **Docker Compose** 2.0+ installed
 - Supported architectures: **linux/amd64** (required), **linux/arm64** (optional)
+- **Docker buildx** (included with Docker Desktop, required for cross-platform builds on macOS)
 
 ### Quick Start
 
@@ -136,9 +137,14 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    - Create necessary data directories
    - Set proper permissions
 
-3. **Start Hypanel**:
+3. **Build and start Hypanel**:
    ```bash
+   # On macOS, use buildx for cross-platform builds:
+   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
    docker-compose up -d
+   
+   # On Linux, regular build works:
+   docker-compose up -d --build
    ```
 
 4. **Access the web panel**: Visit `http://localhost:3000` in your browser and login
@@ -157,12 +163,19 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    # Edit .env and set HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD
    ```
 
-3. **Start Hypanel**:
+3. **Build and start Hypanel**:
    ```bash
+   # On macOS, use buildx for cross-platform builds:
+   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
    docker-compose up -d
+   
+   # On Linux, regular build works:
+   docker-compose up -d --build
    ```
 
 See `.env.example` for all configuration options and password hash generation instructions.
+
+**Note for macOS users:** The Docker image is built for `linux/amd64` by default (as specified in `docker-compose.yml`). On macOS (especially Apple Silicon), use Docker buildx for cross-platform builds. The buildx plugin is included with Docker Desktop and handles QEMU emulation automatically.
 
 ### Docker Data Persistence
 
@@ -248,6 +261,12 @@ docker-compose exec hypanel bash
 - Verify the container is running: `docker-compose ps`
 - Check port mappings in `docker-compose.yml`
 - Ensure firewall allows connections to ports 3000 and 3001
+
+**Build fails on macOS with QEMU errors:**
+- Use Docker buildx: `DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build`
+- Or build directly: `docker buildx build --platform linux/amd64 -t hypanel:latest .`
+- Verify buildx is available: `docker buildx version`
+- See [TESTING_DOCKER.md](./TESTING_DOCKER.md) for detailed macOS build instructions
 
 ## Documentation
 

@@ -18,7 +18,9 @@ RUN apt-get update && apt-get install -y \
 ARG NODE_VERSION=v24.13.0
 ARG NODE_ARCH=x64
 # Detect architecture at build time
-ARG TARGETARCH
+# Default to amd64 for compatibility with older Docker versions
+# Docker buildx automatically sets this when --platform is specified
+ARG TARGETARCH=amd64
 
 # Set architecture for Node.js download
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
@@ -80,7 +82,9 @@ RUN apt-get update && apt-get install -y \
 # Install Node.js 24 LTS (pinned version, runtime only)
 ARG NODE_VERSION=v24.13.0
 ARG NODE_ARCH=x64
-ARG TARGETARCH
+# Default to amd64 for compatibility with older Docker versions
+# Docker buildx automatically sets this when --platform is specified
+ARG TARGETARCH=amd64
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
         NODE_ARCH=arm64; \
@@ -94,7 +98,8 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 
 # Install Java 25 (Temurin) with pinned version and checksum verification
 ARG JAVA_VERSION=25.0.1+8
-ARG TARGETARCH
+# Default to amd64 for compatibility with older Docker versions
+ARG TARGETARCH=amd64
 
 # Set architecture for Java download
 # Note: The + in version must be URL-encoded as %2B in the GitHub URL path
@@ -122,7 +127,8 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     ln -sf /opt/jdk-25/bin/javac /usr/local/bin/javac
 
 # Install hytale-downloader binary
-ARG TARGETARCH
+# Default to amd64 for compatibility with older Docker versions
+ARG TARGETARCH=amd64
 RUN DOWNLOADER_DIR="/opt/hytale-downloader" && \
     DOWNLOADER_BIN="$DOWNLOADER_DIR/hytale-downloader" && \
     TEMP_ZIP="/tmp/hytale-downloader.zip" && \

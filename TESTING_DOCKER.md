@@ -53,10 +53,28 @@ Build the image (this may take several minutes on first build):
 docker-compose build
 ```
 
+**For macOS users (especially Apple Silicon):**
+
+If you encounter QEMU errors like `qemu-x86_64: Could not open '/lib64/ld-linux-x86-64.so.2'`, use Docker buildx for cross-platform builds:
+
+```bash
+# Option 1: Use buildx with docker-compose (recommended)
+DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
+
+# Option 2: Build directly with buildx for linux/amd64 (production target)
+docker buildx build --platform linux/amd64 -t hypanel:latest .
+
+# Option 3: Build for native architecture (faster on Apple Silicon, for testing only)
+docker buildx build --platform linux/arm64 -t hypanel:arm64 .
+```
+
+**Note:** The `docker-compose.yml` file is configured to build for `linux/amd64` by default (required for production). Docker buildx handles cross-platform emulation automatically.
+
 **Troubleshooting build issues:**
 - If build fails, check logs: `docker-compose build --no-cache 2>&1 | tee build.log`
 - Verify Node.js and Java downloads are accessible
 - Check that all source files are present
+- On macOS: Ensure Docker Desktop has buildx enabled (it's enabled by default)
 
 ## Step 5: Start the Container
 
@@ -259,6 +277,34 @@ docker-compose logs
 - Verify password hash was generated correctly
 - Check `docker-compose.yml` has correct env vars
 - View logs: `docker-compose logs | grep -i auth`
+
+### Issue: "qemu-x86_64: Could not open '/lib64/ld-linux-x86-64.so.2'" (macOS)
+**Solution:** This error occurs when building for `linux/amd64` on macOS without proper QEMU emulation. Use one of these approaches:
+
+1. **Use Docker buildx (recommended):**
+   ```bash
+   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
+   ```
+
+2. **Build directly with buildx:**
+   ```bash
+   docker buildx build --platform linux/amd64 -t hypanel:latest .
+   docker-compose up -d
+   ```
+
+3. **Verify buildx is available:**
+   ```bash
+   docker buildx version
+   docker buildx ls
+   ```
+
+4. **Create a new buildx builder if needed:**
+   ```bash
+   docker buildx create --name mybuilder --use
+   docker buildx inspect --bootstrap
+   ```
+
+The `docker-compose.yml` file includes `platform: linux/amd64` to ensure consistent builds across platforms.
 
 ## Clean Up
 
