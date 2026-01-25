@@ -1,0 +1,38 @@
+# Environment variables (contains sensitive data like passwords)
+.env
+.env.local
+.env.*.local
+
+# Docker data directories (user data, should not be committed)
+data/
+servers/
+logs/
+backup/
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+release/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+tmp/
+temp/

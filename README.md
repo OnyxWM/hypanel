@@ -90,6 +90,165 @@ For external connections outside of your home network, you will need to configur
 
 **Note**: Port forwarding configuration varies by router manufacturer. Consult your router's documentation or admin interface for specific instructions on how to set up port forwarding.
 
+## Docker Installation
+
+Hypanel can also be installed and run using Docker, which provides an isolated environment and easier deployment. Docker installation is recommended for users who prefer containerized deployments or want to run Hypanel alongside other containerized services.
+
+### Prerequisites
+
+- **Docker** 20.10+ and **Docker Compose** 2.0+ installed
+- Supported architectures: **linux/amd64** (required), **linux/arm64** (optional)
+
+### Quick Start
+
+```bash
+# 1. Clone the repository
+git clone <repository-url>
+cd hypanel
+
+# 2. Run the setup script (prompts for password and configures everything)
+./setup-docker.sh
+
+# 3. Start Hypanel
+docker-compose up -d
+```
+
+That's it! Access the web panel at `http://localhost:3000` and login with the password you set during setup.
+
+### Installation Steps (Detailed)
+
+**Option A: Automated Setup (Recommended)**
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd hypanel
+   ```
+
+2. **Run the setup script**:
+   ```bash
+   ./setup-docker.sh
+   ```
+   
+   The script will:
+   - Create `.env` file from `.env.example`
+   - Prompt you for a password and generate a bcrypt hash
+   - Create necessary data directories
+   - Set proper permissions
+
+3. **Start Hypanel**:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Access the web panel**: Visit `http://localhost:3000` in your browser and login
+
+**Option B: Manual Setup**
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd hypanel
+   ```
+
+2. **Create and configure `.env` file**:
+   ```bash
+   cp .env.example .env
+   # Edit .env and set HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD
+   ```
+
+3. **Start Hypanel**:
+   ```bash
+   docker-compose up -d
+   ```
+
+See `.env.example` for all configuration options and password hash generation instructions.
+
+### Docker Data Persistence
+
+All persistent data is stored in local directories mounted as volumes:
+- `./data` - Database and credentials
+- `./servers` - Hytale server instances
+- `./logs` - Application logs
+- `./backup` - Server backups
+
+These directories are created automatically when you start the container. To backup your installation, simply copy these directories.
+
+### Configuration
+
+All configuration is done through the `.env` file. The setup script creates this file automatically, or you can copy `.env.example` to `.env` and edit it manually.
+
+**Key configuration options** (see `.env.example` for full list):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HYPANEL_AUTH_METHOD` | `ENV` | Authentication method: `ENV` (Docker default) or `PAM` |
+| `HYPANEL_PASSWORD_HASH` | - | Bcrypt hash of password (recommended) |
+| `HYPANEL_PASSWORD` | - | Plaintext password (testing only) |
+| `PORT` | `3000` | HTTP API server port |
+| `WS_PORT` | `3001` | WebSocket server port |
+| `PUID` | `1000` | User ID for file permissions |
+| `PGID` | `1000` | Group ID for file permissions |
+
+**Password Hash Generation:**
+
+If you need to generate a password hash manually, see instructions in `.env.example` or use:
+```bash
+node -e "const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 10).then(h => console.log(h));"
+```
+
+### Docker Commands
+
+```bash
+# Start Hypanel
+docker-compose up -d
+
+# Stop Hypanel
+docker-compose stop
+
+# Restart Hypanel
+docker-compose restart
+
+# View logs
+docker-compose logs -f
+
+# View logs for last 100 lines
+docker-compose logs --tail=100
+
+# Stop and remove container (data volumes persist)
+docker-compose down
+
+# Rebuild container after code changes
+docker-compose up -d --build
+
+# Access container shell
+docker-compose exec hypanel bash
+```
+
+### Differences from Linux Installation
+
+- **Authentication**: Docker uses ENV mode by default (password from environment variable), while Linux installation uses PAM (system user password)
+- **No systemd**: Docker handles process management, so systemd integration features are not available
+- **Isolated environment**: All dependencies are contained within the Docker image
+- **Easier updates**: Rebuild the container to update the application
+
+### Troubleshooting
+
+**Permission issues with volumes:**
+- Ensure the `PUID` and `PGID` environment variables match your host user/group IDs
+- Check that volume mount directories exist and have correct permissions
+
+**Container won't start:**
+- Check logs: `docker-compose logs`
+- Verify that `.env` file exists and has `HYPANEL_PASSWORD_HASH` or `HYPANEL_PASSWORD` set
+- Ensure ports 3000 and 3001 are not already in use
+- Run `./setup-docker.sh` again to regenerate `.env` if needed
+
+**Can't access web panel:**
+- Verify the container is running: `docker-compose ps`
+- Check port mappings in `docker-compose.yml`
+- Ensure firewall allows connections to ports 3000 and 3001
+
 ## Documentation
 
 For comprehensive documentation, guides, and detailed information about Hypanel, visit:

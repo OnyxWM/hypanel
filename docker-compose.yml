@@ -1,0 +1,54 @@
+version: '3.8'
+
+# Docker Compose automatically reads variables from .env file in the same directory
+# Copy .env.example to .env and edit as needed: cp .env.example .env
+
+services:
+  hypanel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hypanel
+    restart: unless-stopped
+    init: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+      - "${WS_PORT:-3001}:${WS_PORT:-3001}"
+    
+    volumes:
+      - ./data:/opt/hypanel/apps/backend/data
+      - ./servers:/opt/hypanel/apps/backend/servers
+      - ./logs:/opt/hypanel/apps/backend/logs
+      - ./backup:/opt/hypanel/apps/backend/backup
+    
+    environment:
+      # Node.js environment
+      - NODE_ENV=${NODE_ENV:-production}
+      
+      # Server ports
+      - PORT=${PORT:-3000}
+      - WS_PORT=${WS_PORT:-3001}
+      
+      # Explicit paths (matching volume mounts)
+      - DATABASE_PATH=${DATABASE_PATH:-/opt/hypanel/apps/backend/data/hypanel.db}
+      - SERVERS_DIR=${SERVERS_DIR:-/opt/hypanel/apps/backend/servers}
+      - LOGS_DIR=${LOGS_DIR:-/opt/hypanel/apps/backend/logs}
+      - BACKUP_DIR=${BACKUP_DIR:-/opt/hypanel/apps/backend/backup}
+      
+      # Authentication (read from .env file)
+      - HYPANEL_AUTH_METHOD=${HYPANEL_AUTH_METHOD:-ENV}
+      - HYPANEL_PASSWORD_HASH=${HYPANEL_PASSWORD_HASH:-}
+      - HYPANEL_PASSWORD=${HYPANEL_PASSWORD:-}
+      
+      # User/Group overrides (optional)
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
