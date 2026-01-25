@@ -13,6 +13,7 @@
     "test:dev": "tsx test/smoke.test.ts"
   },
   "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
     "@types/better-sqlite3": "^7.6.11",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.0.0",
@@ -22,11 +23,13 @@
     "@types/ws": "^8.18.1",
     "ts-node-dev": "^2.0.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.9.3",
-    "@types/bcrypt": "^5.0.2"
+    "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "authenticate-pam": "^1.0.5"
   },
   "dependencies": {
-    "authenticate-pam": "^1.0.5",
+    "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
@@ -36,7 +39,6 @@
     "winston": "^3.15.0",
     "winston-daily-rotate-file": "^5.0.0",
     "ws": "^8.19.0",
-    "zod": "^3.23.8",
-    "bcrypt": "^5.1.1"
+    "zod": "^3.23.8"
   }
 }

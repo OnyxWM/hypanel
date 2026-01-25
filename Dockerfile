@@ -6,6 +6,7 @@ FROM ubuntu:24.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies
+# Note: libpam0g-dev not needed since we skip optional dependencies (authenticate-pam) in Docker
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
@@ -39,8 +40,9 @@ COPY apps/backend/package.json apps/backend/
 COPY apps/webpanel/package.json apps/webpanel/
 
 # Install dependencies
+# Skip optional dependencies (like authenticate-pam) since Docker uses ENV auth by default
 RUN npm install && \
-    cd apps/backend && npm install && \
+    cd apps/backend && npm install --no-optional && \
     cd ../webpanel && npm install && \
     cd ../..
 
@@ -61,6 +63,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies
+# Note: libpam0g-dev not needed since authenticate-pam is optional and skipped
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
@@ -70,7 +73,6 @@ RUN apt-get update && apt-get install -y \
     python3 \
     rsync \
     sudo \
-    libpam0g-dev \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -143,6 +145,8 @@ RUN groupadd -g 1000 hypanel && \
     useradd -u 1000 -g 1000 -m -s /bin/bash hypanel
 
 # Set up PAM configuration for authentication (optional, for PAM auth mode)
+# Note: This is kept for compatibility, but PAM auth requires authenticate-pam package
+# which is skipped in Docker builds. Users should use ENV auth mode instead.
 RUN echo "hypanel:x:1000:1000::/home/hypanel:/bin/bash" >> /etc/passwd && \
     mkdir -p /etc/pam.d && \
     echo "auth required pam_unix.so" > /etc/pam.d/hypanel && \
