@@ -69,6 +69,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     unzip \
     tar \
+    xz-utils \
     jq \
     python3 \
     rsync \
