@@ -11,15 +11,17 @@ services:
     restart: unless-stopped
     init: true
     user: "${PUID:-1000}:${PGID:-1000}"
-    network_mode: host  # Use host networking to allow game server ports (e.g., 5520) to be accessible from the network
-    # Note: When using host networking, port mappings are not allowed and not needed.
-    # All ports (3000, 3001, and game server ports like 5520) are directly accessible on the host.
     
     volumes:
       - ./data:/opt/hypanel/apps/backend/data
       - ./servers:/opt/hypanel/apps/backend/servers
       - ./logs:/opt/hypanel/apps/backend/logs
       - ./backup:/opt/hypanel/apps/backend/backup
+    
+    ports:
+      - "3000:3000"    # Panel HTTP API
+      - "3001:3001"    # WebSocket server
+      - "5520:5520/udp"  # Game server port (UDP)
     
     environment:
       # Node.js environment

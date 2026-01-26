@@ -289,12 +289,12 @@ docker-compose up -d
 
 ### Docker Networking
 
-Hypanel uses **host networking mode** to allow game servers to be accessible from the network. This means:
+Hypanel uses **bridge networking mode** with explicit port mappings to allow game servers to be accessible from the network. This configuration is compatible with NAS app stores and container orchestration platforms.
 
-- The container shares the host's network stack directly
-- All ports (web panel: 3000, 3001; game servers: 5520, etc.) are directly accessible on the host's IP address
-- No port mapping is required for game server ports
-- Better network performance (no NAT overhead)
+**Port Mappings:**
+- `3000:3000` (TCP) - Panel HTTP API
+- `3001:3001` (TCP) - WebSocket server
+- `5520:5520/udp` - Game server port (UDP protocol)
 
 **Important for Game Servers:**
 
@@ -303,8 +303,8 @@ Hypanel uses **host networking mode** to allow game servers to be accessible fro
   - ❌ Bad: `127.0.0.1:5520` or `localhost:5520` - only accessible from container
 - Hypanel automatically configures servers to bind to `0.0.0.0` by default
 - You may need to configure your firewall to allow connections to game server ports (e.g., port 5520)
-  - **UFW (Ubuntu/Debian)**: `sudo ufw allow 5520/tcp`
-  - **firewalld (CentOS/RHEL)**: `sudo firewall-cmd --add-port=5520/tcp --permanent && sudo firewall-cmd --reload`
+  - **UFW (Ubuntu/Debian)**: `sudo ufw allow 5520/udp`
+  - **firewalld (CentOS/RHEL)**: `sudo firewall-cmd --add-port=5520/udp --permanent && sudo firewall-cmd --reload`
 
 ### Troubleshooting
 

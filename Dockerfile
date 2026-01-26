@@ -202,7 +202,7 @@ RUN mkdir -p apps/backend/data \
     apps/backend/backup
 
 # Expose ports
-EXPOSE 3000 3001
+EXPOSE 3000 3001 5520/udp
 
 # Switch to hypanel user
 USER hypanel
