@@ -3,9 +3,7 @@
 
 services:
   hypanel:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/OnyxWM/hypanel:latest
     platform: linux/amd64  # Runtime platform (required for cross-platform builds on macOS)
     container_name: hypanel
     restart: unless-stopped
@@ -41,10 +39,6 @@ services:
       - HYPANEL_AUTH_METHOD=${HYPANEL_AUTH_METHOD:-ENV}
       - HYPANEL_PASSWORD_HASH=${HYPANEL_PASSWORD_HASH:-}
       - HYPANEL_PASSWORD=${HYPANEL_PASSWORD:-}
-      
-      # User/Group overrides (optional)
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
     
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]

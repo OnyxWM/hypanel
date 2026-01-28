@@ -22,16 +22,18 @@ ARG NODE_ARCH=x64
 # Docker buildx automatically sets this when --platform is specified
 ARG TARGETARCH=amd64
 
-# Set architecture for Node.js download
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        NODE_ARCH=arm64; \
-    fi && \
-    curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" -o /tmp/node.tar.xz && \
-    tar -xJf /tmp/node.tar.xz -C /opt --strip-components=1 && \
-    rm /tmp/node.tar.xz && \
-    ln -sf /opt/bin/node /usr/local/bin/node && \
-    ln -sf /opt/bin/npm /usr/local/bin/npm && \
-    ln -sf /opt/bin/npx /usr/local/bin/npx
+# Set architecture for Node.js download and verify checksum
+RUN if [ "$TARGETARCH" = "arm64" ]; then NODE_ARCH=arm64; else NODE_ARCH=x64; fi && \
+    NODE_TARBALL="node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
+    curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt" -o /tmp/SHASUMS256.txt && \
+    curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}" && \
+    ( cd /tmp && grep "${NODE_TARBALL}" SHASUMS256.txt | sha256sum -c - ) && \
+    mkdir -p /opt/node && \
+    tar -xJf "/tmp/${NODE_TARBALL}" -C /opt/node --strip-components=1 && \
+    rm -f /tmp/node-* /tmp/SHASUMS256.txt && \
+    ln -sf /opt/node/bin/node /usr/local/bin/node && \
+    ln -sf /opt/node/bin/npm /usr/local/bin/npm && \
+    ln -sf /opt/node/bin/npx /usr/local/bin/npx
 
 # Set working directory
 WORKDIR /build
@@ -64,6 +66,17 @@ FROM ubuntu:24.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Architecture (Docker buildx sets when --platform is specified)
+ARG TARGETARCH=amd64
+
+# OCI image labels (set VCS_REF/IMAGE_SOURCE in CI if desired)
+ARG VERSION=0.3.5
+ARG VCS_REF
+ARG IMAGE_SOURCE=https://github.com/your-org/hypanel
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="${IMAGE_SOURCE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
 # Install runtime dependencies
 # Note: libpam0g-dev not needed since authenticate-pam is optional and skipped
 RUN apt-get update && apt-get install -y \
@@ -79,27 +92,24 @@ RUN apt-get update && apt-get install -y \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 24 LTS (pinned version, runtime only)
+# Install Node.js 24 LTS (pinned version, runtime only) with checksum verification
 ARG NODE_VERSION=v24.13.0
 ARG NODE_ARCH=x64
-# Default to amd64 for compatibility with older Docker versions
-# Docker buildx automatically sets this when --platform is specified
-ARG TARGETARCH=amd64
 
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        NODE_ARCH=arm64; \
-    fi && \
-    curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" -o /tmp/node.tar.xz && \
-    tar -xJf /tmp/node.tar.xz -C /opt --strip-components=1 && \
-    rm /tmp/node.tar.xz && \
-    ln -sf /opt/bin/node /usr/local/bin/node && \
-    ln -sf /opt/bin/npm /usr/local/bin/npm && \
-    ln -sf /opt/bin/npx /usr/local/bin/npx
+RUN if [ "$TARGETARCH" = "arm64" ]; then NODE_ARCH=arm64; else NODE_ARCH=x64; fi && \
+    NODE_TARBALL="node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" && \
+    curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt" -o /tmp/SHASUMS256.txt && \
+    curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}" && \
+    ( cd /tmp && grep "${NODE_TARBALL}" SHASUMS256.txt | sha256sum -c - ) && \
+    mkdir -p /opt/node && \
+    tar -xJf "/tmp/${NODE_TARBALL}" -C /opt/node --strip-components=1 && \
+    rm -f /tmp/node-* /tmp/SHASUMS256.txt && \
+    ln -sf /opt/node/bin/node /usr/local/bin/node && \
+    ln -sf /opt/node/bin/npm /usr/local/bin/npm && \
+    ln -sf /opt/node/bin/npx /usr/local/bin/npx
 
 # Install Java 25 (Temurin) with pinned version and checksum verification
 ARG JAVA_VERSION=25.0.1+8
-# Default to amd64 for compatibility with older Docker versions
-ARG TARGETARCH=amd64
 
 # Set architecture for Java download
 # Note: The + in version must be URL-encoded as %2B in the GitHub URL path
@@ -116,19 +126,15 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     JAVA_URL="https://github.com/adoptium/temurin25-binaries/releases/download/jdk-${JAVA_VERSION_ENCODED}/OpenJDK25U-jdk_${JAVA_ARCH}_linux_hotspot_${JAVA_VERSION_FILENAME}.tar.gz" && \
     JAVA_TAR="/tmp/jdk-25.tar.gz" && \
     curl -fsSL "$JAVA_URL" -o "$JAVA_TAR" && \
-    # TODO: Add SHA-256 checksum verification here
-    # Download checksum file and verify:
-    # curl -fsSL "${JAVA_URL}.sha256.txt" -o "${JAVA_TAR}.sha256" && \
-    # sha256sum -c "${JAVA_TAR}.sha256" && \
+    curl -fsSL "${JAVA_URL}.sha256.txt" -o "${JAVA_TAR}.sha256.txt" && \
+    ( cd /tmp && awk '{print $1"  jdk-25.tar.gz"}' jdk-25.tar.gz.sha256.txt > jdk-25.sha256 && sha256sum -c jdk-25.sha256 ) && \
     mkdir -p /opt/jdk-25 && \
     tar -xzf "$JAVA_TAR" -C /opt/jdk-25 --strip-components=1 && \
-    rm -f "$JAVA_TAR" && \
+    rm -f "$JAVA_TAR" "${JAVA_TAR}.sha256.txt" && \
     ln -sf /opt/jdk-25/bin/java /usr/local/bin/java && \
     ln -sf /opt/jdk-25/bin/javac /usr/local/bin/javac
 
-# Install hytale-downloader binary
-# Default to amd64 for compatibility with older Docker versions
-ARG TARGETARCH=amd64
+# Install hytale-downloader binary (no published checksum; image pins URL)
 RUN DOWNLOADER_DIR="/opt/hytale-downloader" && \
     DOWNLOADER_BIN="$DOWNLOADER_DIR/hytale-downloader" && \
     TEMP_ZIP="/tmp/hytale-downloader.zip" && \
@@ -177,29 +183,24 @@ RUN if getent group 1000 > /dev/null 2>&1; then \
         useradd -u 1000 -g hypanel -m -s /bin/bash hypanel; \
     fi
 
-# Set up PAM configuration for authentication (optional, for PAM auth mode)
-# Note: This is kept for compatibility, but PAM auth requires authenticate-pam package
-# which is skipped in Docker builds. Users should use ENV auth mode instead.
-RUN echo "hypanel:x:1000:1000::/home/hypanel:/bin/bash" >> /etc/passwd && \
-    mkdir -p /etc/pam.d && \
-    echo "auth required pam_unix.so" > /etc/pam.d/hypanel && \
-    echo "account required pam_unix.so" >> /etc/pam.d/hypanel
+# Docker image uses ENV auth only; PAM is not installed (authenticate-pam skipped in build).
 
-# Copy built application from builder stage
-COPY --from=builder --chown=hypanel:hypanel /build /opt/hypanel
+# Copy only runtime artifacts (no source, caches, or dev node_modules)
+COPY --from=builder /build/apps/backend/package.json /build/apps/backend/package-lock.json /opt/hypanel/apps/backend/
+COPY --from=builder /build/apps/backend/dist /opt/hypanel/apps/backend/dist
+COPY --from=builder /build/apps/webpanel/dist /opt/hypanel/apps/webpanel/dist
 
-# Set working directory
 WORKDIR /opt/hypanel
 
-# Create directories for persistent data
+# Install production backend dependencies only
+RUN cd apps/backend && npm ci --omit=dev --no-optional
+
+# Create directories for persistent data and set ownership
 RUN mkdir -p apps/backend/data \
     apps/backend/servers \
     apps/backend/logs \
     apps/backend/backup && \
-    chown -R hypanel:hypanel apps/backend/data \
-    apps/backend/servers \
-    apps/backend/logs \
-    apps/backend/backup
+    chown -R hypanel:hypanel /opt/hypanel
 
 # Expose ports
 EXPOSE 3000 3001 5520/udp

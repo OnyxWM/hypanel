@@ -226,8 +226,8 @@ All configuration is done through the `.env` file. The setup script creates this
 | `HYPANEL_PASSWORD` | - | Plaintext password (testing only) |
 | `PORT` | `3000` | HTTP API server port |
 | `WS_PORT` | `3001` | WebSocket server port |
-| `PUID` | `1000` | User ID for file permissions |
-| `PGID` | `1000` | Group ID for file permissions |
+| `PUID` | `1000` | User ID (Compose `user:` and setup-docker.sh; not app env) |
+| `PGID` | `1000` | Group ID (Compose `user:` and setup-docker.sh; not app env) |
 
 **Password Hash Generation:**
 
@@ -309,7 +309,7 @@ Hypanel uses **bridge networking mode** with explicit port mappings to allow gam
 ### Troubleshooting
 
 **Permission issues with volumes:**
-- Ensure the `PUID` and `PGID` environment variables match your host user/group IDs
+- Ensure `PUID` and `PGID` in `.env` match your host user/group IDs (used by Compose `user:` and setup-docker.sh)
 - Check that volume mount directories exist and have correct permissions
 
 **Container won't start:**
