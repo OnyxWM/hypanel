@@ -65,3 +65,5 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
             VCS_REF=${{ github.sha }}
             IMAGE_SOURCE=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

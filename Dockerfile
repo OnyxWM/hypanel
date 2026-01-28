@@ -54,8 +54,14 @@ RUN npm install && \
 COPY apps/backend apps/backend/
 COPY apps/webpanel apps/webpanel/
 
+# Sync backend deps from lock file and build native modules (better-sqlite3) in builder
+RUN cd apps/backend && npm ci --omit=optional
+
 # Build backend TypeScript
 RUN cd apps/backend && npm run build
+
+# Keep only production backend deps for runtime copy (no devDependencies)
+RUN cd apps/backend && npm prune --production
 
 # Build frontend
 RUN cd apps/webpanel && npm run build
@@ -185,15 +191,13 @@ RUN if getent group 1000 > /dev/null 2>&1; then \
 
 # Docker image uses ENV auth only; PAM is not installed (authenticate-pam skipped in build).
 
-# Copy only runtime artifacts (no source, caches, or dev node_modules)
+# Copy only runtime artifacts (node_modules built in builder so no compile in runtime)
 COPY --from=builder /build/apps/backend/package.json /build/apps/backend/package-lock.json /opt/hypanel/apps/backend/
+COPY --from=builder /build/apps/backend/node_modules /opt/hypanel/apps/backend/node_modules
 COPY --from=builder /build/apps/backend/dist /opt/hypanel/apps/backend/dist
 COPY --from=builder /build/apps/webpanel/dist /opt/hypanel/apps/webpanel/dist
 
 WORKDIR /opt/hypanel
-
-# Install production backend dependencies only
-RUN cd apps/backend && npm ci --omit=dev --no-optional
 
 # Create directories for persistent data and set ownership
 RUN mkdir -p apps/backend/data \
