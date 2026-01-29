@@ -21,8 +21,9 @@ A Linux server manager tool for Hytale servers that allows you to create, instal
 Hypanel is tested and supported on:
 - **Ubuntu** 22.04, 24.04
 - **Debian** 12, 13
+- **Docker** 20.10+ with Docker Compose 2.0+ (linux/amd64 required; linux/arm64 optional)
 
-> **Note**: Hypanel may work on other Linux distributions, but they are not officially supported. If you choose to use Hypanel on an unsupported distribution, you will be responsible for testing and troubleshooting any issues that may arise.
+> **Note**: Hypanel may work on other Linux distributions or Docker hosts, but they are not officially supported. If you choose to use Hypanel on an unsupported system, you will be responsible for testing and troubleshooting any issues that may arise.
 
 ## Disclaimer
 
@@ -30,32 +31,83 @@ Hypanel is tested and supported on:
 
 ## Installation
 
+Choose one of the following: Docker install script (easiest for Docker), Docker manual (clone and build), or native Linux.
+
 ### Prerequisites
 
-Install `curl` if it's not already installed:
+- **For native Linux**: Install `curl` if needed: `sudo apt-get update && sudo apt-get install -y curl` (Ubuntu/Debian).
+- **For Docker**: **Docker** 20.10+ and **Docker Compose** 2.0+. Supported architectures: **linux/amd64** (required), **linux/arm64** (optional). For building from source on macOS: **Docker buildx** (included with Docker Desktop).
+
+### Option 1: Docker (install script)
+
+One-command install: no clone or build. The script creates a `hypanel` directory, pulls `docker-compose.yml` and config from the repo, pulls the pre-built image, prompts for a password, and starts the stack. Run from the directory where you want the `hypanel` folder (e.g. your home directory):
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get update && sudo apt-get install -y curl
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/setup-hypanel-docker.sh)"
 ```
 
-### Installation Steps
+Or download and run manually:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/setup-hypanel-docker.sh -o setup-hypanel-docker.sh
+bash setup-hypanel-docker.sh
+```
+
+Then see [After installation](#after-installation). Access the panel at `http://localhost:3000` (or your host IP).
+
+### Option 2: Docker (manual – pull image)
+
+Same as the install script but done step-by-step (no clone, no build). Use the pre-built image from the registry.
+
+1. **Create a directory and download config**:
+   ```bash
+   mkdir -p hypanel && cd hypanel
+   curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/docker-compose.yml -o docker-compose.yml
+   curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/.env.example -o .env.example
+   cp .env.example .env
+   ```
+
+2. **Pull the Docker image**:
+   ```bash
+   docker pull ghcr.io/onyxwm/hypanel:latest
+   ```
+
+3. **Set the panel password** (choose one):
+   - **Secret file** (recommended): generate a hash and write it to the file Docker Compose expects:
+     ```bash
+     mkdir -p secrets
+     docker run --rm -it --entrypoint "" -v "$(pwd)/secrets:/out" ghcr.io/onyxwm/hypanel:latest hypanel hash-password --output /out/hypanel_password_hash
+     ```
+   - **Or** put the hash or plaintext in `.env`: set `HYPANEL_PASSWORD_HASH` or `HYPANEL_PASSWORD` (see `.env.example` and the [Configuration](#configuration) section).
+
+4. **Start Hypanel**:
+   ```bash
+   docker compose up -d
+   ```
+
+Then see [After installation](#after-installation). Access the panel at `http://localhost:3000` (or your host IP).
+
+### Option 3: Native Linux
 
 1. **Run the installation script**:
    ```bash
-   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh)" 
+   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh)"
    ```
-   Or download and run the script manually:
+   Or download and run manually:
    ```bash
    curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/install.sh -o install.sh
    sudo bash install.sh
    ```
 
-2. **Access the web panel**: Visit `http://[your-server-ip]:3000` in your browser
+2. See [After installation](#after-installation). Access the panel at `http://[your-server-ip]:3000`.
 
-3. **Login**: Use the password you created during the installation process
+### After installation
 
-4. **Authorize the downloader**: Click the "Authorize" button at the top of the page to authorize the Hytale downloader. Once authorized, it will show "Authorized" status.
+1. **Access the web panel**: Visit `http://[your-server-ip]:3000` (or `http://localhost:3000` for Docker on the same machine).
+
+2. **Login**: Use the password you set during installation.
+
+3. **Authorize the downloader**: Click the "Authorize" button at the top of the page. Once authorized, it will show "Authorized" status.
 
    ![Auth Downloader Button](img/auth-downloader.png)
    
@@ -63,9 +115,9 @@ sudo apt-get update && sudo apt-get install -y curl
    
    ![Downloader Authorized](img/downloader-authorised.png)
 
-5. **Create and install a server**: From the dashboard, create a new server and install it.
+4. **Create and install a server**: From the dashboard, create a new server and install it.
 
-6. **Authorize the server** (first start only):
+5. **Authorize the server** (first start only):
    - When you start the server for the first time, it will show an "Auth Required" status
    
    ![Server Auth Required](img/auth-server.png)
@@ -86,118 +138,13 @@ sudo apt-get update && sudo apt-get install -y curl
 
 ### External Connections
 
-For external connections outside of your home network, you will need to configure standard port forwarding on your router. Forward the server's port (shown in the server details, e.g., `5520`) to your server's local IP address. This allows players from outside your local network to connect to your Hytale server.
+For external connections outside of your home network, configure port forwarding on your router: forward the server's port (e.g. `5520`) to your server's local IP. Consult your router's documentation for port forwarding instructions.
 
-**Note**: Port forwarding configuration varies by router manufacturer. Consult your router's documentation or admin interface for specific instructions on how to set up port forwarding.
+### Docker: data, configuration, and reference
 
-## Docker Installation
+The following applies after installing with **Option 1** or **Option 2** (Docker).
 
-Hypanel can also be installed and run using Docker, which provides an isolated environment and easier deployment. Docker installation is recommended for users who prefer containerized deployments or want to run Hypanel alongside other containerized services.
-
-### Prerequisites
-
-- **Docker** 20.10+ and **Docker Compose** 2.0+ installed
-- Supported architectures: **linux/amd64** (required), **linux/arm64** (optional)
-- **Docker buildx** (included with Docker Desktop, required for cross-platform builds on macOS)
-
-### Quick Start
-
-```bash
-# 1. Clone the repository
-git clone <repository-url>
-cd hypanel
-
-# 2. Run the setup script (one-time setup: creates .env, directories, etc.)
-./setup-docker.sh
-
-# 3. Build the Docker image
-# On macOS (especially Colima):
-./build-docker.sh
-# On Linux:
-docker-compose build
-
-# 4. Start Hypanel
-docker-compose up -d
-```
-
-That's it! Access the web panel at `http://localhost:3000` and login with the password you set during setup.
-
-### Installation Steps (Detailed)
-
-**Option A: Automated Setup (Recommended)**
-
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd hypanel
-   ```
-
-2. **Run the setup script** (one-time setup):
-   ```bash
-   ./setup-docker.sh
-   ```
-   
-   The script will:
-   - Create `.env` file from `.env.example`
-   - Prompt you for a password and generate a bcrypt hash
-   - Confirm use of Docker named volumes (no host directories to create)
-   - Check and configure Docker buildx (for macOS/Colima)
-
-3. **Build the Docker image**:
-   ```bash
-   # On macOS (especially with Colima), use the helper script:
-   ./build-docker.sh
-   
-   # Or manually with buildx:
-   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
-   
-   # On Linux, regular build works:
-   docker-compose build
-   ```
-
-4. **Start Hypanel**:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Access the web panel**: Visit `http://localhost:3000` in your browser and login
-
-**Option B: Manual Setup**
-
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd hypanel
-   ```
-
-2. **Create and configure `.env` file**:
-   ```bash
-   cp .env.example .env
-   # Edit .env and set HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD
-   ```
-
-3. **Build the Docker image**:
-   ```bash
-   # On macOS (especially with Colima), use the helper script:
-   ./build-docker.sh
-   
-   # Or manually with buildx:
-   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
-   
-   # On Linux, regular build works:
-   docker-compose build
-   ```
-
-4. **Start Hypanel**:
-   ```bash
-   docker-compose up -d
-   ```
-
-See `.env.example` for all configuration options and password hash generation instructions.
-
-**Note for macOS users:** The Docker image is built for `linux/amd64` by default (as specified in `docker-compose.yml`). On macOS (especially Apple Silicon), use Docker buildx for cross-platform builds. The buildx plugin is included with Docker Desktop and handles QEMU emulation automatically.
-
-### Docker Data Persistence
+#### Docker Data Persistence
 
 All persistent data is stored in Docker named volumes: `hypanel_data`, `hypanel_servers`, `hypanel_logs`, and `hypanel_backup`. Docker creates and manages them; no host directory permissions are required. You cannot browse `./data` in the project folder; use `docker volume inspect hypanel_data` or backup by mounting volumes into a helper container, for example:
 
@@ -207,7 +154,7 @@ docker run --rm -v hypanel_data:/data -v $(pwd):/backup alpine tar czf /backup/h
 
 Repeat for `hypanel_servers`, `hypanel_logs`, and `hypanel_backup` as needed.
 
-### Configuration
+#### Configuration
 
 All configuration is done through the `.env` file. The setup script creates this file automatically, or you can copy `.env.example` to `.env` and edit it manually.
 
@@ -228,7 +175,7 @@ If you need to generate a password hash manually, see instructions in `.env.exam
 node -e "const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 10).then(h => console.log(h));"
 ```
 
-### Docker Commands
+#### Docker Commands
 
 ```bash
 # Start Hypanel
@@ -272,14 +219,14 @@ docker rm -f hypanel
 docker-compose up -d
 ```
 
-### Differences from Linux Installation
+#### Differences from Linux Installation
 
 - **Authentication**: Docker uses ENV mode by default (password from environment variable), while Linux installation uses PAM (system user password)
 - **No systemd**: Docker handles process management, so systemd integration features are not available
 - **Isolated environment**: All dependencies are contained within the Docker image
 - **Easier updates**: Rebuild the container to update the application
 
-### Docker Networking
+#### Docker Networking
 
 Hypanel uses **bridge networking mode** with explicit port mappings to allow game servers to be accessible from the network. This configuration is compatible with NAS app stores and container orchestration platforms.
 
@@ -298,7 +245,7 @@ Hypanel uses **bridge networking mode** with explicit port mappings to allow gam
   - **UFW (Ubuntu/Debian)**: `sudo ufw allow 5520/udp`
   - **firewalld (CentOS/RHEL)**: `sudo firewall-cmd --add-port=5520/udp --permanent && sudo firewall-cmd --reload`
 
-### Troubleshooting
+#### Troubleshooting
 
 **Permission issues with volumes:**
 - With named volumes, host directory permissions are not used. If you see permission errors inside the container, ensure the container has started at least once (the entrypoint chowns volume mount points to the app user) or check logs: `docker-compose logs`
@@ -340,7 +287,7 @@ The documentation site includes detailed guides, API references, troubleshooting
 
 ## Uninstallation
 
-To completely remove Hypanel from your system, run the uninstall script:
+**Native Linux:** To completely remove Hypanel, run the uninstall script:
 
 ```bash
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/uninstall.sh)"
@@ -353,7 +300,16 @@ curl -fsSL https://raw.githubusercontent.com/OnyxWm/hypanel/main/uninstall.sh -o
 sudo bash uninstall.sh
 ```
 
-**Warning**: This will permanently delete all Hypanel data including server instances, configurations, databases, logs, and backups.
+**Docker:** Stop and remove the stack (optionally remove volumes to delete data):
+
+```bash
+cd hypanel   # or wherever you ran setup-hypanel-docker.sh
+docker compose down
+# Optional: remove volumes and data
+docker volume rm hypanel_data hypanel_servers hypanel_logs hypanel_backup 2>/dev/null || true
+```
+
+**Warning:** Uninstalling will permanently delete all Hypanel data (server instances, configurations, databases, logs, backups) for that installation.
 
 ## Development
 
