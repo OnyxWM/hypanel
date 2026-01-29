@@ -38,15 +38,11 @@ function verifyRuntimePermissions(): void {
       logger.info("Running as hypanel user - security model verified");
     }
     
-    // Verify critical directories exist and are writable
-    const criticalDirs = [
-      process.env.HYPANEL_SERVERS_DIR || "/home/hypanel/hytale",
-      process.env.HYPANEL_LOG_DIR || "/var/log/hypanel"
-    ];
+    // Verify critical directories exist and are writable (use same paths as config)
+    const criticalDirs = [config.serversDir, config.logsDir];
     
     for (const dir of criticalDirs) {
       try {
-        const fs = require("fs");
         if (!fs.existsSync(dir)) {
           logger.error(`Critical directory missing: ${dir}`);
           logger.error("Please run install.sh to set up the required directories");
