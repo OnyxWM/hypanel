@@ -13,6 +13,8 @@
     "test:dev": "tsx test/smoke.test.ts"
   },
   "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.0.0",
@@ -24,8 +26,12 @@
     "tsx": "^4.19.2",
     "typescript": "^5.9.3"
   },
+  "optionalDependencies": {
+    "authenticate-pam": "^1.0.5"
+  },
   "dependencies": {
-    "authenticate-pam": "^1.0.5",
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",

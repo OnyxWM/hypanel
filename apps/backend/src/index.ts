@@ -76,6 +76,27 @@ async function initialize(): Promise<void> {
   try {
     logger.info("Initializing Hypanel daemon...");
 
+    // Validate authentication configuration (fail-fast if misconfigured)
+    const authMethod = process.env.HYPANEL_AUTH_METHOD || "PAM";
+    if (authMethod === "ENV") {
+      const passwordHash = process.env.HYPANEL_PASSWORD_HASH;
+      const passwordPlain = process.env.HYPANEL_PASSWORD;
+      
+      if (!passwordHash && !passwordPlain) {
+        logger.error("HYPANEL_AUTH_METHOD=ENV requires HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD to be set");
+        logger.error("Please set one of these environment variables before starting the application");
+        process.exit(1);
+      }
+      
+      if (passwordHash) {
+        logger.info("Using ENV authentication with bcrypt hash (recommended)");
+      } else if (passwordPlain) {
+        logger.warn("Using ENV authentication with plaintext password (for testing only - use HYPANEL_PASSWORD_HASH in production)");
+      }
+    } else {
+      logger.info("Using PAM authentication (default)");
+    }
+
     // Verify runtime permissions model
     verifyRuntimePermissions();
 

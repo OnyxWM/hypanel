@@ -1,5 +1,8 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
+import fs from "fs";
+import path from "path";
+import { config } from "../config/config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,11 +59,169 @@ function realtimeMicrosToMs(value: unknown): number {
   return Math.floor(micros / 1000);
 }
 
+/**
+ * Detect if we're running in a Docker container
+ * Checks for /.dockerenv file (standard Docker indicator)
+ */
+export function isDockerEnvironment(): boolean {
+  try {
+    return fs.existsSync("/.dockerenv");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read logs from Docker environment (winston log files)
+ * Reads from winston daily-rotated log files and converts to JournalEntryWire format
+ */
+async function readDockerLogs(input: {
+  limit: number;
+  cursor?: string;
+}): Promise<{ entries: JournalEntryWire[]; nextCursor?: string }> {
+  const limit = Math.max(1, Math.min(1000, Math.floor(input.limit)));
+  const allEntries: JournalEntryWire[] = [];
+  
+  const logsDir = config.logsDir;
+  if (!fs.existsSync(logsDir)) {
+    return { entries: [], nextCursor: undefined };
+  }
+
+  // Parse cursor: format is "timestamp" (simple timestamp-based cursor)
+  let cursorTimestamp: number | undefined;
+  if (input.cursor && input.cursor.trim() !== "") {
+    // Try to parse as timestamp (first part before any colon)
+    const cursorParts = input.cursor.split(":");
+    if (cursorParts.length > 0 && cursorParts[0]) {
+      const ts = Number.parseInt(cursorParts[0], 10);
+      if (Number.isFinite(ts) && ts > 0) {
+        cursorTimestamp = ts;
+      }
+    }
+  }
+
+  // Get all log files matching pattern hypanel-YYYY-MM-DD.log
+  const logFiles: Array<{ path: string; date: string }> = [];
+  try {
+    const files = fs.readdirSync(logsDir);
+    const logFilePattern = /^hypanel-(\d{4}-\d{2}-\d{2})\.log$/;
+    
+    for (const file of files) {
+      const match = file.match(logFilePattern);
+      if (match && match[1]) {
+        logFiles.push({
+          path: path.join(logsDir, file),
+          date: match[1],
+        });
+      }
+    }
+    
+    // Sort by date ascending (oldest first) to read chronologically
+    logFiles.sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    // If we can't read the directory, return empty results
+    return { entries: [], nextCursor: undefined };
+  }
+
+  // Read all entries from all log files
+  for (const logFile of logFiles) {
+    try {
+      if (!fs.existsSync(logFile.path)) continue;
+      
+      const fileContent = fs.readFileSync(logFile.path, "utf-8");
+      const lines = fileContent.split("\n").filter((line) => line.trim());
+      
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
+        if (!line || !line.trim()) continue;
+        
+        try {
+          const logEntry = JSON.parse(line) as any;
+          
+          // Only process entries from hypanel service
+          if (logEntry.service !== "hypanel") continue;
+          
+          // Parse timestamp
+          let timestamp: number;
+          if (logEntry.timestamp) {
+            const date = new Date(logEntry.timestamp);
+            timestamp = date.getTime();
+            if (!Number.isFinite(timestamp)) {
+              timestamp = Date.now();
+            }
+          } else {
+            timestamp = Date.now();
+          }
+          
+          // Skip entries at or before cursor timestamp
+          if (cursorTimestamp !== undefined && timestamp <= cursorTimestamp) {
+            continue;
+          }
+          
+          // Convert winston level to SystemLogLevel
+          let level: SystemLogLevel = "info";
+          const winstonLevel = String(logEntry.level || "").toLowerCase();
+          if (winstonLevel === "error") {
+            level = "error";
+          } else if (winstonLevel === "warn" || winstonLevel === "warning") {
+            level = "warning";
+          }
+          
+          // Extract message
+          const message = stripAnsi(String(logEntry.message || ""));
+          
+          // Create cursor: timestamp (simple format for compatibility)
+          const cursor = String(timestamp);
+          
+          allEntries.push({
+            cursor,
+            timestamp,
+            level,
+            message,
+          });
+        } catch {
+          // Skip invalid JSON lines
+          continue;
+        }
+      }
+    } catch (error) {
+      // Skip files we can't read
+      continue;
+    }
+  }
+  
+  // Sort entries by timestamp ascending (oldest first) to match journalctl behavior
+  allEntries.sort((a, b) => a.timestamp - b.timestamp);
+  
+  // If we have a cursor, we want entries after it. Otherwise, get the most recent entries.
+  let entries: JournalEntryWire[];
+  if (cursorTimestamp !== undefined) {
+    // Filter to entries after cursor and take up to limit
+    entries = allEntries.filter(e => e.timestamp > cursorTimestamp).slice(0, limit);
+  } else {
+    // No cursor: take the last N entries (most recent)
+    entries = allEntries.slice(-limit);
+  }
+  
+  const nextCursor = entries.length > 0 ? entries[entries.length - 1]!.cursor : input.cursor;
+  
+  return {
+    entries,
+    nextCursor,
+  };
+}
+
 export async function readUnitJournal(input: {
   unit: string;
   limit: number;
   cursor?: string;
 }): Promise<{ entries: JournalEntryWire[]; nextCursor?: string }> {
+  // If running in Docker, use winston log files instead of journalctl
+  if (isDockerEnvironment()) {
+    return readDockerLogs({ limit: input.limit, cursor: input.cursor });
+  }
+
+  // Original journalctl implementation for non-Docker environments
   const limit = Math.max(1, Math.min(1000, Math.floor(input.limit)));
   const args: string[] = [
     "-u",

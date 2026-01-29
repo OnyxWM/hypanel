@@ -356,7 +356,7 @@ export default function SettingsPage() {
       <main className="pl-0 md:pl-64">
         <Header
           title="Settings"
-          subtitle="Manage global actions and view systemd logs for the Hypanel daemon"
+          subtitle="Manage global actions and view application logs for the Hypanel daemon"
         />
         <div className="p-4 md:p-6 space-y-6">
           {actionError && (
@@ -469,8 +469,8 @@ export default function SettingsPage() {
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-lg">Systemd logs</CardTitle>
-                <CardDescription>Live `journalctl -u hypanel` output.</CardDescription>
+                <CardTitle className="text-lg">Application logs</CardTitle>
+                <CardDescription>Live application log output.</CardDescription>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -510,7 +510,7 @@ export default function SettingsPage() {
                     ))}
                     {journalEntries.length === 0 && (
                       <p className="text-muted-foreground">
-                        No journal entries yet (or insufficient permissions to read the system journal).
+                        No log entries yet.
                       </p>
                     )}
                   </div>

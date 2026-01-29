@@ -1,0 +1,73 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Node modules (will be installed in container)
+node_modules
+**/node_modules
+
+# Development files
+*.log
+*.md
+!README.md
+.DS_Store
+.vscode
+.idea
+
+# Build artifacts (will be rebuilt in container)
+dist
+**/dist
+build
+**/build
+release
+**/release
+
+# Local data directories (use volumes instead)
+apps/backend/data
+apps/backend/servers
+apps/backend/logs
+apps/backend/backup
+data
+servers
+logs
+backup
+
+# Test files
+**/test
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+
+# Development scripts
+install-dev.sh
+*.sh
+!install.sh
+!uninstall.sh
+!docker-entrypoint.sh
+!scripts/hypanel-wrapper.sh
+
+# Documentation (keep README.md)
+docs
+DOCKER.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Environment files (use docker-compose env vars)
+.env
+.env.local
+.env.*.local
+
+# IDE files
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp
+temp
+*.tmp
