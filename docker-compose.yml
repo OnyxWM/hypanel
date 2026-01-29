@@ -8,6 +8,8 @@ services:
     container_name: hypanel
     restart: unless-stopped
     init: true
+    # Run as root so entrypoint can chown volume mount points to hypanel (required for named volumes)
+    user: "0:0"
 
     volumes:
       - hypanel_data:/opt/hypanel/apps/backend/data
