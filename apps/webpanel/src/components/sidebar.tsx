@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Download, X } from "lucide-react"
+import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Download, X, Copy } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/contexts/sidebar-context"
 import { useEffect, useState } from "react"
@@ -179,27 +179,57 @@ export function Sidebar() {
                         View release →
                       </a>
                     )}
-                    <div className="flex gap-2">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => {
-                          navigate("/settings?update=true")
-                          close()
-                        }}
-                        className="h-6 px-2 text-xs flex-1"
-                      >
-                        Update Now
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleDismissUpdate}
-                        className="h-6 px-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
-                      >
-                        Dismiss
-                      </Button>
-                    </div>
+                    {updateInfo.isDocker ? (
+                      <>
+                        <div className="text-xs text-sidebar-foreground/70 mb-1">
+                          To update, run on your host:
+                        </div>
+                        <div className="flex items-center gap-1 mb-2">
+                          <code className="flex-1 text-xs bg-sidebar-border/50 rounded px-2 py-1.5 break-all">
+                            docker compose pull && docker compose up -d
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 flex-shrink-0 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                            onClick={() => navigator.clipboard.writeText("docker compose pull && docker compose up -d")}
+                            title="Copy command"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleDismissUpdate}
+                          className="h-6 px-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                        >
+                          Dismiss
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => {
+                            navigate("/settings?update=true")
+                            close()
+                          }}
+                          className="h-6 px-2 text-xs flex-1"
+                        >
+                          Update Now
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleDismissUpdate}
+                          className="h-6 px-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <Button
                     variant="ghost"

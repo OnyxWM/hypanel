@@ -4,11 +4,8 @@
 services:
   hypanel:
     image: ghcr.io/OnyxWM/hypanel:latest
-    platform: linux/amd64  # Runtime platform (required for cross-platform builds on macOS)
     container_name: hypanel
     restart: unless-stopped
-    init: true
-    # Run as root so entrypoint can chown volume mount points to hypanel (required for named volumes)
     user: "0:0"
 
     volumes:

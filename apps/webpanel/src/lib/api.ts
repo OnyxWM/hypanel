@@ -101,6 +101,7 @@ export interface UpdateCheckResponse {
   rateLimitRemaining?: number
   rateLimitReset?: number
   error?: string
+  isDocker?: boolean
 }
 
 export interface VersionResponse {
