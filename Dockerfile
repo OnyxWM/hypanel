@@ -202,6 +202,10 @@ COPY --from=builder /build/apps/webpanel/dist /opt/hypanel/apps/webpanel/dist
 COPY docker-entrypoint.sh /opt/hypanel/docker-entrypoint.sh
 RUN chmod +x /opt/hypanel/docker-entrypoint.sh
 
+# CLI wrapper so users can run: hypanel hash-password
+COPY scripts/hypanel-wrapper.sh /usr/local/bin/hypanel
+RUN chmod +x /usr/local/bin/hypanel
+
 WORKDIR /opt/hypanel
 
 # Create directories for persistent data and set ownership

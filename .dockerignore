@@ -46,6 +46,7 @@ install-dev.sh
 !install.sh
 !uninstall.sh
 !docker-entrypoint.sh
+!scripts/hypanel-wrapper.sh
 
 # Documentation (keep README.md)
 docs
