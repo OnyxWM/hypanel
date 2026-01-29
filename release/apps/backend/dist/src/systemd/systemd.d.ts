@@ -6,6 +6,11 @@ export interface JournalEntryWire {
     level: SystemLogLevel;
     message: string;
 }
+/**
+ * Detect if we're running in a Docker container
+ * Checks for /.dockerenv file (standard Docker indicator)
+ */
+export declare function isDockerEnvironment(): boolean;
 export declare function readUnitJournal(input: {
     unit: string;
     limit: number;

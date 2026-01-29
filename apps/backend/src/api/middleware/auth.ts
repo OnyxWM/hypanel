@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { logger } from "../../logger/Logger.js";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { timingSafeEqual } from "crypto";
 
 export const SESSION_COOKIE_NAME = "hypanel_session";

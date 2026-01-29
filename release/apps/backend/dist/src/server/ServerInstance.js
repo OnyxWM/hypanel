@@ -132,6 +132,9 @@ export class ServerInstance extends EventEmitter {
                 // Ahead-of-time caching (writes/uses cache file in working directory)
                 args.push("-XX:AOTCache=HytaleServer.aot");
             }
+            if (this.config.acceptEarlyPlugins === true) {
+                args.push("--accept-early-plugins");
+            }
             args.push("-jar", jarPath, "--assets", assetsPath);
             // Add bind address (default to 0.0.0.0:port if not specified)
             const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";

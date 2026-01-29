@@ -5,7 +5,7 @@ set -e
 # Usage: ./setup-hypanel-docker.sh
 
 REPO_BASE="${REPO_BASE:-https://raw.githubusercontent.com/OnyxWm/hypanel/main}"
-IMAGE="${IMAGE:-ghcr.io/OnyxWM/hypanel:latest}"
+IMAGE="${IMAGE:-ghcr.io/onyxwm/hypanel:latest}"
 
 echo "==> Creating hypanel directory and entering it"
 mkdir -p hypanel

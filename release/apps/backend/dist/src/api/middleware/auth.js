@@ -1,12 +1,22 @@
 import { createRequire } from "module";
+import { readFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { logger } from "../../logger/Logger.js";
+import bcrypt from "bcryptjs";
+import { timingSafeEqual } from "crypto";
 export const SESSION_COOKIE_NAME = "hypanel_session";
 // `authenticate-pam` is a native addon; load via CJS require to avoid Node ESM
 // attempting to `import` the `.node` binary directly.
-const require = createRequire(import.meta.url);
-const pam = require("authenticate-pam");
+// Load PAM conditionally - it may not be available in all environments (e.g., Docker)
+let pam = null;
+try {
+    const require = createRequire(import.meta.url);
+    pam = require("authenticate-pam");
+}
+catch (err) {
+    logger.warn("PAM module not available - ENV authentication mode will be required");
+}
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
 const sessions = new Map();
 const loginRateLimit = new Map();
@@ -116,13 +126,64 @@ function isRequestSecure(req) {
     return false;
 }
 export async function authenticateOsUser(username, password) {
-    await new Promise((resolve, reject) => {
-        pam.authenticate(username, password, (err) => {
-            if (err)
-                return reject(err);
-            return resolve();
+    const authMethod = process.env.HYPANEL_AUTH_METHOD || "PAM";
+    if (authMethod === "ENV") {
+        // ENV authentication mode
+        let passwordHash = process.env.HYPANEL_PASSWORD_HASH;
+        const hashFile = process.env.HYPANEL_PASSWORD_HASH_FILE;
+        if (hashFile) {
+            try {
+                const content = readFileSync(hashFile, "utf8").trim();
+                if (content)
+                    passwordHash = content;
+            }
+            catch (err) {
+                logger.warn(`Failed to read HYPANEL_PASSWORD_HASH_FILE=${hashFile}: ${err instanceof Error ? err.message : String(err)}`);
+                throw new Error("Invalid password");
+            }
+        }
+        const passwordPlain = process.env.HYPANEL_PASSWORD;
+        if (passwordHash) {
+            // Precedence 1: Use bcrypt hash verification (recommended)
+            const isValid = await bcrypt.compare(password, passwordHash);
+            if (!isValid) {
+                throw new Error("Invalid password");
+            }
+            return;
+        }
+        else if (passwordPlain) {
+            // Precedence 2: Use constant-time comparison for plaintext (testing only)
+            // Convert both to buffers for constant-time comparison
+            const providedBuffer = Buffer.from(password, "utf8");
+            const expectedBuffer = Buffer.from(passwordPlain, "utf8");
+            // Ensure buffers are same length to prevent timing attacks
+            if (providedBuffer.length !== expectedBuffer.length) {
+                throw new Error("Invalid password");
+            }
+            const isValid = timingSafeEqual(providedBuffer, expectedBuffer);
+            if (!isValid) {
+                throw new Error("Invalid password");
+            }
+            return;
+        }
+        else {
+            // Precedence 3: Fail-fast - no credentials provided
+            throw new Error("HYPANEL_AUTH_METHOD=ENV requires HYPANEL_PASSWORD_HASH, HYPANEL_PASSWORD_HASH_FILE, or HYPANEL_PASSWORD to be set");
+        }
+    }
+    else {
+        // PAM authentication mode (default)
+        if (!pam) {
+            throw new Error("PAM authentication is not available. Set HYPANEL_AUTH_METHOD=ENV to use environment-based authentication.");
+        }
+        await new Promise((resolve, reject) => {
+            pam.authenticate(username, password, (err) => {
+                if (err)
+                    return reject(err);
+                return resolve();
+            });
         });
-    });
+    }
 }
 export const loginBodySchema = z.object({
     username: z.string().optional(),

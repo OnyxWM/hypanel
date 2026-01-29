@@ -3,7 +3,7 @@
 
 services:
   hypanel:
-    image: ghcr.io/OnyxWM/hypanel:latest
+    image: ghcr.io/onyxwm/hypanel:latest
     container_name: hypanel
     restart: unless-stopped
     user: "0:0"

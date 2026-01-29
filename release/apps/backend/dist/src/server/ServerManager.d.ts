@@ -34,6 +34,7 @@ export declare class ServerManager extends EventEmitter {
         backupFrequency?: number;
         backupMaxCount?: number;
         aotCacheEnabled?: boolean;
+        acceptEarlyPlugins?: boolean;
     }>): Promise<Server>;
     deleteServer(id: string): Promise<void>;
     startServer(id: string): Promise<void>;
