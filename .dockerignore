@@ -45,6 +45,7 @@ install-dev.sh
 *.sh
 !install.sh
 !uninstall.sh
+!docker-entrypoint.sh
 
 # Documentation (keep README.md)
 docs
