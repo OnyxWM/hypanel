@@ -96,6 +96,7 @@ RUN apt-get update && apt-get install -y \
     rsync \
     sudo \
     tini \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 24 LTS (pinned version, runtime only) with checksum verification
@@ -197,6 +198,10 @@ COPY --from=builder /build/apps/backend/node_modules /opt/hypanel/apps/backend/n
 COPY --from=builder /build/apps/backend/dist /opt/hypanel/apps/backend/dist
 COPY --from=builder /build/apps/webpanel/dist /opt/hypanel/apps/webpanel/dist
 
+# Entrypoint runs as root, chowns named volume mount points to hypanel, then exec's as hypanel
+COPY docker-entrypoint.sh /opt/hypanel/docker-entrypoint.sh
+RUN chmod +x /opt/hypanel/docker-entrypoint.sh
+
 WORKDIR /opt/hypanel
 
 # Create directories for persistent data and set ownership
@@ -209,11 +214,6 @@ RUN mkdir -p apps/backend/data \
 # Expose ports
 EXPOSE 3000 3001 5520/udp
 
-# Switch to hypanel user
-USER hypanel
-
-# Use tini as entrypoint for proper signal handling
-ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# Default command: start backend
+# Run as root so entrypoint can chown volume mount points; entrypoint drops to hypanel via gosu
+ENTRYPOINT ["/opt/hypanel/docker-entrypoint.sh"]
 CMD ["node", "apps/backend/dist/index.js"]

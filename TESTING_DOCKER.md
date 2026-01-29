@@ -134,7 +134,7 @@ docker-compose logs -f
 **If you see errors:**
 - Authentication error: Check that `HYPANEL_PASSWORD_HASH` or `HYPANEL_PASSWORD` is set
 - Port conflict: Ensure ports 3000/3001 aren't in use: `lsof -i :3000 -i :3001`
-- Permission errors: Check volume mount permissions
+- Permission errors: With named volumes, ensure the container has started at least once (entrypoint chowns); check `docker-compose logs`
 
 ## Step 8: Test Health Endpoint
 
@@ -220,9 +220,10 @@ Expected response:
    docker-compose down
    ```
 
-3. Verify data directories exist:
+3. Verify volumes exist:
    ```bash
-   ls -la data/ servers/ logs/ backup/
+   docker volume ls
+   # Optionally: docker volume inspect hypanel_data
    ```
 
 4. Restart the container:
@@ -271,10 +272,7 @@ docker buildx build --platform linux/arm64 -t hypanel:arm64 .
 ## Common Issues and Solutions
 
 ### Issue: "Permission denied" errors
-**Solution:** Check volume permissions:
-```bash
-sudo chown -R $USER:$USER data/ servers/ logs/ backup/
-```
+**Solution:** With named volumes, Docker manages permissions. Ensure the container has started at least once (the entrypoint chowns volume mount points to the app user). If errors persist, check container user or run `docker-compose logs` for details.
 
 ### Issue: "Port already in use"
 **Solution:** Change ports in `docker-compose.yml` or stop conflicting service:

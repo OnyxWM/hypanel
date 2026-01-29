@@ -162,32 +162,8 @@ HYPANEL_PASSWORD_HASH=$HASH" .env
     fi
 fi
 
-# Create necessary directories
-log "Creating data directories..."
-mkdir -p data servers logs backup
-log "Directories created: data/, servers/, logs/, backup/"
-
-# Set permissions (try to match PUID/PGID if set in .env)
-PUID_VAL=1000
-PGID_VAL=1000
-
-if [[ -f .env ]]; then
-    if grep -q "^PUID=" .env; then
-        PUID_VAL=$(grep "^PUID=" .env | cut -d'=' -f2 | tr -d ' ')
-    fi
-    if grep -q "^PGID=" .env; then
-        PGID_VAL=$(grep "^PGID=" .env | cut -d'=' -f2 | tr -d ' ')
-    fi
-fi
-
-# Try to set ownership (may fail if not running as root, that's okay)
-if command -v chown &> /dev/null; then
-    chown -R "${PUID_VAL}:${PGID_VAL}" data servers logs backup 2>/dev/null || \
-        warn "Could not set directory ownership. You may need to adjust permissions manually."
-fi
-
-# Set basic permissions
-chmod -R 755 data servers logs backup 2>/dev/null || true
+# Using Docker named volumes; no host directories needed
+log "Using Docker named volumes (hypanel_data, hypanel_servers, hypanel_logs, hypanel_backup); no host directories to create."
 
 # Check for Docker buildx (required for cross-platform builds on macOS)
 log "Checking Docker buildx support..."

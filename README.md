@@ -140,8 +140,7 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    The script will:
    - Create `.env` file from `.env.example`
    - Prompt you for a password and generate a bcrypt hash
-   - Create necessary data directories (`data/`, `servers/`, `logs/`, `backup/`)
-   - Set proper permissions
+   - Confirm use of Docker named volumes (no host directories to create)
    - Check and configure Docker buildx (for macOS/Colima)
 
 3. **Build the Docker image**:
@@ -177,12 +176,7 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    # Edit .env and set HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD
    ```
 
-3. **Create data directories**:
-   ```bash
-   mkdir -p data servers logs backup
-   ```
-
-4. **Build the Docker image**:
+3. **Build the Docker image**:
    ```bash
    # On macOS (especially with Colima), use the helper script:
    ./build-docker.sh
@@ -194,7 +188,7 @@ That's it! Access the web panel at `http://localhost:3000` and login with the pa
    docker-compose build
    ```
 
-5. **Start Hypanel**:
+4. **Start Hypanel**:
    ```bash
    docker-compose up -d
    ```
@@ -205,13 +199,13 @@ See `.env.example` for all configuration options and password hash generation in
 
 ### Docker Data Persistence
 
-All persistent data is stored in local directories mounted as volumes:
-- `./data` - Database and credentials
-- `./servers` - Hytale server instances
-- `./logs` - Application logs
-- `./backup` - Server backups
+All persistent data is stored in Docker named volumes: `hypanel_data`, `hypanel_servers`, `hypanel_logs`, and `hypanel_backup`. Docker creates and manages them; no host directory permissions are required. You cannot browse `./data` in the project folder; use `docker volume inspect hypanel_data` or backup by mounting volumes into a helper container, for example:
 
-These directories are created automatically when you start the container. To backup your installation, simply copy these directories.
+```bash
+docker run --rm -v hypanel_data:/data -v $(pwd):/backup alpine tar czf /backup/hypanel_data.tar.gz -C /data .
+```
+
+Repeat for `hypanel_servers`, `hypanel_logs`, and `hypanel_backup` as needed.
 
 ### Configuration
 
@@ -226,8 +220,6 @@ All configuration is done through the `.env` file. The setup script creates this
 | `HYPANEL_PASSWORD` | - | Plaintext password (testing only) |
 | `PORT` | `3000` | HTTP API server port |
 | `WS_PORT` | `3001` | WebSocket server port |
-| `PUID` | `1000` | User ID (Compose `user:` and setup-docker.sh; not app env) |
-| `PGID` | `1000` | Group ID (Compose `user:` and setup-docker.sh; not app env) |
 
 **Password Hash Generation:**
 
@@ -309,8 +301,7 @@ Hypanel uses **bridge networking mode** with explicit port mappings to allow gam
 ### Troubleshooting
 
 **Permission issues with volumes:**
-- Ensure `PUID` and `PGID` in `.env` match your host user/group IDs (used by Compose `user:` and setup-docker.sh)
-- Check that volume mount directories exist and have correct permissions
+- With named volumes, host directory permissions are not used. If you see permission errors inside the container, ensure the container has started at least once (the entrypoint chowns volume mount points to the app user) or check logs: `docker-compose logs`
 
 **Container won't start:**
 - Check logs: `docker-compose logs`

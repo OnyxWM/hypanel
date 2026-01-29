@@ -8,13 +8,12 @@ services:
     container_name: hypanel
     restart: unless-stopped
     init: true
-    user: "${PUID:-1000}:${PGID:-1000}"
-    
+
     volumes:
-      - ./data:/opt/hypanel/apps/backend/data
-      - ./servers:/opt/hypanel/apps/backend/servers
-      - ./logs:/opt/hypanel/apps/backend/logs
-      - ./backup:/opt/hypanel/apps/backend/backup
+      - hypanel_data:/opt/hypanel/apps/backend/data
+      - hypanel_servers:/opt/hypanel/apps/backend/servers
+      - hypanel_logs:/opt/hypanel/apps/backend/logs
+      - hypanel_backup:/opt/hypanel/apps/backend/backup
     
     ports:
       - "3000:3000"    # Panel HTTP API
@@ -46,3 +45,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+volumes:
+  hypanel_data:
+  hypanel_servers:
+  hypanel_logs:
+  hypanel_backup:
