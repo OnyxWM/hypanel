@@ -170,6 +170,10 @@ export class ServerInstance extends EventEmitter {
         args.push("-XX:AOTCache=HytaleServer.aot");
       }
 
+      if (this.config.acceptEarlyPlugins === true) {
+        args.push("--accept-early-plugins");
+      }
+
       args.push(
         "-jar",
         jarPath,

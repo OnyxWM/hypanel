@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { createRequire } from "module";
+import { readFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { logger } from "../../logger/Logger.js";
@@ -145,9 +146,19 @@ export async function authenticateOsUser(username: string, password: string): Pr
   
   if (authMethod === "ENV") {
     // ENV authentication mode
-    const passwordHash = process.env.HYPANEL_PASSWORD_HASH;
+    let passwordHash: string | undefined = process.env.HYPANEL_PASSWORD_HASH;
+    const hashFile = process.env.HYPANEL_PASSWORD_HASH_FILE;
+    if (hashFile) {
+      try {
+        const content = readFileSync(hashFile, "utf8").trim();
+        if (content) passwordHash = content;
+      } catch (err) {
+        logger.warn(`Failed to read HYPANEL_PASSWORD_HASH_FILE=${hashFile}: ${err instanceof Error ? err.message : String(err)}`);
+        throw new Error("Invalid password");
+      }
+    }
     const passwordPlain = process.env.HYPANEL_PASSWORD;
-    
+
     if (passwordHash) {
       // Precedence 1: Use bcrypt hash verification (recommended)
       const isValid = await bcrypt.compare(password, passwordHash);
@@ -173,7 +184,7 @@ export async function authenticateOsUser(username: string, password: string): Pr
       return;
     } else {
       // Precedence 3: Fail-fast - no credentials provided
-      throw new Error("HYPANEL_AUTH_METHOD=ENV requires HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD to be set");
+      throw new Error("HYPANEL_AUTH_METHOD=ENV requires HYPANEL_PASSWORD_HASH, HYPANEL_PASSWORD_HASH_FILE, or HYPANEL_PASSWORD to be set");
     }
   } else {
     // PAM authentication mode (default)

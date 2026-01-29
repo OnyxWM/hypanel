@@ -291,6 +291,7 @@ export class ServerManager extends EventEmitter {
             bindAddress: config.bindAddress || config.ip || "0.0.0.0",
             backupEnabled: config.backupEnabled,
             aotCacheEnabled: config.aotCacheEnabled,
+            acceptEarlyPlugins: config.acceptEarlyPlugins,
           };
           const instance = new ServerInstance(finalConfig);
           this.setupInstanceListeners(instance);
@@ -359,6 +360,7 @@ export class ServerManager extends EventEmitter {
       bindAddress: config.bindAddress || config.ip || "0.0.0.0",
       backupEnabled: config.backupEnabled !== undefined ? config.backupEnabled : true,
       aotCacheEnabled: config.aotCacheEnabled !== undefined ? config.aotCacheEnabled : false,
+      acceptEarlyPlugins: config.acceptEarlyPlugins !== undefined ? config.acceptEarlyPlugins : false,
       id,
     };
 
@@ -472,6 +474,7 @@ export class ServerManager extends EventEmitter {
     backupFrequency?: number;
     backupMaxCount?: number;
     aotCacheEnabled?: boolean;
+    acceptEarlyPlugins?: boolean;
   }>): Promise<Server> {
     logConfigOperation(id, "validation", "Starting server config update");
 
@@ -711,6 +714,7 @@ export class ServerManager extends EventEmitter {
         bindAddress: config.bindAddress || config.ip || "0.0.0.0",
         backupEnabled: config.backupEnabled,
         aotCacheEnabled: config.aotCacheEnabled,
+        acceptEarlyPlugins: config.acceptEarlyPlugins,
       };
 
       // Double-check path is still valid
@@ -918,6 +922,7 @@ export class ServerManager extends EventEmitter {
     let backupFrequency: number | undefined = undefined;
     let backupMaxCount: number | undefined = undefined;
     let aotCacheEnabled: boolean | undefined = undefined;
+    let acceptEarlyPlugins: boolean | undefined = undefined;
     if (!instance) {
       try {
         const serverRoot = dbServer.serverRoot && typeof dbServer.serverRoot === "string" && dbServer.serverRoot.trim() !== ""
@@ -931,6 +936,7 @@ export class ServerManager extends EventEmitter {
           backupFrequency = config.backupFrequency;
           backupMaxCount = config.backupMaxCount;
           aotCacheEnabled = config.aotCacheEnabled;
+          acceptEarlyPlugins = config.acceptEarlyPlugins;
         }
       } catch (error) {
         // Config might not exist, use default
@@ -949,6 +955,7 @@ export class ServerManager extends EventEmitter {
         backupFrequency,
         backupMaxCount,
         aotCacheEnabled,
+        acceptEarlyPlugins,
         uptime: 0,
         // Replace "0.0.0.0" with actual server IP for display
         ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
@@ -973,6 +980,7 @@ export class ServerManager extends EventEmitter {
       backupFrequency: config.backupFrequency,
       backupMaxCount: config.backupMaxCount,
       aotCacheEnabled: config.aotCacheEnabled,
+      acceptEarlyPlugins: config.acceptEarlyPlugins,
       uptime,
       // Clear stats if server is offline
       cpu: status === "online" ? dbServer.cpu : 0,
@@ -1008,6 +1016,7 @@ export class ServerManager extends EventEmitter {
         let maxPlayers = dbServer.maxPlayers || 0;
         let backupEnabled: boolean | undefined = undefined;
         let aotCacheEnabled: boolean | undefined = undefined;
+        let acceptEarlyPlugins: boolean | undefined = undefined;
         try {
           const serverRoot = dbServer.serverRoot && typeof dbServer.serverRoot === "string" && dbServer.serverRoot.trim() !== ""
             ? dbServer.serverRoot
@@ -1018,6 +1027,7 @@ export class ServerManager extends EventEmitter {
             maxPlayers = config.maxPlayers || 0;
             backupEnabled = config.backupEnabled;
             aotCacheEnabled = config.aotCacheEnabled;
+            acceptEarlyPlugins = config.acceptEarlyPlugins;
           }
         } catch (error) {
           // Config might not exist, use default
@@ -1034,6 +1044,7 @@ export class ServerManager extends EventEmitter {
           maxPlayers: hytaleMaxPlayers ?? maxPlayers,
           backupEnabled,
           aotCacheEnabled,
+          acceptEarlyPlugins,
           uptime: 0,
           // Replace "0.0.0.0" with actual server IP for display
           ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
@@ -1055,6 +1066,7 @@ export class ServerManager extends EventEmitter {
         maxPlayers: hytaleMaxPlayers ?? config.maxPlayers,
         backupEnabled: config.backupEnabled,
         aotCacheEnabled: config.aotCacheEnabled,
+        acceptEarlyPlugins: config.acceptEarlyPlugins,
         uptime,
         // Clear stats if server is offline
         cpu: status === "online" ? dbServer.cpu : 0,

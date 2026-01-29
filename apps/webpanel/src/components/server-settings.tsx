@@ -37,6 +37,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
   const [backupFrequency, setBackupFrequency] = useState(30)
   const [backupMaxCount, setBackupMaxCount] = useState(5)
   const [aotCacheEnabled, setAotCacheEnabled] = useState(false)
+  const [acceptEarlyPlugins, setAcceptEarlyPlugins] = useState(false)
 
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -59,6 +60,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
       setBackupFrequency(s.backupFrequency ?? 30)
       setBackupMaxCount(s.backupMaxCount ?? 5)
       setAotCacheEnabled(s.aotCacheEnabled ?? false)
+      setAcceptEarlyPlugins(s.acceptEarlyPlugins ?? false)
       setSuccess(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load server")
@@ -81,6 +83,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
     const nextBackupFrequency = backupFrequency
     const nextBackupMaxCount = backupMaxCount
     const nextAotCacheEnabled = aotCacheEnabled
+    const nextAcceptEarlyPlugins = acceptEarlyPlugins
     return (
       nextName !== original.name ||
       nextMaxMemory !== original.maxMemory ||
@@ -88,9 +91,10 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
       nextBackupEnabled !== (original.backupEnabled ?? true) ||
       nextBackupFrequency !== (original.backupFrequency ?? 30) ||
       nextBackupMaxCount !== (original.backupMaxCount ?? 5) ||
-      nextAotCacheEnabled !== (original.aotCacheEnabled ?? false)
+      nextAotCacheEnabled !== (original.aotCacheEnabled ?? false) ||
+      nextAcceptEarlyPlugins !== (original.acceptEarlyPlugins ?? false)
     )
-  }, [original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled])
+  }, [original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled, acceptEarlyPlugins])
 
   const handleReset = () => {
     if (!original) return
@@ -101,6 +105,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
     setBackupFrequency(original.backupFrequency ?? 30)
     setBackupMaxCount(original.backupMaxCount ?? 5)
     setAotCacheEnabled(original.aotCacheEnabled ?? false)
+    setAcceptEarlyPlugins(original.acceptEarlyPlugins ?? false)
     setError(null)
     setSuccess(false)
   }
@@ -121,6 +126,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
         backupFrequency,
         backupMaxCount,
         aotCacheEnabled,
+        acceptEarlyPlugins,
       })
 
       setServer(updated)
@@ -327,6 +333,30 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   Adds <span className="font-mono">-XX:AOTCache=HytaleServer.aot</span> to the Java startup flags.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Accept early plugins</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-start space-x-2">
+              <Checkbox
+                id="acceptEarlyPlugins"
+                checked={acceptEarlyPlugins}
+                onCheckedChange={(checked) => setAcceptEarlyPlugins(checked === true)}
+                disabled={!canEdit}
+              />
+              <div className="space-y-1">
+                <Label htmlFor="acceptEarlyPlugins" className="text-sm font-normal cursor-pointer">
+                  Accept early plugins
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Adds <span className="font-mono">--accept-early-plugins</span> to the server startup arguments.
                 </p>
               </div>
             </div>

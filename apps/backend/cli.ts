@@ -2,16 +2,27 @@
 /**
  * Hypanel CLI — e.g. hypanel hash-password (interactive or --password '...')
  * Use bcryptjs (pure JS) for hashing; output is compatible with server's bcrypt.compare().
+ * Optional --output <path> writes the raw hash to a file (e.g. for Docker secrets).
  */
 import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import * as readline from "readline";
 import bcrypt from "bcryptjs";
 
 const HASH_COST = 12;
-const USAGE = "Usage: hypanel hash-password [--password 'your-password']";
+const USAGE = "Usage: hypanel hash-password [--password 'your-password'] [--output <path>]";
 
 function getPasswordFromArgv(argv: string[]): string | null {
   const idx = argv.indexOf("--password");
+  if (idx === -1) return null;
+  const value = argv[idx + 1];
+  if (value === undefined || value.startsWith("--")) return null;
+  return value;
+}
+
+function getOutputFromArgv(argv: string[]): string | null {
+  const idx = argv.indexOf("--output");
   if (idx === -1) return null;
   const value = argv[idx + 1];
   if (value === undefined || value.startsWith("--")) return null;
@@ -59,6 +70,7 @@ async function hashPassword(): Promise<void> {
 
   const rest = argv.slice(1);
   const passwordArg = getPasswordFromArgv(rest);
+  const outputPath = getOutputFromArgv(rest);
 
   let password: string;
   if (passwordArg !== null) {
@@ -81,7 +93,17 @@ async function hashPassword(): Promise<void> {
   }
 
   const hash = bcrypt.hashSync(password, HASH_COST);
-  console.log(`HYPANEL_PASSWORD_HASH=${hash}`);
+
+  if (outputPath) {
+    const dir = path.dirname(outputPath);
+    if (dir !== ".") {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(outputPath, hash.trim() + "\n", { mode: 0o600 });
+    console.error(`Wrote hash to ${outputPath}`);
+  } else {
+    console.log(`HYPANEL_PASSWORD_HASH=${hash}`);
+  }
 }
 
 hashPassword().then(

@@ -185,6 +185,7 @@ export default function DashboardPage() {
     port?: number
     backupEnabled?: boolean
     aotCacheEnabled?: boolean
+    acceptEarlyPlugins?: boolean
   }) => {
     const serverPath = `hytale/${data.name.toLowerCase().replace(/\s+/g, "-")}`;
     try {
@@ -200,6 +201,7 @@ export default function DashboardPage() {
         ip: "0.0.0.0",
         backupEnabled: data.backupEnabled,
         aotCacheEnabled: data.aotCacheEnabled,
+        acceptEarlyPlugins: data.acceptEarlyPlugins,
       })
       setServers((prev) => [...prev, newServer])
     } catch (err) {

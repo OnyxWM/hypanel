@@ -9,6 +9,9 @@ servers/
 logs/
 backup/
 
+# Secret files (e.g. password hash for Docker)
+secrets/
+
 # Node modules
 node_modules/
 

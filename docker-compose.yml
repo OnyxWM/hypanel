@@ -33,10 +33,14 @@ services:
       - LOGS_DIR=${LOGS_DIR:-/opt/hypanel/apps/backend/logs}
       - BACKUP_DIR=${BACKUP_DIR:-/opt/hypanel/apps/backend/backup}
       
-      # Authentication (read from .env file)
+      # Authentication: .env vars and/or file-based hash (Docker secret)
       - HYPANEL_AUTH_METHOD=${HYPANEL_AUTH_METHOD:-ENV}
       - HYPANEL_PASSWORD_HASH=${HYPANEL_PASSWORD_HASH:-}
+      - HYPANEL_PASSWORD_HASH_FILE=${HYPANEL_PASSWORD_HASH_FILE:-/run/secrets/hypanel_password_hash}
       - HYPANEL_PASSWORD=${HYPANEL_PASSWORD:-}
+    
+    secrets:
+      - hypanel_password_hash
     
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -44,6 +48,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+secrets:
+  hypanel_password_hash:
+    file: ./secrets/hypanel_password_hash
 
 volumes:
   hypanel_data:
