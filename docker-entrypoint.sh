@@ -10,6 +10,13 @@ if [ "$(id -u)" = "0" ]; then
     [ -d "$dir" ] || mkdir -p "$dir"
     chown -R hypanel:hypanel "$dir" || true
   done
+  # Docker secrets are root-only; copy to a file hypanel can read (inherited by child)
+  if [ -r /run/secrets/hypanel_password_hash ]; then
+    cp /run/secrets/hypanel_password_hash /tmp/hypanel_password_hash
+    chown hypanel:hypanel /tmp/hypanel_password_hash
+    chmod 600 /tmp/hypanel_password_hash
+    export HYPANEL_PASSWORD_HASH_FILE=/tmp/hypanel_password_hash
+  fi
   exec gosu hypanel /usr/bin/tini -- "$@"
 else
   exec /usr/bin/tini -- "$@"
