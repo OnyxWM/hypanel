@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { RotateCcw, Power, RefreshCw, Download } from "lucide-react"
+import { RotateCcw, Power, RefreshCw, Download, Copy } from "lucide-react"
 
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
@@ -105,7 +105,7 @@ export default function SettingsPage() {
       // Remove the query parameter from URL
       setSearchParams({})
       
-      // First check for updates, then start the update process
+      // First check for updates, then start the update process (native only; Docker shows command)
       const triggerUpdate = async () => {
         try {
           // Check for updates first
@@ -114,12 +114,15 @@ export default function SettingsPage() {
           setUpdateCheckResult(result)
           setCheckUpdateState("idle")
           
-          // If update is available, start the update process (skip confirmation since user clicked "Update Now")
-          if (result.updateAvailable) {
+          // If update is available and native install, start the update process (skip confirmation since user clicked "Update Now")
+          if (result.updateAvailable && !result.isDocker) {
             // Small delay to let the UI update
             setTimeout(() => {
               runUpdateApplication(true)
             }, 500)
+          } else if (result.updateAvailable && result.isDocker) {
+            // Docker: just show the result with the command; no in-app update
+            setActionSuccess(`Update available! Current: ${result.currentVersion}, Latest: ${result.latestVersion}. Run the command below on your host.`)
           } else {
             setActionError("No update available")
           }
@@ -282,6 +285,7 @@ export default function SettingsPage() {
   const runUpdateApplication = async (skipConfirmation: boolean = false, providedPassword?: string) => {
     if (!canRunActions) return
     if (!updateCheckResult?.updateAvailable) return
+    if (updateCheckResult?.isDocker) return // Docker updates are done on the host
     if (!skipConfirmation && !window.confirm("This will stop all servers, download and install the update, then restart the service. Continue?")) return
 
     setActionError(null)
@@ -356,7 +360,7 @@ export default function SettingsPage() {
       <main className="pl-0 md:pl-64">
         <Header
           title="Settings"
-          subtitle="Manage global actions and view systemd logs for the Hypanel daemon"
+          subtitle="Manage global actions and view application logs for the Hypanel daemon"
         />
         <div className="p-4 md:p-6 space-y-6">
           {actionError && (
@@ -426,7 +430,7 @@ export default function SettingsPage() {
                   {checkUpdateState === "running" ? "Checking..." : "Check for updates"}
                 </Button>
 
-                {updateCheckResult && updateCheckResult.updateAvailable && (
+                {updateCheckResult && updateCheckResult.updateAvailable && !updateCheckResult.isDocker && (
                   <Button
                     variant="default"
                     onClick={() => runUpdateApplication()}
@@ -438,6 +442,29 @@ export default function SettingsPage() {
                   </Button>
                 )}
               </div>
+
+              {updateCheckResult && updateCheckResult.updateAvailable && updateCheckResult.isDocker && (
+                <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Please run the following command on your host:
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-sm bg-muted rounded px-3 py-2 break-all">
+                      docker compose pull && docker compose up -d
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-shrink-0"
+                      onClick={() => navigator.clipboard.writeText("docker compose pull && docker compose up -d")}
+                      title="Copy command"
+                    >
+                      <Copy className="h-4 w-4 mr-1" />
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {updateProgress && (
                 <div className="text-sm text-muted-foreground">
@@ -469,8 +496,8 @@ export default function SettingsPage() {
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-lg">Systemd logs</CardTitle>
-                <CardDescription>Live `journalctl -u hypanel` output.</CardDescription>
+                <CardTitle className="text-lg">Application logs</CardTitle>
+                <CardDescription>Live application log output.</CardDescription>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -510,7 +537,7 @@ export default function SettingsPage() {
                     ))}
                     {journalEntries.length === 0 && (
                       <p className="text-muted-foreground">
-                        No journal entries yet (or insufficient permissions to read the system journal).
+                        No log entries yet.
                       </p>
                     )}
                   </div>

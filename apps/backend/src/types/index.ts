@@ -15,6 +15,7 @@ export interface Server {
   backupFrequency?: number;
   backupMaxCount?: number;
   aotCacheEnabled?: boolean;
+  acceptEarlyPlugins?: boolean;
   uptime: number;
   ip: string;
   port: number;
@@ -57,6 +58,7 @@ export interface ServerConfig {
   backupFrequency?: number; // Default: 30 (minutes)
   backupMaxCount?: number; // Default: 5
   aotCacheEnabled?: boolean; // Default: false
+  acceptEarlyPlugins?: boolean; // Default: false
 }
 
 export interface ServerStats {

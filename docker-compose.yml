@@ -1,0 +1,60 @@
+# Docker Compose automatically reads variables from .env file in the same directory
+# Copy .env.example to .env and edit as needed: cp .env.example .env
+
+services:
+  hypanel:
+    image: ghcr.io/onyxwm/hypanel:latest
+    container_name: hypanel
+    restart: unless-stopped
+    user: "0:0"
+
+    volumes:
+      - hypanel_data:/opt/hypanel/apps/backend/data
+      - hypanel_servers:/opt/hypanel/apps/backend/servers
+      - hypanel_logs:/opt/hypanel/apps/backend/logs
+      - hypanel_backup:/opt/hypanel/apps/backend/backup
+    
+    ports:
+      - "3000:3000"    # Panel HTTP API
+      - "3001:3001"    # WebSocket server
+      - "5520:5520/udp"  # Game server port (UDP)
+    
+    environment:
+      # Node.js environment
+      - NODE_ENV=${NODE_ENV:-production}
+      
+      # Server ports
+      - PORT=${PORT:-3000}
+      - WS_PORT=${WS_PORT:-3001}
+      
+      # Explicit paths (matching volume mounts)
+      - DATABASE_PATH=${DATABASE_PATH:-/opt/hypanel/apps/backend/data/hypanel.db}
+      - SERVERS_DIR=${SERVERS_DIR:-/opt/hypanel/apps/backend/servers}
+      - LOGS_DIR=${LOGS_DIR:-/opt/hypanel/apps/backend/logs}
+      - BACKUP_DIR=${BACKUP_DIR:-/opt/hypanel/apps/backend/backup}
+      
+      # Authentication: .env vars and/or file-based hash (Docker secret)
+      - HYPANEL_AUTH_METHOD=${HYPANEL_AUTH_METHOD:-ENV}
+      - HYPANEL_PASSWORD_HASH=${HYPANEL_PASSWORD_HASH:-}
+      - HYPANEL_PASSWORD_HASH_FILE=${HYPANEL_PASSWORD_HASH_FILE:-/run/secrets/hypanel_password_hash}
+      - HYPANEL_PASSWORD=${HYPANEL_PASSWORD:-}
+    
+    secrets:
+      - hypanel_password_hash
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+secrets:
+  hypanel_password_hash:
+    file: ./secrets/hypanel_password_hash
+
+volumes:
+  hypanel_data:
+  hypanel_servers:
+  hypanel_logs:
+  hypanel_backup:

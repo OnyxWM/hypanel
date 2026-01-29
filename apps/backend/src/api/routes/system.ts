@@ -6,7 +6,7 @@ import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { ServerManager } from "../../server/ServerManager.js";
-import { HYPANEL_SYSTEMD_UNIT, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
+import { HYPANEL_SYSTEMD_UNIT, isDockerEnvironment, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
 import { getCurrentVersion, compareVersions } from "../../utils/version.js";
 
 const execAsync = promisify(exec);
@@ -251,7 +251,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       // Check cache first (unless force refresh is requested)
       if (!forceRefresh && updateCheckCache && now < updateCheckCache.expiresAt) {
         // Return cached data, but update currentVersion in case it changed
-        const cachedData = { ...updateCheckCache.data, currentVersion };
+        const cachedData = { ...updateCheckCache.data, currentVersion, isDocker: isDockerEnvironment() };
         return res.json(cachedData);
       }
 
@@ -309,7 +309,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
               expiresAt: now + (15 * 60 * 1000), // 15 minutes
             };
 
-            return res.status(429).json(updateCheckCache.data);
+            return res.status(429).json({ ...updateCheckCache.data, isDocker: isDockerEnvironment() });
           }
 
           if (response.status === 404) {
@@ -331,7 +331,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
               expiresAt: now + CACHE_DURATION_MS,
             };
 
-            return res.json(errorData);
+            return res.json({ ...errorData, isDocker: isDockerEnvironment() });
           }
 
           throw new Error(`GitHub API returned ${response.status}`);
@@ -369,7 +369,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
               expiresAt: now + CACHE_DURATION_MS,
             };
 
-            return res.json(errorData);
+            return res.json({ ...errorData, isDocker: isDockerEnvironment() });
           }
 
           latestRelease = betaReleases[0]!;
@@ -396,7 +396,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
           expiresAt: now + (15 * 60 * 1000),
         };
 
-        return res.status(503).json(errorData);
+        return res.status(503).json({ ...errorData, isDocker: isDockerEnvironment() });
       }
 
       // Extract version from tag (remove 'v' prefix if present)
@@ -425,7 +425,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         expiresAt: now + CACHE_DURATION_MS,
       };
 
-      res.json(responseData);
+      res.json({ ...responseData, isDocker: isDockerEnvironment() });
     } catch (error) {
       console.error("Error checking for updates:", error);
       res.status(500).json({
@@ -434,6 +434,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         updateAvailable: false,
         error: "Failed to check for updates",
         message: error instanceof Error ? error.message : String(error),
+        isDocker: isDockerEnvironment(),
       });
     }
   });

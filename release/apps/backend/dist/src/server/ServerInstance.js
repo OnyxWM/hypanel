@@ -133,6 +133,10 @@ export class ServerInstance extends EventEmitter {
                 args.push("-XX:AOTCache=HytaleServer.aot");
             }
             args.push("-jar", jarPath, "--assets", assetsPath);
+            // Application args (after -jar): passed to Hytale server, not the JVM
+            if (this.config.acceptEarlyPlugins === true) {
+                args.push("--accept-early-plugins");
+            }
             // Add bind address (default to 0.0.0.0:port if not specified)
             const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";
             args.push("--bind", `${bindAddress}:${this.config.port}`);

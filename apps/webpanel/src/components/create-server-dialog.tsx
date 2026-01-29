@@ -26,6 +26,7 @@ interface CreateServerDialogProps {
     backupFrequency?: number
     backupMaxCount?: number
     aotCacheEnabled?: boolean
+    acceptEarlyPlugins?: boolean
   }) => Promise<void>
 }
 
@@ -38,6 +39,7 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
   const [backupFrequency, setBackupFrequency] = useState(30)
   const [backupMaxCount, setBackupMaxCount] = useState(5)
   const [aotCacheEnabled, setAotCacheEnabled] = useState(true)
+  const [acceptEarlyPlugins, setAcceptEarlyPlugins] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,6 +54,7 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
         backupFrequency,
         backupMaxCount,
         aotCacheEnabled,
+        acceptEarlyPlugins,
       })
       setOpen(false)
       setName("")
@@ -61,6 +64,7 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
       setBackupFrequency(30)
       setBackupMaxCount(5)
       setAotCacheEnabled(true)
+      setAcceptEarlyPlugins(false)
     } finally {
       setIsLoading(false)
     }
@@ -157,6 +161,21 @@ export function CreateServerDialog({ onCreateServer }: CreateServerDialogProps) 
               <Label htmlFor="aotCacheEnabled" className="text-sm font-normal cursor-pointer">
                 Enable Ahead-of-Time (AOT) caching
               </Label>
+            </div>
+            <div className="flex items-start space-x-2">
+              <Checkbox
+                id="acceptEarlyPlugins"
+                checked={acceptEarlyPlugins}
+                onCheckedChange={(checked: boolean | "indeterminate") => setAcceptEarlyPlugins(checked === true)}
+              />
+              <div className="space-y-1">
+                <Label htmlFor="acceptEarlyPlugins" className="text-sm font-normal cursor-pointer">
+                  Accept early plugins
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Adds <span className="font-mono">--accept-early-plugins</span> to the server startup arguments.
+                </p>
+              </div>
             </div>
           </div>
           <DialogFooter>

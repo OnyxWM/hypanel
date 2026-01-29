@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { HYPANEL_SYSTEMD_UNIT, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
+import { HYPANEL_SYSTEMD_UNIT, isDockerEnvironment, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
 import { getCurrentVersion, compareVersions } from "../../utils/version.js";
 const execAsync = promisify(exec);
 // In-memory cache for GitHub release data
@@ -190,7 +190,7 @@ export function createSystemRoutes(serverManager) {
             // Check cache first (unless force refresh is requested)
             if (!forceRefresh && updateCheckCache && now < updateCheckCache.expiresAt) {
                 // Return cached data, but update currentVersion in case it changed
-                const cachedData = { ...updateCheckCache.data, currentVersion };
+                const cachedData = { ...updateCheckCache.data, currentVersion, isDocker: isDockerEnvironment() };
                 return res.json(cachedData);
             }
             // Fetch latest release from GitHub API based on configured channel
@@ -238,7 +238,7 @@ export function createSystemRoutes(serverManager) {
                             timestamp: now,
                             expiresAt: now + (15 * 60 * 1000), // 15 minutes
                         };
-                        return res.status(429).json(updateCheckCache.data);
+                        return res.status(429).json({ ...updateCheckCache.data, isDocker: isDockerEnvironment() });
                     }
                     if (response.status === 404) {
                         // No releases found
@@ -257,7 +257,7 @@ export function createSystemRoutes(serverManager) {
                             timestamp: now,
                             expiresAt: now + CACHE_DURATION_MS,
                         };
-                        return res.json(errorData);
+                        return res.json({ ...errorData, isDocker: isDockerEnvironment() });
                     }
                     throw new Error(`GitHub API returned ${response.status}`);
                 }
@@ -289,7 +289,7 @@ export function createSystemRoutes(serverManager) {
                             timestamp: now,
                             expiresAt: now + CACHE_DURATION_MS,
                         };
-                        return res.json(errorData);
+                        return res.json({ ...errorData, isDocker: isDockerEnvironment() });
                     }
                     latestRelease = betaReleases[0];
                 }
@@ -314,7 +314,7 @@ export function createSystemRoutes(serverManager) {
                     timestamp: now,
                     expiresAt: now + (15 * 60 * 1000),
                 };
-                return res.status(503).json(errorData);
+                return res.status(503).json({ ...errorData, isDocker: isDockerEnvironment() });
             }
             // Extract version from tag (remove 'v' prefix if present)
             const latestVersion = latestRelease.tag_name?.replace(/^v/, "") || latestRelease.tag_name || "";
@@ -338,7 +338,7 @@ export function createSystemRoutes(serverManager) {
                 timestamp: now,
                 expiresAt: now + CACHE_DURATION_MS,
             };
-            res.json(responseData);
+            res.json({ ...responseData, isDocker: isDockerEnvironment() });
         }
         catch (error) {
             console.error("Error checking for updates:", error);
@@ -348,6 +348,7 @@ export function createSystemRoutes(serverManager) {
                 updateAvailable: false,
                 error: "Failed to check for updates",
                 message: error instanceof Error ? error.message : String(error),
+                isDocker: isDockerEnvironment(),
             });
         }
     });

@@ -16,6 +16,7 @@ export interface Server {
   backupFrequency?: number
   backupMaxCount?: number
   aotCacheEnabled?: boolean
+  acceptEarlyPlugins?: boolean
   uptime: number
   ip: string
   port: number
@@ -101,6 +102,7 @@ export interface UpdateCheckResponse {
   rateLimitRemaining?: number
   rateLimitReset?: number
   error?: string
+  isDocker?: boolean
 }
 
 export interface VersionResponse {

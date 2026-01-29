@@ -144,6 +144,7 @@ export class ApiClient {
     backupFrequency?: number
     backupMaxCount?: number
     aotCacheEnabled?: boolean
+    acceptEarlyPlugins?: boolean
   }): Promise<Server> {
     return this.request<Server>("/api/servers", {
       method: "POST",
@@ -176,6 +177,7 @@ export class ApiClient {
       backupFrequency?: number
       backupMaxCount?: number
       aotCacheEnabled?: boolean
+      acceptEarlyPlugins?: boolean
     }>
   ): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}`, {

@@ -90,6 +90,246 @@ For external connections outside of your home network, you will need to configur
 
 **Note**: Port forwarding configuration varies by router manufacturer. Consult your router's documentation or admin interface for specific instructions on how to set up port forwarding.
 
+## Docker Installation
+
+Hypanel can also be installed and run using Docker, which provides an isolated environment and easier deployment. Docker installation is recommended for users who prefer containerized deployments or want to run Hypanel alongside other containerized services.
+
+### Prerequisites
+
+- **Docker** 20.10+ and **Docker Compose** 2.0+ installed
+- Supported architectures: **linux/amd64** (required), **linux/arm64** (optional)
+- **Docker buildx** (included with Docker Desktop, required for cross-platform builds on macOS)
+
+### Quick Start
+
+```bash
+# 1. Clone the repository
+git clone <repository-url>
+cd hypanel
+
+# 2. Run the setup script (one-time setup: creates .env, directories, etc.)
+./setup-docker.sh
+
+# 3. Build the Docker image
+# On macOS (especially Colima):
+./build-docker.sh
+# On Linux:
+docker-compose build
+
+# 4. Start Hypanel
+docker-compose up -d
+```
+
+That's it! Access the web panel at `http://localhost:3000` and login with the password you set during setup.
+
+### Installation Steps (Detailed)
+
+**Option A: Automated Setup (Recommended)**
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd hypanel
+   ```
+
+2. **Run the setup script** (one-time setup):
+   ```bash
+   ./setup-docker.sh
+   ```
+   
+   The script will:
+   - Create `.env` file from `.env.example`
+   - Prompt you for a password and generate a bcrypt hash
+   - Confirm use of Docker named volumes (no host directories to create)
+   - Check and configure Docker buildx (for macOS/Colima)
+
+3. **Build the Docker image**:
+   ```bash
+   # On macOS (especially with Colima), use the helper script:
+   ./build-docker.sh
+   
+   # Or manually with buildx:
+   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
+   
+   # On Linux, regular build works:
+   docker-compose build
+   ```
+
+4. **Start Hypanel**:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. **Access the web panel**: Visit `http://localhost:3000` in your browser and login
+
+**Option B: Manual Setup**
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd hypanel
+   ```
+
+2. **Create and configure `.env` file**:
+   ```bash
+   cp .env.example .env
+   # Edit .env and set HYPANEL_PASSWORD_HASH or HYPANEL_PASSWORD
+   ```
+
+3. **Build the Docker image**:
+   ```bash
+   # On macOS (especially with Colima), use the helper script:
+   ./build-docker.sh
+   
+   # Or manually with buildx:
+   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build
+   
+   # On Linux, regular build works:
+   docker-compose build
+   ```
+
+4. **Start Hypanel**:
+   ```bash
+   docker-compose up -d
+   ```
+
+See `.env.example` for all configuration options and password hash generation instructions.
+
+**Note for macOS users:** The Docker image is built for `linux/amd64` by default (as specified in `docker-compose.yml`). On macOS (especially Apple Silicon), use Docker buildx for cross-platform builds. The buildx plugin is included with Docker Desktop and handles QEMU emulation automatically.
+
+### Docker Data Persistence
+
+All persistent data is stored in Docker named volumes: `hypanel_data`, `hypanel_servers`, `hypanel_logs`, and `hypanel_backup`. Docker creates and manages them; no host directory permissions are required. You cannot browse `./data` in the project folder; use `docker volume inspect hypanel_data` or backup by mounting volumes into a helper container, for example:
+
+```bash
+docker run --rm -v hypanel_data:/data -v $(pwd):/backup alpine tar czf /backup/hypanel_data.tar.gz -C /data .
+```
+
+Repeat for `hypanel_servers`, `hypanel_logs`, and `hypanel_backup` as needed.
+
+### Configuration
+
+All configuration is done through the `.env` file. The setup script creates this file automatically, or you can copy `.env.example` to `.env` and edit it manually.
+
+**Key configuration options** (see `.env.example` for full list):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HYPANEL_AUTH_METHOD` | `ENV` | Authentication method: `ENV` (Docker default) or `PAM` |
+| `HYPANEL_PASSWORD_HASH` | - | Bcrypt hash of password (recommended) |
+| `HYPANEL_PASSWORD` | - | Plaintext password (testing only) |
+| `PORT` | `3000` | HTTP API server port |
+| `WS_PORT` | `3001` | WebSocket server port |
+
+**Password Hash Generation:**
+
+If you need to generate a password hash manually, see instructions in `.env.example` or use:
+```bash
+node -e "const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 10).then(h => console.log(h));"
+```
+
+### Docker Commands
+
+```bash
+# Start Hypanel
+docker-compose up -d
+
+# Stop Hypanel
+docker-compose stop
+
+# Restart Hypanel
+docker-compose restart
+
+# View logs
+docker-compose logs -f
+
+# View logs for last 100 lines
+docker-compose logs --tail=100
+
+# Stop and remove container (data volumes persist)
+docker-compose down
+
+# Rebuild container after code changes
+# On macOS/Colima:
+./build-docker.sh && docker-compose up -d
+# On Linux:
+docker-compose up -d --build
+
+# Access container shell
+docker-compose exec hypanel bash
+```
+
+**Note:** If you encounter a `KeyError: 'ContainerConfig'` error when switching to host networking mode, you need to remove the old container first:
+
+```bash
+# Stop and remove the old container
+docker-compose down
+
+# Remove the old container manually if needed
+docker rm -f hypanel
+
+# Then start fresh
+docker-compose up -d
+```
+
+### Differences from Linux Installation
+
+- **Authentication**: Docker uses ENV mode by default (password from environment variable), while Linux installation uses PAM (system user password)
+- **No systemd**: Docker handles process management, so systemd integration features are not available
+- **Isolated environment**: All dependencies are contained within the Docker image
+- **Easier updates**: Rebuild the container to update the application
+
+### Docker Networking
+
+Hypanel uses **bridge networking mode** with explicit port mappings to allow game servers to be accessible from the network. This configuration is compatible with NAS app stores and container orchestration platforms.
+
+**Port Mappings:**
+- `3000:3000` (TCP) - Panel HTTP API
+- `3001:3001` (TCP) - WebSocket server
+- `5520:5520/udp` - Game server port (UDP protocol)
+
+**Important for Game Servers:**
+
+- Game servers **must bind to `0.0.0.0`** (not `127.0.0.1` or `localhost`) to accept connections from outside the container
+  - ✅ Good: `0.0.0.0:5520` - accessible from network
+  - ❌ Bad: `127.0.0.1:5520` or `localhost:5520` - only accessible from container
+- Hypanel automatically configures servers to bind to `0.0.0.0` by default
+- You may need to configure your firewall to allow connections to game server ports (e.g., port 5520)
+  - **UFW (Ubuntu/Debian)**: `sudo ufw allow 5520/udp`
+  - **firewalld (CentOS/RHEL)**: `sudo firewall-cmd --add-port=5520/udp --permanent && sudo firewall-cmd --reload`
+
+### Troubleshooting
+
+**Permission issues with volumes:**
+- With named volumes, host directory permissions are not used. If you see permission errors inside the container, ensure the container has started at least once (the entrypoint chowns volume mount points to the app user) or check logs: `docker-compose logs`
+
+**Container won't start:**
+- Check logs: `docker-compose logs`
+- Verify that `.env` file exists and has `HYPANEL_PASSWORD_HASH` or `HYPANEL_PASSWORD` set
+- Ensure ports 3000 and 3001 are not already in use
+- Run `./setup-docker.sh` again to regenerate `.env` if needed
+
+**Can't access web panel:**
+- Verify the container is running: `docker-compose ps`
+- Check port mappings in `docker-compose.yml`
+- Ensure firewall allows connections to ports 3000 and 3001
+
+**Can't connect to game server from network:**
+- Verify the server is binding to `0.0.0.0` (not `127.0.0.1`) - Hypanel configures this automatically
+- Check that the firewall allows connections to the game server port (default: 5520)
+  - UFW: `sudo ufw allow 5520/tcp`
+  - firewalld: `sudo firewall-cmd --add-port=5520/tcp --permanent && sudo firewall-cmd --reload`
+- Verify the container is using host networking mode (`network_mode: host` in `docker-compose.yml`)
+- Test connectivity: `telnet <your-server-ip> 5520` or `nc -zv <your-server-ip> 5520`
+
+**Build fails on macOS with QEMU errors:**
+- Use the helper script: `./build-docker.sh` (handles Colima automatically)
+- Or use Docker buildx: `DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose build`
+- Or build directly: `docker buildx build --platform linux/amd64 -t hypanel:latest .`
+- For Colima: Set up buildx builder: `docker buildx create --name hypanel-builder --use && docker buildx inspect --bootstrap`
+- Verify buildx is available: `docker buildx version`
+- See [TESTING_DOCKER.md](./TESTING_DOCKER.md) for detailed macOS build instructions
+
 ## Documentation
 
 For comprehensive documentation, guides, and detailed information about Hypanel, visit:
