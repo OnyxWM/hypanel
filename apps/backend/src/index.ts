@@ -202,9 +202,9 @@ async function initialize(): Promise<void> {
       logger.info(`HTTP server listening on port ${config.port}`);
     });
 
-    // Initialize WebSocket server
+    // Initialize WebSocket server (attached to HTTP server at /ws for single-port reverse proxy support)
     logger.info("Initializing WebSocket server...");
-    wsServer = new WebSocketServerManager(config.wsPort, serverManager);
+    wsServer = new WebSocketServerManager(httpServer, "/ws", serverManager);
     logger.info("WebSocket server initialized");
 
     logger.info("Hypanel daemon initialized successfully");
