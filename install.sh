@@ -684,6 +684,7 @@ User=$HYPANEL_USER
 Group=$HYPANEL_USER
 WorkingDirectory=$HYPANEL_INSTALL_DIR
 EnvironmentFile=$HYPANEL_CONFIG_DIR/hypanel.env
+ExecStartPre=/usr/local/bin/node $HYPANEL_INSTALL_DIR/apps/backend/dist/src/ensure-deps.js
 ExecStart=/usr/local/bin/node $HYPANEL_INSTALL_DIR/apps/backend/dist/index.js
 Restart=always
 RestartSec=10

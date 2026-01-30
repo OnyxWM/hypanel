@@ -980,10 +980,13 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
 
       // Step 7: Rebuild native modules
       console.log("Rebuilding native modules...");
+      const backendDir = path.join(HYPANEL_INSTALL_DIR, "apps", "backend");
       try {
-        const backendDir = path.join(HYPANEL_INSTALL_DIR, "apps", "backend");
+        // Give hypanel write access so npm install can run (backend dir is root-owned)
+        await runSudo(`chown -R hypanel:hypanel "${backendDir}"`);
+
         const nodePath = process.execPath; // Use the Node.js that's running this process
-        
+
         // Find npm
         let npmPath = "npm";
         try {
@@ -993,7 +996,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
           // Fallback to npm in PATH
         }
 
-        // Install/rebuild production dependencies (npm doesn't need sudo, runs as hypanel user)
+        // Install/rebuild production dependencies (runs as hypanel user, now has write access)
         await execAsync(`cd "${backendDir}" && "${npmPath}" install --omit=dev`, {
           env: { ...process.env, PATH: process.env.PATH },
         });
@@ -1007,6 +1010,13 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
       } catch (error) {
         console.warn("Warning: Failed to rebuild native modules:", error);
         // Continue anyway - the app might still work
+      } finally {
+        // Restore root ownership so install dir stays root-owned
+        try {
+          await runSudo(`chown -R root:root "${backendDir}"`);
+        } catch (restoreError) {
+          console.warn("Warning: Failed to restore root ownership of backend dir:", restoreError);
+        }
       }
 
       // Step 8: Clean up temp files

@@ -1,155 +1,58 @@
-import express from "express";
-import path from "path";
-import fs from "fs";
-import { config } from "./src/config/config.js";
-import { initDatabase, closeDatabase } from "./src/database/db.js";
-import { ServerManager } from "./src/server/ServerManager.js";
-import { createServerRoutes } from "./src/api/routes/servers.js";
-import { createStatsRoutes } from "./src/api/routes/stats.js";
-import { createDownloaderRoutes } from "./src/api/routes/downloader.js";
-import { createSystemRoutes } from "./src/api/routes/system.js";
-import { createPlayerRoutes } from "./src/api/routes/players.js";
-import { createNotificationRoutes } from "./src/api/routes/notifications.js";
-import { createAuthRoutes } from "./src/api/routes/auth.js";
-import { errorHandler } from "./src/api/middleware/validation.js";
-import { requireAuth } from "./src/api/middleware/auth.js";
-import { WebSocketServerManager } from "./src/websocket/WebSocketServer.js";
-import { logger } from "./src/logger/Logger.js";
-let serverManager;
-let wsServer;
-let httpServer;
-async function initialize() {
-    try {
-        logger.info("Initializing Hypanel daemon...");
-        // Initialize database
-        logger.info("Initializing database...");
-        initDatabase();
-        logger.info("Database initialized");
-        // Initialize server manager
-        logger.info("Initializing server manager...");
-        serverManager = new ServerManager();
-        logger.info("Server manager initialized");
-        // Initialize Express app
-        const app = express();
-        app.use(express.json());
-        app.use(express.urlencoded({ extended: true }));
-        // CORS middleware (support cookie auth in dev)
-        const allowedOrigins = (process.env.HYPANEL_WEB_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        app.use((req, res, next) => {
-            const origin = req.headers.origin;
-            if (typeof origin === "string" && allowedOrigins.includes(origin)) {
-                res.header("Access-Control-Allow-Origin", origin);
-                res.header("Vary", "Origin");
-                res.header("Access-Control-Allow-Credentials", "true");
-            }
-            res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-            res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-            if (req.method === "OPTIONS") {
-                return res.sendStatus(200);
-            }
-            next();
-        });
-        // API routes
-        app.use("/api/auth", createAuthRoutes());
-        app.use("/api/servers", requireAuth, createServerRoutes(serverManager));
-        app.use("/api/servers", requireAuth, createStatsRoutes());
-        app.use("/api/downloader", requireAuth, createDownloaderRoutes());
-        app.use("/api/system", requireAuth, createSystemRoutes(serverManager));
-        app.use("/api/players", requireAuth, createPlayerRoutes(serverManager));
-        app.use("/api/notifications", requireAuth, createNotificationRoutes());
-        // Health check endpoint
-        app.get("/health", (req, res) => {
-            res.json({ status: "ok", timestamp: new Date().toISOString() });
-        });
-        // Serve webpanel static files in production
-        if (process.env.NODE_ENV === "production") {
-            // Try different possible paths for webpanel dist
-            let webpanelDistPath = path.join(process.cwd(), "..", "webpanel", "dist");
-            // Alternative paths if the above doesn't exist
-            const alternativePaths = [
-                path.join(process.cwd(), "apps", "webpanel", "dist"),
-                path.join(process.env.HYPANEL_INSTALL_DIR || "/opt/hypanel", "apps", "webpanel", "dist"),
-                "/opt/hypanel/apps/webpanel/dist"
-            ];
-            // Find the first existing path
-            for (const altPath of alternativePaths) {
-                if (fs.existsSync(altPath)) {
-                    webpanelDistPath = altPath;
-                    break;
-                }
-            }
-            if (fs.existsSync(webpanelDistPath)) {
-                app.use(express.static(webpanelDistPath));
-                // Serve index.html for all non-API routes (SPA support)
-                app.get(/^(?!\/api).*/, (req, res) => {
-                    res.sendFile(path.join(webpanelDistPath, "index.html"));
-                });
-                logger.info(`Webpanel static files being served from: ${webpanelDistPath}`);
-            }
-            else {
-                logger.warn(`Webpanel static files not found at: ${webpanelDistPath}`);
-            }
-        }
-        // Error handler
-        app.use(errorHandler);
-        // Start HTTP server
-        httpServer = app.listen(config.port, () => {
-            logger.info(`HTTP server listening on port ${config.port}`);
-        });
-        // Initialize WebSocket server
-        logger.info("Initializing WebSocket server...");
-        wsServer = new WebSocketServerManager(config.wsPort, serverManager);
-        logger.info("WebSocket server initialized");
-        logger.info("Hypanel daemon initialized successfully");
+/**
+ * Entry point: load the real server. If the app fails to load due to missing
+ * dependencies (e.g. ERR_MODULE_NOT_FOUND for bcryptjs after a failed in-app
+ * update), start a minimal HTTP server that shows recovery instructions and
+ * logs the same message to stderr (journal).
+ */
+import http from "http";
+const RECOVERY_CMD = "cd /opt/hypanel/apps/backend && npm install --omit=dev && sudo systemctl restart hypanel";
+const RECOVERY_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Hypanel – Backend failed to start</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; background: #1a1a1a; color: #e4e4e7; }
+    h1 { color: #f87171; }
+    code { background: #27272a; color: #e4e4e7; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+    pre { background: #18181b; color: #a1a1aa; padding: 1rem; overflow-x: auto; border-radius: 6px; border: 1px solid #3f3f46; }
+  </style>
+</head>
+<body>
+  <h1>Backend failed to start</h1>
+  <p>Dependencies are missing (e.g. after an in-app update). Run the following as <strong>root</strong> on the host:</p>
+  <pre>${RECOVERY_CMD}</pre>
+  <p>Then reload this page. See <code>journalctl -u hypanel -n 50</code> for logs.</p>
+</body>
+</html>`;
+function isModuleNotFound(err) {
+    const code = err?.code;
+    const msg = err instanceof Error ? err.message : String(err);
+    return code === "ERR_MODULE_NOT_FOUND" || /Cannot find package/i.test(msg);
+}
+function startRecoveryServer(port) {
+    const log = `[hypanel] Backend failed to start (missing deps). Run as root on host:\n  ${RECOVERY_CMD}\n`;
+    process.stderr.write(log);
+    const server = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(RECOVERY_HTML);
+    });
+    server.listen(port, () => {
+        process.stderr.write(`[hypanel] Recovery server listening on http://localhost:${port} – fix deps then restart service.\n`);
+    });
+}
+const port = Number(process.env.PORT) || 3000;
+try {
+    await import("./server.js");
+}
+catch (err) {
+    if (isModuleNotFound(err)) {
+        startRecoveryServer(port);
     }
-    catch (error) {
-        logger.error(`Failed to initialize: ${error}`);
-        process.exit(1);
+    else {
+        throw err;
     }
 }
-async function shutdown() {
-    logger.info("Shutting down Hypanel daemon...");
-    // Shutdown server manager
-    if (serverManager) {
-        await serverManager.shutdown();
-    }
-    // Close WebSocket server
-    if (wsServer) {
-        wsServer.close();
-    }
-    // Close HTTP server
-    if (httpServer) {
-        httpServer.close();
-    }
-    // Close database
-    closeDatabase();
-    logger.info("Hypanel daemon shut down");
-    process.exit(0);
-}
-// Handle graceful shutdown
-process.on("SIGTERM", () => {
-    logger.info("Received SIGTERM, shutting down gracefully...");
-    shutdown();
-});
-process.on("SIGINT", () => {
-    logger.info("Received SIGINT, shutting down gracefully...");
-    shutdown();
-});
-// Handle uncaught errors
-process.on("uncaughtException", (error) => {
-    logger.error(`Uncaught exception: ${error.message}`, error);
-    shutdown();
-});
-process.on("unhandledRejection", (reason, promise) => {
-    logger.error(`Unhandled rejection at: ${promise}, reason: ${reason}`);
-    shutdown();
-});
-// Start daemon
-initialize().catch((error) => {
-    logger.error(`Failed to start daemon: ${error}`);
-    process.exit(1);
-});
 //# sourceMappingURL=index.js.map

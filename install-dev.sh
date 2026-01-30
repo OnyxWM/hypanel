@@ -280,6 +280,7 @@ User=hypanel
 Group=hypanel
 WorkingDirectory=/opt/hypanel
 EnvironmentFile=/etc/hypanel/hypanel.env
+ExecStartPre=${node_bin} /opt/hypanel/apps/backend/dist/src/ensure-deps.js
 ExecStart=${node_bin} /opt/hypanel/apps/backend/dist/index.js
 Restart=always
 RestartSec=10
