@@ -710,6 +710,22 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         });
       }
 
+      // Compare backend dependencies: only run npm install/rebuild in Step 7 when deps changed
+      let depsChanged = true;
+      try {
+        const currentPkgPath = path.join(HYPANEL_INSTALL_DIR, "apps", "backend", "package.json");
+        const newPkgPath = path.join(tempExtract, "apps", "backend", "package.json");
+        if (fs.existsSync(currentPkgPath) && fs.existsSync(newPkgPath)) {
+          const currentPkg = JSON.parse(fs.readFileSync(currentPkgPath, "utf8")) as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+          const newPkg = JSON.parse(fs.readFileSync(newPkgPath, "utf8")) as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+          const currentDeps = { dependencies: currentPkg.dependencies ?? {}, optionalDependencies: currentPkg.optionalDependencies ?? {} };
+          const newDeps = { dependencies: newPkg.dependencies ?? {}, optionalDependencies: newPkg.optionalDependencies ?? {} };
+          depsChanged = JSON.stringify(currentDeps) !== JSON.stringify(newDeps);
+        }
+      } catch (compareError) {
+        console.warn("Could not compare package.json, will run npm install", compareError);
+      }
+
       // Step 6: Install to /opt/hypanel
       console.log("Installing update to /opt/hypanel...");
       try {
@@ -978,45 +994,49 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         });
       }
 
-      // Step 7: Rebuild native modules
-      console.log("Rebuilding native modules...");
+      // Step 7: Rebuild native modules (only when dependencies changed)
       const backendDir = path.join(HYPANEL_INSTALL_DIR, "apps", "backend");
-      try {
-        // Give hypanel write access so npm install can run (backend dir is root-owned)
-        await runSudo(`chown -R hypanel:hypanel "${backendDir}"`);
-
-        const nodePath = process.execPath; // Use the Node.js that's running this process
-
-        // Find npm
-        let npmPath = "npm";
+      if (depsChanged) {
+        console.log("Rebuilding native modules...");
         try {
-          const npmCheck = await execAsync("which npm");
-          npmPath = npmCheck.stdout.trim() || "npm";
-        } catch {
-          // Fallback to npm in PATH
+          // Give hypanel write access so npm install can run (backend dir is root-owned)
+          await runSudo(`chown -R hypanel:hypanel "${backendDir}"`);
+
+          const nodePath = process.execPath; // Use the Node.js that's running this process
+
+          // Find npm
+          let npmPath = "npm";
+          try {
+            const npmCheck = await execAsync("which npm");
+            npmPath = npmCheck.stdout.trim() || "npm";
+          } catch {
+            // Fallback to npm in PATH
+          }
+
+          // Install/rebuild production dependencies (runs as hypanel user, now has write access)
+          await execAsync(`cd "${backendDir}" && "${npmPath}" install --omit=dev`, {
+            env: { ...process.env, PATH: process.env.PATH },
+          });
+
+          // Rebuild better-sqlite3
+          await execAsync(`cd "${backendDir}" && "${npmPath}" rebuild better-sqlite3 || "${npmPath}" install better-sqlite3 --build-from-source --force --omit=dev`, {
+            env: { ...process.env, PATH: process.env.PATH },
+          });
+
+          console.log("Native modules rebuilt");
+        } catch (error) {
+          console.warn("Warning: Failed to rebuild native modules:", error);
+          // Continue anyway - the app might still work
+        } finally {
+          // Restore root ownership so install dir stays root-owned
+          try {
+            await runSudo(`chown -R root:root "${backendDir}"`);
+          } catch (restoreError) {
+            console.warn("Warning: Failed to restore root ownership of backend dir:", restoreError);
+          }
         }
-
-        // Install/rebuild production dependencies (runs as hypanel user, now has write access)
-        await execAsync(`cd "${backendDir}" && "${npmPath}" install --omit=dev`, {
-          env: { ...process.env, PATH: process.env.PATH },
-        });
-
-        // Rebuild better-sqlite3
-        await execAsync(`cd "${backendDir}" && "${npmPath}" rebuild better-sqlite3 || "${npmPath}" install better-sqlite3 --build-from-source --force --omit=dev`, {
-          env: { ...process.env, PATH: process.env.PATH },
-        });
-
-        console.log("Native modules rebuilt");
-      } catch (error) {
-        console.warn("Warning: Failed to rebuild native modules:", error);
-        // Continue anyway - the app might still work
-      } finally {
-        // Restore root ownership so install dir stays root-owned
-        try {
-          await runSudo(`chown -R root:root "${backendDir}"`);
-        } catch (restoreError) {
-          console.warn("Warning: Failed to restore root ownership of backend dir:", restoreError);
-        }
+      } else {
+        console.log("Dependencies unchanged, skipping native module rebuild");
       }
 
       // Step 8: Clean up temp files
