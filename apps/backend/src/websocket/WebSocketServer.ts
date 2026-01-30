@@ -4,6 +4,7 @@ import { logger } from "../logger/Logger.js";
 import { ServerStatus, ConsoleLog } from "../types/index.js";
 import { getPlayerTracker } from "../server/PlayerTracker.js";
 import type { IncomingMessage } from "http";
+import type { Server as HttpServer } from "http";
 import { getSessionById, getSessionFromCookieHeader } from "../api/middleware/auth.js";
 
 interface Client {
@@ -17,11 +18,27 @@ export class WebSocketServerManager {
   private wss: WebSocketServer;
   private clients: Set<Client>;
   private serverManager: ServerManager;
+  private attachedPath: string | null;
 
-  constructor(port: number, serverManager: ServerManager) {
-    this.wss = new WebSocketServer({ port });
+  constructor(port: number, serverManager: ServerManager);
+  constructor(httpServer: HttpServer, path: string, serverManager: ServerManager);
+  constructor(
+    portOrServer: number | HttpServer,
+    pathOrManager: string | ServerManager,
+    serverManager?: ServerManager
+  ) {
     this.clients = new Set();
-    this.serverManager = serverManager;
+    const manager =
+      (typeof portOrServer === "number" ? (pathOrManager as ServerManager) : serverManager!) as ServerManager;
+    this.serverManager = manager;
+
+    if (typeof portOrServer === "number") {
+      this.wss = new WebSocketServer({ port: portOrServer });
+      this.attachedPath = null;
+    } else {
+      this.wss = new WebSocketServer({ server: portOrServer, path: pathOrManager as string });
+      this.attachedPath = pathOrManager as string;
+    }
 
     this.setupServer();
     this.setupServerManagerListeners();
@@ -78,7 +95,11 @@ export class WebSocketServerManager {
       });
     });
 
-    logger.info(`WebSocket server listening on port ${this.wss.options.port}`);
+    if (this.attachedPath !== null) {
+      logger.info(`WebSocket server attached at path ${this.attachedPath}`);
+    } else {
+      logger.info(`WebSocket server listening on port ${this.wss.options.port}`);
+    }
   }
 
   private setupServerManagerListeners(): void {

@@ -24,21 +24,24 @@ function getApiBaseUrl(): string {
   return "http://localhost:3000"
 }
 
-// Get WebSocket URL dynamically from current location
+// Get WebSocket URL: same origin + /ws (works behind single-port reverse proxy e.g. Pangolin)
 function getWebSocketUrl(): string {
   if (import.meta.env.VITE_WS_URL) {
     return import.meta.env.VITE_WS_URL
   }
-  // Derive from current location, converting http to ws
-  // WebSocket uses port 3001 by default (configurable via WS_PORT env var)
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const hostname = window.location.hostname
-    // Use port 3001 for WebSocket (default backend WebSocket port)
-    const port = '3001'
-    return `${protocol}//${hostname}:${port}`
+  // Derive base URL from VITE_API_URL or current origin, then use ws/wss + path /ws
+  let base: string
+  if (import.meta.env.VITE_API_URL) {
+    base = import.meta.env.VITE_API_URL
+  } else if (typeof window !== 'undefined') {
+    base = window.location.origin
+  } else {
+    return "ws://localhost:3000/ws"
   }
-  return "ws://localhost:3001"
+  const url = new URL(base)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = '/ws'
+  return url.toString()
 }
 
 const API_BASE_URL = getApiBaseUrl()

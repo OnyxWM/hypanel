@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { apiClient } from "@/lib/api-client"
+import { useAppUpdate } from "@/contexts/app-update-context"
 import type { JournalEntry, SystemActionSummary, UpdateCheckResponse } from "@/lib/api"
 
 type ActionState = "idle" | "running"
@@ -30,6 +31,7 @@ function formatTime(ts: Date | string | number): string {
 }
 
 export default function SettingsPage() {
+  const { setAppUpdateInProgress } = useAppUpdate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [autoScroll, setAutoScroll] = useState(true)
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([])
@@ -293,11 +295,12 @@ export default function SettingsPage() {
     setUpdateProgress(null)
     setPasswordError(null)
     setUpdateState("running")
-    
+    setAppUpdateInProgress(true, "Stopping servers...")
+
     try {
       setUpdateProgress("Stopping servers...")
       const result = await apiClient.updateApplication(providedPassword)
-      
+
       if (result.success) {
         setUpdateProgress(null)
         setActionSuccess(result.message || "Update installed successfully! The service will restart shortly. Please refresh the page in a few moments.")
@@ -305,12 +308,14 @@ export default function SettingsPage() {
         setUpdateCheckResult(null)
         setShowPasswordDialog(false)
         setPassword("")
-        // Optionally refresh after a delay
+        // Keep overlay visible with completion message until reload
+        setAppUpdateInProgress(true, "Update complete. Restarting. The page will refresh shortly.")
         setTimeout(() => {
           window.location.reload()
         }, 5000)
       } else {
         setUpdateProgress(null)
+        setAppUpdateInProgress(false)
         // Check if password is required
         if (result.requiresPassword) {
           setUpdateState("idle")
@@ -323,12 +328,13 @@ export default function SettingsPage() {
       }
     } catch (e) {
       setUpdateProgress(null)
+      setAppUpdateInProgress(false)
       const error = e instanceof Error ? e.message : "Failed to update application"
       // Check if password is required (from error object or message)
-      const requiresPassword = (e as any)?.requiresPassword || 
+      const requiresPassword = (e as any)?.requiresPassword ||
                                error.includes("Password required") ||
                                error.includes("password is required")
-      
+
       if (requiresPassword) {
         setUpdateState("idle")
         setShowPasswordDialog(true)

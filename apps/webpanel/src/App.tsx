@@ -9,11 +9,13 @@ import SettingsPage from "./pages/SettingsPage"
 import LoginPage from "./pages/LoginPage"
 import { AuthProvider, RequireAuth } from "@/lib/auth"
 import { SidebarProvider } from "@/contexts/sidebar-context"
+import { AppUpdateProvider } from "@/contexts/app-update-context"
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <AppUpdateProvider>
         <SidebarProvider>
           <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -75,6 +77,7 @@ export default function App() {
           />
         </Routes>
         </SidebarProvider>
+        </AppUpdateProvider>
       </AuthProvider>
     </BrowserRouter>
   )
