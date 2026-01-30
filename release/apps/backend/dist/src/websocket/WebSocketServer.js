@@ -6,10 +6,19 @@ export class WebSocketServerManager {
     wss;
     clients;
     serverManager;
-    constructor(port, serverManager) {
-        this.wss = new WebSocketServer({ port });
+    attachedPath;
+    constructor(portOrServer, pathOrManager, serverManager) {
         this.clients = new Set();
-        this.serverManager = serverManager;
+        const manager = (typeof portOrServer === "number" ? pathOrManager : serverManager);
+        this.serverManager = manager;
+        if (typeof portOrServer === "number") {
+            this.wss = new WebSocketServer({ port: portOrServer });
+            this.attachedPath = null;
+        }
+        else {
+            this.wss = new WebSocketServer({ server: portOrServer, path: pathOrManager });
+            this.attachedPath = pathOrManager;
+        }
         this.setupServer();
         this.setupServerManagerListeners();
         this.setupPlayerTrackerListeners();
@@ -58,7 +67,12 @@ export class WebSocketServerManager {
                 message: "Connected to Hypanel WebSocket server",
             });
         });
-        logger.info(`WebSocket server listening on port ${this.wss.options.port}`);
+        if (this.attachedPath !== null) {
+            logger.info(`WebSocket server attached at path ${this.attachedPath}`);
+        }
+        else {
+            logger.info(`WebSocket server listening on port ${this.wss.options.port}`);
+        }
     }
     setupServerManagerListeners() {
         // Listen for server status changes
