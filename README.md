@@ -6,6 +6,12 @@
 
 A Linux server manager tool for Hytale servers that allows you to create, install, update, and delete Hytale servers in a web GUI. Manage your servers with ease through a modern web interface.
 
+<p align="center">
+  <a href="https://hypanel.app"><img src="https://img.shields.io/badge/Visit_Site-hypanel.app-2563eb?style=for-the-badge" alt="Visit Site"></a>
+  <a href="https://docs.hypanel.app"><img src="https://img.shields.io/badge/Visit_Docs-docs.hypanel.app-2563eb?style=for-the-badge" alt="Visit Docs"></a>
+  <a href="https://discord.gg/yg9uJc9Q56"><img src="https://img.shields.io/badge/Join_Discord-Community-5865F2?style=for-the-badge&logo=discord" alt="Join Discord"></a>
+</p>
+
 ## Features
 
 - **Server Management**: Create, install, update, and delete Hytale servers via web GUI
@@ -129,7 +135,7 @@ Then see [After installation](#after-installation). Access the panel at `http://
    ![Server Auth Link](img/server-auth-link.png)
    
    - Open the link in a new browser tab and sign in with your Hytale account
-   - Once authorized, return to the console and run: `/auth persistence Encrypted save`
+   - Once authorized, return to the console and run: `/auth persistence Encrypted`
    - You should see confirmation that credential storage has been changed to Encrypted
    
    ![Auth Encrypted Persisted](img/auth-encrypted-persisted.png)
