@@ -131,24 +131,57 @@ const modUpload = multer({
 const fileManagerUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
-      const dir = (req as any).hypanel?.filesDir as string | undefined;
-      if (!dir) {
+      const baseDir = (req as any).hypanel?.filesDir as string | undefined;
+      const resolvedBaseDir = (req as any).hypanel?.resolvedFilesDir as string | undefined;
+      if (!baseDir || !resolvedBaseDir) {
         return cb(new Error("MISSING_SERVER_CONTEXT"), "");
       }
-      return cb(null, dir);
+      
+      // Extract directory path from file.originalname (e.g., "folder/subfolder/file.txt" -> "folder/subfolder")
+      const filePath = file.originalname || "";
+      const dirPath = path.dirname(filePath);
+      
+      // If there's a directory component, resolve it relative to baseDir
+      let targetDir = baseDir;
+      if (dirPath && dirPath !== ".") {
+        const safeDirPath = dirPath.split("/").map((segment) => {
+          // Sanitize each path segment
+          let safe = segment.replace(/\0/g, "").replace(/\.\./g, "_");
+          safe = safe.replace(/[\\:*?"<>|]/g, "_");
+          return safe.trim();
+        }).filter(Boolean).join(path.sep);
+        
+        targetDir = path.resolve(baseDir, safeDirPath);
+        
+        // Ensure the target directory is within resolvedBaseDir
+        if (!targetDir.startsWith(resolvedBaseDir)) {
+          return cb(new Error("PATH_TRAVERSAL_DETECTED"), "");
+        }
+        
+        // Create directory if it doesn't exist
+        try {
+          if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+          }
+        } catch (e) {
+          return cb(e as Error, "");
+        }
+      }
+      
+      return cb(null, targetDir);
     },
     filename: (req, file, cb) => {
       try {
-        const dir = (req as any).hypanel?.filesDir as string | undefined;
-        const resolvedDir = (req as any).hypanel?.resolvedFilesDir as string | undefined;
-        if (!dir || !resolvedDir) {
+        const baseDir = (req as any).hypanel?.filesDir as string | undefined;
+        const resolvedBaseDir = (req as any).hypanel?.resolvedFilesDir as string | undefined;
+        if (!baseDir || !resolvedBaseDir) {
           return cb(new Error("MISSING_SERVER_CONTEXT"), "");
         }
-        const safeName = sanitizeFileFilename(file.originalname);
-        const targetPath = path.resolve(dir, safeName);
-        if (!targetPath.startsWith(resolvedDir)) {
-          return cb(new Error("PATH_TRAVERSAL_DETECTED"), "");
-        }
+        
+        // Get just the filename (not the full path)
+        const filePath = file.originalname || "";
+        const safeName = sanitizeFileFilename(path.basename(filePath));
+        
         return cb(null, safeName);
       } catch (e) {
         return cb(e as Error, "");
@@ -156,7 +189,7 @@ const fileManagerUpload = multer({
     },
   }),
   limits: {
-    files: 1,
+    files: 50,
     fileSize: FILE_MANAGER_UPLOAD_MAX_BYTES,
   },
 });
@@ -1401,19 +1434,26 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         }
         (req as any).hypanel = { filesDir: resolvedPath, resolvedFilesDir: path.resolve(resolvedPath) };
 
-        fileManagerUpload.single("file")(req, res, (err: any) => {
+        fileManagerUpload.array("files", 50)(req, res, (err: any) => {
           if (err) {
             if (err instanceof multer.MulterError) {
               if (err.code === "LIMIT_FILE_SIZE") {
                 return res.status(413).json({
                   code: "FILE_TOO_LARGE",
-                  message: `File is too large (max ${Math.floor(FILE_MANAGER_UPLOAD_MAX_BYTES / (1024 * 1024))}MB)`,
-                  suggestedAction: "Upload a smaller file",
+                  message: `One or more files are too large (max ${Math.floor(FILE_MANAGER_UPLOAD_MAX_BYTES / (1024 * 1024))}MB each)`,
+                  suggestedAction: "Upload smaller files",
+                });
+              }
+              if (err.code === "LIMIT_FILE_COUNT") {
+                return res.status(400).json({
+                  code: "TOO_MANY_FILES",
+                  message: "Too many files (max 50 at once)",
+                  suggestedAction: "Upload fewer files at a time",
                 });
               }
               return res.status(400).json({
                 code: "UPLOAD_ERROR",
-                message: "Failed to upload file",
+                message: "Failed to upload files",
                 details: err.message,
                 suggestedAction: "Try again or check server logs",
               });
@@ -1428,17 +1468,17 @@ export function createServerRoutes(serverManager: ServerManager): Router {
             }
             return res.status(500).json({
               code: "INTERNAL_ERROR",
-              message: "Failed to upload file",
+              message: "Failed to upload files",
               details: err instanceof Error ? err.message : "Unknown error",
               suggestedAction: "Check server logs for details",
             });
           }
-          const uploaded = (req as any).file as Express.Multer.File | undefined;
-          if (!uploaded) {
+          const uploaded = (req as any).files as Express.Multer.File[] | undefined;
+          if (!uploaded || uploaded.length === 0) {
             return res.status(400).json({
               code: "NO_FILE",
-              message: "No file uploaded",
-              suggestedAction: "Select a file to upload",
+              message: "No files uploaded",
+              suggestedAction: "Select files to upload",
             });
           }
           const entries = fs.readdirSync(resolvedPath, { withFileTypes: true });
@@ -1533,15 +1573,7 @@ export function createServerRoutes(serverManager: ServerManager): Router {
         }
         const stat = fs.statSync(resolvedPath);
         if (stat.isDirectory()) {
-          const contents = fs.readdirSync(resolvedPath);
-          if (contents.length > 0) {
-            return res.status(400).json({
-              code: "DIRECTORY_NOT_EMPTY",
-              message: "Directory is not empty",
-              suggestedAction: "Delete contents first or use an empty directory",
-            });
-          }
-          fs.rmdirSync(resolvedPath);
+          fs.rmSync(resolvedPath, { recursive: true, force: true });
         } else {
           fs.unlinkSync(resolvedPath);
         }

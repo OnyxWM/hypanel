@@ -275,9 +275,11 @@ export class ApiClient {
     return this.request<ServerFilesListResponse>(`/api/servers/${serverId}/files${qs}`)
   }
 
-  async uploadServerFile(serverId: string, path: string, file: File): Promise<ServerFilesListResponse> {
+  async uploadServerFiles(serverId: string, path: string, files: File[]): Promise<ServerFilesListResponse> {
     const form = new FormData()
-    form.append("file", file)
+    for (const file of files) {
+      form.append("files", file)
+    }
     const qs = path ? `?path=${encodeURIComponent(path)}` : ""
     return this.request<ServerFilesListResponse>(`/api/servers/${serverId}/files/upload${qs}`, {
       method: "POST",
