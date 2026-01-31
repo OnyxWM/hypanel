@@ -10,6 +10,7 @@ import { ServerConsole } from "@/components/server-console"
 import { ServerConfig } from "@/components/server-config"
 import { ServerSettings } from "@/components/server-settings"
 import { WorldConfig } from "@/components/world-config"
+import { ServerFileManager } from "@/components/server-file-manager"
 import { AuthGuidance } from "@/components/auth-guidance"
 import { PlayerList } from "@/components/player-list"
 import { UpdateProgressModal, type UpdateProgressState } from "@/components/update-progress-modal"
@@ -602,7 +603,8 @@ export default function ServerDetailsPage() {
               <TabsTrigger value="players">Players</TabsTrigger>
               <TabsTrigger value="config">Config</TabsTrigger>
               <TabsTrigger value="worlds">Worlds</TabsTrigger>
-                <TabsTrigger value="mods">Mods</TabsTrigger>
+              <TabsTrigger value="mods">Mods</TabsTrigger>
+              <TabsTrigger value="files">Files</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">
@@ -895,6 +897,10 @@ export default function ServerDetailsPage() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="files" className="space-y-4">
+              <ServerFileManager serverId={server.id} />
             </TabsContent>
           </Tabs>
         </div>
