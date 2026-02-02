@@ -35,9 +35,11 @@ export function validateParams(schema) {
 }
 export function errorHandler(err, req, res, next) {
     console.error("Error:", err);
-    res.status(500).json({
-        error: "Internal server error",
-        message: err.message,
-    });
+    if (!res.headersSent) {
+        res.status(500).json({
+            error: "Internal server error",
+            message: err.message,
+        });
+    }
 }
 //# sourceMappingURL=validation.js.map

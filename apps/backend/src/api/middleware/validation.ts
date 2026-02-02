@@ -42,8 +42,10 @@ export function errorHandler(
   next: NextFunction
 ) {
   console.error("Error:", err);
-  res.status(500).json({
-    error: "Internal server error",
-    message: err.message,
-  });
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: "Internal server error",
+      message: err.message,
+    });
+  }
 }

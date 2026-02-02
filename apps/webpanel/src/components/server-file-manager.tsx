@@ -20,6 +20,11 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
 }
 
+/** True if this looks like an unwanted parent (e.g. server ID .json or UUID), not the folder the user selected. */
+function isUnwantedLeadingSegment(segment: string): boolean {
+  return segment.endsWith(".json") || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)
+}
+
 interface ServerFileManagerProps {
   serverId: string
 }
@@ -30,46 +35,115 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [deletingPath, setDeletingPath] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ path: string; isDirectory: boolean } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const refreshButtonRef = useRef<HTMLButtonElement | null>(null)
+  const deleteTargetPathRef = useRef<string | null>(null)
 
-  /** Collect files from drop, including nested directories (uses webkitGetAsEntry when available). */
-  async function collectFilesFromItems(items: DataTransferItemList): Promise<File[]> {
-    const files: File[] = []
-    const readEntry = async (entry: FileSystemEntry, basePath = ""): Promise<void> => {
-      const path = basePath ? `${basePath}/${entry.name}` : entry.name
-      if (entry.isFile) {
-        const file = await new Promise<File>((resolve, reject) =>
-          (entry as FileSystemFileEntry).file(resolve, reject)
-        )
-        files.push(new (globalThis as typeof globalThis & { File: typeof File }).File([file], path, { type: file.type }))
-      } else if (entry.isDirectory) {
-        const dirEntry = entry as FileSystemDirectoryEntry
-        const reader = dirEntry.createReader()
-        const read = (): Promise<FileSystemEntry[]> =>
-          new Promise((resolve, reject) => reader.readEntries(resolve, reject))
-        let entries = await read()
-        while (entries.length > 0) {
-          for (const e of entries) await readEntry(e, path)
-          entries = await read()
+  /** Collect files from drop. Reads file contents into memory immediately. Catches revoked-access errors (NotFoundError) and surfaces a friendly message. */
+  async function collectFilesFromDrop(dataTransfer: DataTransfer): Promise<File[]> {
+    const FileCtor = (globalThis as typeof globalThis & { File: typeof File }).File
+
+    const readFileIntoMemory = async (f: File, path: string): Promise<File> => {
+      try {
+        const buf = await f.arrayBuffer()
+        return new FileCtor([buf], path, { type: f.type })
+      } catch (err) {
+        if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
+          throw new Error("Dropped files are no longer available. Use the Upload button or drop again.")
         }
+        throw err
       }
     }
+
+    const dtFiles = dataTransfer.files
+    if (dtFiles && dtFiles.length > 0) {
+      return Promise.all(
+        Array.from(dtFiles).map(async (f) => {
+          const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+          return readFileIntoMemory(f, path)
+        })
+      )
+    }
+    const items = dataTransfer.items
+    if (!items || items.length === 0) return []
+
+    const filePromises: Promise<File>[] = []
+    const dirPromises: Promise<File[]>[] = []
+
+    const readDir = async (entry: FileSystemDirectoryEntry, basePath: string): Promise<File[]> => {
+      const reader = entry.createReader()
+      const read = (): Promise<FileSystemEntry[]> =>
+        new Promise((resolve, reject) => reader.readEntries(resolve, reject))
+      const out: File[] = []
+      let entries: FileSystemEntry[]
+      try {
+        entries = await read()
+      } catch (err) {
+        if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
+          throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
+        }
+        throw err
+      }
+      while (entries.length > 0) {
+        for (const e of entries) {
+          const path = basePath ? `${basePath}/${e.name}` : e.name
+          if (e.isFile) {
+            let file: File
+            try {
+              file = await new Promise<File>((resolve, reject) =>
+                (e as FileSystemFileEntry).file(resolve, reject)
+              )
+            } catch (err) {
+              if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
+                throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
+              }
+              throw err
+            }
+            out.push(await readFileIntoMemory(file, path))
+          } else if (e.isDirectory) {
+            out.push(...(await readDir(e as FileSystemDirectoryEntry, path)))
+          }
+        }
+        try {
+          entries = await read()
+        } catch (err) {
+          if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
+            throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
+          }
+          throw err
+        }
+      }
+      return out
+    }
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
       if (item.kind !== "file") continue
       const entry = "webkitGetAsEntry" in item ? (item as DataTransferItem & { webkitGetAsEntry(): FileSystemEntry | null }).webkitGetAsEntry() : null
-      if (entry) {
-        await readEntry(entry)
+      if (entry?.isFile) {
+        filePromises.push(
+          new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject)).then(
+            async (file) => readFileIntoMemory(file, entry.name)
+          )
+        )
+      } else if (entry?.isDirectory) {
+        dirPromises.push(readDir(entry as FileSystemDirectoryEntry, entry.name))
       } else {
         const file = item.getAsFile()
-        if (file) files.push(file)
+        if (file) {
+          filePromises.push(readFileIntoMemory(file, file.name))
+        }
       }
     }
-    return files
+
+    const singleFiles = await Promise.all(filePromises)
+    const dirFiles = await Promise.all(dirPromises)
+    return [...singleFiles, ...dirFiles.flat()]
   }
 
   const loadList = async () => {
@@ -89,6 +163,15 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
   useEffect(() => {
     loadList()
   }, [serverId, currentPath])
+
+  // Keep delete target ref in sync with dialog state so Confirm always has the right path
+  useEffect(() => {
+    if (deleteConfirm) {
+      deleteTargetPathRef.current = deleteConfirm.path
+    } else {
+      deleteTargetPathRef.current = null
+    }
+  }, [deleteConfirm])
 
   const goUp = () => {
     const segments = currentPath.split("/").filter(Boolean)
@@ -118,34 +201,80 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
-    const items = e.dataTransfer?.items
-    if (!items || items.length === 0) return
-    const files = await collectFilesFromItems(items)
+    const dt = e.dataTransfer
+    if (!dt) return
+    const files = await collectFilesFromDrop(dt)
     if (files.length === 0) return
     try {
       setUploading(true)
+      setUploadProgress(0)
       setError(null)
-      await apiClient.uploadServerFiles(serverId, currentPath, files)
+      await apiClient.uploadServerFilesWithProgress(
+        serverId,
+        currentPath,
+        files,
+        undefined,
+        setUploadProgress
+      )
       await loadList()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to upload")
     } finally {
       setUploading(false)
+      setUploadProgress(null)
     }
   }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
+    const fileList = Array.from(files)
+    const hasRelativePaths = fileList.some(
+      (f) => (f as File & { webkitRelativePath?: string }).webkitRelativePath
+    )
+    // webkitRelativePath can be "players/file.txt" (selected folder) or "uuid.json/players/file.txt" (browser added parent).
+    // Strip a leading segment that looks like UUID or .json so we don't create an extra folder with that name.
+    let selectedFolderName = ""
+    if (hasRelativePaths && e.target.value) {
+      selectedFolderName = e.target.value.replace(/^.*[/\\]/, "").trim() || ""
+    }
+    if (!selectedFolderName && hasRelativePaths && fileList.length > 0) {
+      const firstPath = (fileList[0] as File & { webkitRelativePath?: string }).webkitRelativePath || ""
+      const segments = firstPath.split("/").filter(Boolean)
+      const firstReal = segments.find((s) => !isUnwantedLeadingSegment(s))
+      if (firstReal) selectedFolderName = firstReal
+    }
+    if (hasRelativePaths && !selectedFolderName) {
+      selectedFolderName = "uploaded_folder"
+    }
+    const pathsToUpload = hasRelativePaths
+      ? fileList.map((f) => {
+          let relative =
+            (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+          const segments = relative.split("/").filter(Boolean)
+          if (segments.length > 0 && isUnwantedLeadingSegment(segments[0])) {
+            relative = segments.slice(1).join("/")
+          }
+          return relative.includes("/") ? relative : `${selectedFolderName}/${relative}`
+        })
+      : undefined
     try {
       setUploading(true)
+      setUploadProgress(0)
       setError(null)
-      await apiClient.uploadServerFiles(serverId, currentPath, Array.from(files))
+      await apiClient.uploadServerFilesWithProgress(
+        serverId,
+        currentPath,
+        fileList,
+        pathsToUpload,
+        setUploadProgress
+      )
       await loadList()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to upload")
     } finally {
       setUploading(false)
+      setUploadProgress(null)
       e.target.value = ""
     }
   }
@@ -155,10 +284,13 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
       setDeletingPath(fullPath)
       setError(null)
       await apiClient.deleteServerFile(serverId, fullPath)
-      setDeleteConfirm(null)
       await loadList()
+      setDeleteConfirm(null)
+      deleteTargetPathRef.current = null
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete")
+      setDeleteConfirm(null)
+      deleteTargetPathRef.current = null
     } finally {
       setDeletingPath(null)
     }
@@ -174,12 +306,43 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
   }
 
   return (
-    <Card>
+    <Card className="relative">
+      {uploading && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/90"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-lg border bg-card p-6 shadow-lg">
+            <div className="flex items-center gap-3">
+              <RefreshCw className="h-5 w-5 shrink-0 animate-spin text-muted-foreground" />
+              <div>
+                <p className="font-medium">Uploading files...</p>
+                <p className="text-sm text-muted-foreground">
+                  Please don&apos;t close or navigate away.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full bg-primary transition-[width] duration-300 ease-out"
+                  style={{ width: `${uploadProgress ?? 0}%` }}
+                />
+              </div>
+              <p className="text-center text-sm text-muted-foreground">
+                {uploadProgress ?? 0}%
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base">Files</CardTitle>
           <div className="flex items-center gap-2">
             <Button
+              ref={refreshButtonRef}
               variant="outline"
               size="sm"
               onClick={loadList}
@@ -347,7 +510,10 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
                       variant="destructive"
                       size="sm"
                       disabled={isDeleting || (deletingPath !== null && deletingPath !== entryPath)}
-                      onClick={() => setDeleteConfirm({ path: entryPath, isDirectory: entry.isDirectory })}
+                      onClick={() => {
+                      deleteTargetPathRef.current = entryPath
+                      setDeleteConfirm({ path: entryPath, isDirectory: entry.isDirectory })
+                    }}
                     >
                       {isDeleting ? (
                         <>
@@ -371,7 +537,12 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
       </CardContent>
 
       <Dialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
-        <DialogContent>
+        <DialogContent
+          onCloseAutoFocus={(e) => {
+            e.preventDefault()
+            refreshButtonRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Delete {deleteConfirm?.isDirectory ? "Folder" : "File"}</DialogTitle>
             <DialogDescription className="space-y-2">
@@ -391,10 +562,23 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
               Cancel
             </Button>
             <Button
+              type="button"
               variant="destructive"
-              onClick={() => deleteConfirm && handleDelete(deleteConfirm.path)}
+              disabled={deletingPath !== null}
+              onClick={() => {
+                if (deletingPath !== null) return
+                const path = deleteTargetPathRef.current ?? deleteConfirm?.path
+                if (path) handleDelete(path)
+              }}
             >
-              Delete{deleteConfirm?.isDirectory ? " Folder" : ""}
+              {deletingPath !== null ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>Delete{deleteConfirm?.isDirectory ? " Folder" : ""}</>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

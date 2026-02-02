@@ -110,62 +110,19 @@ const modUpload = multer({
         return cb(null, true);
     },
 });
+/** Sanitize relative path segments and return a safe path string (no leading slash, no ..). */
+function sanitizeRelativePath(relativePath) {
+    const normalized = (relativePath || "").replace(/\\/g, "/").trim().replace(/^\/+/, "");
+    const segments = normalized.split("/").map((seg) => {
+        let s = seg.replace(/\0/g, "").replace(/\.\./g, "_");
+        s = s.replace(/[\\:*?"<>|]/g, "_").trim();
+        return s;
+    }).filter(Boolean);
+    return segments.join(path.sep);
+}
 const fileManagerUpload = multer({
-    storage: multer.diskStorage({
-        destination: (req, file, cb) => {
-            const baseDir = req.hypanel?.filesDir;
-            const resolvedBaseDir = req.hypanel?.resolvedFilesDir;
-            if (!baseDir || !resolvedBaseDir) {
-                return cb(new Error("MISSING_SERVER_CONTEXT"), "");
-            }
-            // Extract directory path from file.originalname (e.g., "folder/subfolder/file.txt" -> "folder/subfolder")
-            const filePath = file.originalname || "";
-            const dirPath = path.dirname(filePath);
-            // If there's a directory component, resolve it relative to baseDir
-            let targetDir = baseDir;
-            if (dirPath && dirPath !== ".") {
-                const safeDirPath = dirPath.split("/").map((segment) => {
-                    // Sanitize each path segment
-                    let safe = segment.replace(/\0/g, "").replace(/\.\./g, "_");
-                    safe = safe.replace(/[\\:*?"<>|]/g, "_");
-                    return safe.trim();
-                }).filter(Boolean).join(path.sep);
-                targetDir = path.resolve(baseDir, safeDirPath);
-                // Ensure the target directory is within resolvedBaseDir
-                if (!targetDir.startsWith(resolvedBaseDir)) {
-                    return cb(new Error("PATH_TRAVERSAL_DETECTED"), "");
-                }
-                // Create directory if it doesn't exist
-                try {
-                    if (!fs.existsSync(targetDir)) {
-                        fs.mkdirSync(targetDir, { recursive: true, mode: 0o755 });
-                    }
-                }
-                catch (e) {
-                    return cb(e, "");
-                }
-            }
-            return cb(null, targetDir);
-        },
-        filename: (req, file, cb) => {
-            try {
-                const baseDir = req.hypanel?.filesDir;
-                const resolvedBaseDir = req.hypanel?.resolvedFilesDir;
-                if (!baseDir || !resolvedBaseDir) {
-                    return cb(new Error("MISSING_SERVER_CONTEXT"), "");
-                }
-                // Get just the filename (not the full path)
-                const filePath = file.originalname || "";
-                const safeName = sanitizeFileFilename(path.basename(filePath));
-                return cb(null, safeName);
-            }
-            catch (e) {
-                return cb(e, "");
-            }
-        },
-    }),
+    storage: multer.memoryStorage(),
     limits: {
-        files: 50,
         fileSize: FILE_MANAGER_UPLOAD_MAX_BYTES,
     },
 });
@@ -1158,6 +1115,7 @@ export function createServerRoutes(serverManager) {
         try {
             const { id } = req.params;
             const rawPath = req.query.path ?? "";
+            logger.info(`[FileManager] List files: serverId=${id}, path="${rawPath}"`);
             const dbServer = getServerFromDb(id);
             if (!dbServer) {
                 return res.status(404).json({
@@ -1223,9 +1181,11 @@ export function createServerRoutes(serverManager) {
                     return a.isDirectory ? -1 : 1;
                 return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
             });
+            logger.info(`[FileManager] List files done: serverId=${id}, path="${rawPath}", entries=${result.length}`);
             res.json({ path: rawPath || "", entries: result });
         }
         catch (error) {
+            logger.error(`[FileManager] List files error: serverId=${req.params.id}`, error);
             if (error instanceof HypanelError) {
                 return res.status(error.statusCode).json(error.toJSON());
             }
@@ -1242,6 +1202,7 @@ export function createServerRoutes(serverManager) {
         try {
             const { id } = req.params;
             const rawPath = req.query.path ?? "";
+            logger.info(`[FileManager] Upload start: serverId=${id}, path="${rawPath}"`);
             const dbServer = getServerFromDb(id);
             if (!dbServer) {
                 return res.status(404).json({
@@ -1277,7 +1238,7 @@ export function createServerRoutes(serverManager) {
                 });
             }
             req.hypanel = { filesDir: resolvedPath, resolvedFilesDir: path.resolve(resolvedPath) };
-            fileManagerUpload.array("files", 50)(req, res, (err) => {
+            fileManagerUpload.array("files")(req, res, (err) => {
                 if (err) {
                     if (err instanceof multer.MulterError) {
                         if (err.code === "LIMIT_FILE_SIZE") {
@@ -1285,13 +1246,6 @@ export function createServerRoutes(serverManager) {
                                 code: "FILE_TOO_LARGE",
                                 message: `One or more files are too large (max ${Math.floor(FILE_MANAGER_UPLOAD_MAX_BYTES / (1024 * 1024))}MB each)`,
                                 suggestedAction: "Upload smaller files",
-                            });
-                        }
-                        if (err.code === "LIMIT_FILE_COUNT") {
-                            return res.status(400).json({
-                                code: "TOO_MANY_FILES",
-                                message: "Too many files (max 50 at once)",
-                                suggestedAction: "Upload fewer files at a time",
                             });
                         }
                         return res.status(400).json({
@@ -1324,6 +1278,50 @@ export function createServerRoutes(serverManager) {
                         suggestedAction: "Select files to upload",
                     });
                 }
+                let filePaths;
+                try {
+                    const raw = req.body?.filePaths;
+                    if (typeof raw === "string")
+                        filePaths = JSON.parse(raw);
+                }
+                catch {
+                    filePaths = undefined;
+                }
+                const baseDir = resolvedPath;
+                for (let i = 0; i < uploaded.length; i++) {
+                    const file = uploaded[i];
+                    if (!file)
+                        continue;
+                    const explicitPath = filePaths?.[i];
+                    const relativePath = typeof explicitPath === "string"
+                        ? explicitPath
+                        : (file.originalname || "").replace(/\\/g, "/");
+                    const safeRelative = sanitizeRelativePath(relativePath);
+                    if (!safeRelative)
+                        continue;
+                    const fullPath = path.resolve(baseDir, safeRelative);
+                    if (!fullPath.startsWith(resolvedRoot)) {
+                        return res.status(400).json({
+                            code: "PATH_TRAVERSAL_DETECTED",
+                            message: "Invalid path or filename",
+                            suggestedAction: "Try again",
+                        });
+                    }
+                    try {
+                        fs.mkdirSync(path.dirname(fullPath), { recursive: true, mode: 0o755 });
+                        fs.writeFileSync(fullPath, file.buffer, { mode: 0o644 });
+                    }
+                    catch (e) {
+                        logger.error("[FileManager] Write failed", fullPath, e);
+                        return res.status(500).json({
+                            code: "UPLOAD_ERROR",
+                            message: "Failed to write file",
+                            details: e instanceof Error ? e.message : "Unknown error",
+                            suggestedAction: "Check server logs",
+                        });
+                    }
+                }
+                logger.info(`[FileManager] Upload done: serverId=${id}, path="${rawPath}", files=${uploaded.length}, paths=${filePaths ? "yes" : "originalname"}`);
                 const entries = fs.readdirSync(resolvedPath, { withFileTypes: true });
                 const result = entries
                     .map((e) => {
@@ -1377,6 +1375,7 @@ export function createServerRoutes(serverManager) {
                 });
             }
             const { id } = req.params;
+            logger.info(`[FileManager] Delete start: serverId=${id}, path="${pathParam}"`);
             const dbServer = getServerFromDb(id);
             if (!dbServer) {
                 return res.status(404).json({
@@ -1415,15 +1414,20 @@ export function createServerRoutes(serverManager) {
                 });
             }
             const stat = fs.statSync(resolvedPath);
-            if (stat.isDirectory()) {
+            const isDir = stat.isDirectory();
+            if (isDir) {
                 fs.rmSync(resolvedPath, { recursive: true, force: true });
             }
             else {
                 fs.unlinkSync(resolvedPath);
             }
-            res.status(204).send();
+            logger.info(`[FileManager] Delete done: serverId=${id}, path="${pathParam}", type=${isDir ? "directory" : "file"}`);
+            return res.status(204).send();
         }
         catch (error) {
+            logger.error(`[FileManager] Delete error: serverId=${req.params.id}, path="${req.query.path}"`, error);
+            if (res.headersSent)
+                return;
             if (error instanceof HypanelError) {
                 return res.status(error.statusCode).json(error.toJSON());
             }
@@ -1447,6 +1451,7 @@ export function createServerRoutes(serverManager) {
                 });
             }
             const { id } = req.params;
+            logger.info(`[FileManager] Download start: serverId=${id}, path="${pathParam}"`);
             const dbServer = getServerFromDb(id);
             if (!dbServer) {
                 return res.status(404).json({
