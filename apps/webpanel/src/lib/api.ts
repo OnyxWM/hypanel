@@ -65,6 +65,18 @@ export interface ModFile {
   modified: string
 }
 
+export interface FileEntry {
+  name: string
+  size: number
+  modified: string
+  isDirectory: boolean
+}
+
+export interface ServerFilesListResponse {
+  path: string
+  entries: FileEntry[]
+}
+
 export interface Notification {
   id: string
   createdAt: string

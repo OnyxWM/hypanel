@@ -10,7 +10,39 @@ import { getPlayerTracker } from "../../server/PlayerTracker.js";
 import { config } from "../../config/config.js";
 import multer from "multer";
 const MOD_UPLOAD_MAX_BYTES = 200 * 1024 * 1024; // 200MB
+const FILE_MANAGER_UPLOAD_MAX_BYTES = 200 * 1024 * 1024; // 200MB
 const ALLOWED_MOD_EXTENSIONS = new Set([".jar", ".zip"]);
+/**
+ * Normalize relative path (decode, strip .. and empty segments) and resolve against server root.
+ * Returns { resolvedPath, resolvedRoot } if contained; otherwise throws (caller returns 400).
+ */
+function resolveServerPath(serverRoot, relativePath) {
+    const resolvedRoot = path.resolve(serverRoot);
+    const decoded = decodeURIComponent(relativePath || "").replace(/\\/g, "/").trim();
+    const segments = decoded.split("/").filter((s) => s.length > 0 && s !== "..");
+    const normalized = segments.join(path.sep);
+    const resolvedPath = path.resolve(serverRoot, normalized);
+    if (!resolvedPath.startsWith(resolvedRoot)) {
+        throw new Error("PATH_TRAVERSAL_DETECTED");
+    }
+    return { resolvedPath, resolvedRoot };
+}
+function sanitizeFileFilename(originalName) {
+    let name = path.basename(originalName || "");
+    name = name.replace(/\0/g, "");
+    name = name.replace(/\.\./g, "_");
+    name = name.replace(/[\/\\]/g, "_");
+    name = name.replace(/[:*?"<>|]/g, "_");
+    name = name.replace(/\s+/g, " ").trim();
+    if (!name) {
+        return "file";
+    }
+    const ext = path.extname(name);
+    const base = ext ? name.slice(0, -ext.length) : name;
+    const maxLength = 200;
+    const clippedBase = base.length > maxLength ? base.slice(0, maxLength) : base;
+    return `${clippedBase}${ext}`;
+}
 function sanitizeModFilename(originalName) {
     let name = path.basename(originalName || "");
     // Remove null bytes and obvious path traversal sequences
@@ -76,6 +108,22 @@ const modUpload = multer({
             return cb(new Error("INVALID_MOD_EXTENSION"));
         }
         return cb(null, true);
+    },
+});
+/** Sanitize relative path segments and return a safe path string (no leading slash, no ..). */
+function sanitizeRelativePath(relativePath) {
+    const normalized = (relativePath || "").replace(/\\/g, "/").trim().replace(/^\/+/, "");
+    const segments = normalized.split("/").map((seg) => {
+        let s = seg.replace(/\0/g, "").replace(/\.\./g, "_");
+        s = s.replace(/[\\:*?"<>|]/g, "_").trim();
+        return s;
+    }).filter(Boolean);
+    return segments.join(path.sep);
+}
+const fileManagerUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: FILE_MANAGER_UPLOAD_MAX_BYTES,
     },
 });
 const createServerSchema = z.object({
@@ -1057,6 +1105,410 @@ export function createServerRoutes(serverManager) {
             res.status(500).json({
                 code: "INTERNAL_ERROR",
                 message: "Failed to delete mod",
+                details: error instanceof Error ? error.message : "Unknown error",
+                suggestedAction: "Check server logs for details",
+            });
+        }
+    });
+    // GET /api/servers/:id/files - List directory (path = relative path, default "")
+    router.get("/:id/files", validateParams(serverIdSchema), (req, res) => {
+        try {
+            const { id } = req.params;
+            const rawPath = req.query.path ?? "";
+            logger.info(`[FileManager] List files: serverId=${id}, path="${rawPath}"`);
+            const dbServer = getServerFromDb(id);
+            if (!dbServer) {
+                return res.status(404).json({
+                    code: "SERVER_NOT_FOUND",
+                    message: `Server ${id} not found`,
+                    suggestedAction: "Verify the server ID is correct",
+                });
+            }
+            const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+            let resolvedPath;
+            let resolvedRoot;
+            try {
+                const out = resolveServerPath(serverRoot, rawPath);
+                resolvedPath = out.resolvedPath;
+                resolvedRoot = out.resolvedRoot;
+            }
+            catch (e) {
+                return res.status(400).json({
+                    code: "PATH_TRAVERSAL_DETECTED",
+                    message: "Invalid path",
+                    suggestedAction: "Use a path within the server directory",
+                });
+            }
+            if (!fs.existsSync(resolvedPath)) {
+                return res.status(404).json({
+                    code: "NOT_FOUND",
+                    message: "Directory not found",
+                    suggestedAction: "Check the path",
+                });
+            }
+            const stat = fs.statSync(resolvedPath);
+            if (!stat.isDirectory()) {
+                return res.status(400).json({
+                    code: "NOT_A_DIRECTORY",
+                    message: "Path is not a directory",
+                    suggestedAction: "Use a directory path to list contents",
+                });
+            }
+            const entries = fs.readdirSync(resolvedPath, { withFileTypes: true });
+            const result = entries
+                .map((e) => {
+                const entryPath = path.join(resolvedPath, e.name);
+                const resolvedEntryPath = path.resolve(entryPath);
+                if (!resolvedEntryPath.startsWith(resolvedRoot)) {
+                    return null;
+                }
+                try {
+                    const lstats = fs.lstatSync(entryPath);
+                    return {
+                        name: e.name,
+                        size: lstats.isFile() ? lstats.size : 0,
+                        modified: lstats.mtime.toISOString(),
+                        isDirectory: lstats.isDirectory(),
+                    };
+                }
+                catch {
+                    return null;
+                }
+            })
+                .filter(Boolean);
+            result.sort((a, b) => {
+                if (a.isDirectory !== b.isDirectory)
+                    return a.isDirectory ? -1 : 1;
+                return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+            });
+            logger.info(`[FileManager] List files done: serverId=${id}, path="${rawPath}", entries=${result.length}`);
+            res.json({ path: rawPath || "", entries: result });
+        }
+        catch (error) {
+            logger.error(`[FileManager] List files error: serverId=${req.params.id}`, error);
+            if (error instanceof HypanelError) {
+                return res.status(error.statusCode).json(error.toJSON());
+            }
+            res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Failed to list files",
+                details: error instanceof Error ? error.message : "Unknown error",
+                suggestedAction: "Check server logs for details",
+            });
+        }
+    });
+    // POST /api/servers/:id/files/upload - Upload file to directory (query path = relative dir)
+    router.post("/:id/files/upload", validateParams(serverIdSchema), (req, res) => {
+        try {
+            const { id } = req.params;
+            const rawPath = req.query.path ?? "";
+            logger.info(`[FileManager] Upload start: serverId=${id}, path="${rawPath}"`);
+            const dbServer = getServerFromDb(id);
+            if (!dbServer) {
+                return res.status(404).json({
+                    code: "SERVER_NOT_FOUND",
+                    message: `Server ${id} not found`,
+                    suggestedAction: "Verify the server ID is correct",
+                });
+            }
+            const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+            let resolvedPath;
+            let resolvedRoot;
+            try {
+                const out = resolveServerPath(serverRoot, rawPath);
+                resolvedPath = out.resolvedPath;
+                resolvedRoot = out.resolvedRoot;
+            }
+            catch (e) {
+                return res.status(400).json({
+                    code: "PATH_TRAVERSAL_DETECTED",
+                    message: "Invalid path",
+                    suggestedAction: "Use a path within the server directory",
+                });
+            }
+            if (!fs.existsSync(resolvedPath)) {
+                fs.mkdirSync(resolvedPath, { recursive: true, mode: 0o755 });
+            }
+            const stat = fs.statSync(resolvedPath);
+            if (!stat.isDirectory()) {
+                return res.status(400).json({
+                    code: "NOT_A_DIRECTORY",
+                    message: "Upload path is not a directory",
+                    suggestedAction: "Use a directory path",
+                });
+            }
+            req.hypanel = { filesDir: resolvedPath, resolvedFilesDir: path.resolve(resolvedPath) };
+            fileManagerUpload.array("files")(req, res, (err) => {
+                if (err) {
+                    if (err instanceof multer.MulterError) {
+                        if (err.code === "LIMIT_FILE_SIZE") {
+                            return res.status(413).json({
+                                code: "FILE_TOO_LARGE",
+                                message: `One or more files are too large (max ${Math.floor(FILE_MANAGER_UPLOAD_MAX_BYTES / (1024 * 1024))}MB each)`,
+                                suggestedAction: "Upload smaller files",
+                            });
+                        }
+                        return res.status(400).json({
+                            code: "UPLOAD_ERROR",
+                            message: "Failed to upload files",
+                            details: err.message,
+                            suggestedAction: "Try again or check server logs",
+                        });
+                    }
+                    const code = err instanceof Error ? err.message : String(err);
+                    if (code === "PATH_TRAVERSAL_DETECTED" || code === "MISSING_SERVER_CONTEXT") {
+                        return res.status(400).json({
+                            code: "PATH_TRAVERSAL_DETECTED",
+                            message: "Invalid path or filename",
+                            suggestedAction: "Try again",
+                        });
+                    }
+                    return res.status(500).json({
+                        code: "INTERNAL_ERROR",
+                        message: "Failed to upload files",
+                        details: err instanceof Error ? err.message : "Unknown error",
+                        suggestedAction: "Check server logs for details",
+                    });
+                }
+                const uploaded = req.files;
+                if (!uploaded || uploaded.length === 0) {
+                    return res.status(400).json({
+                        code: "NO_FILE",
+                        message: "No files uploaded",
+                        suggestedAction: "Select files to upload",
+                    });
+                }
+                let filePaths;
+                try {
+                    const raw = req.body?.filePaths;
+                    if (typeof raw === "string")
+                        filePaths = JSON.parse(raw);
+                }
+                catch {
+                    filePaths = undefined;
+                }
+                const baseDir = resolvedPath;
+                for (let i = 0; i < uploaded.length; i++) {
+                    const file = uploaded[i];
+                    if (!file)
+                        continue;
+                    const explicitPath = filePaths?.[i];
+                    const relativePath = typeof explicitPath === "string"
+                        ? explicitPath
+                        : (file.originalname || "").replace(/\\/g, "/");
+                    const safeRelative = sanitizeRelativePath(relativePath);
+                    if (!safeRelative)
+                        continue;
+                    const fullPath = path.resolve(baseDir, safeRelative);
+                    if (!fullPath.startsWith(resolvedRoot)) {
+                        return res.status(400).json({
+                            code: "PATH_TRAVERSAL_DETECTED",
+                            message: "Invalid path or filename",
+                            suggestedAction: "Try again",
+                        });
+                    }
+                    try {
+                        fs.mkdirSync(path.dirname(fullPath), { recursive: true, mode: 0o755 });
+                        fs.writeFileSync(fullPath, file.buffer, { mode: 0o644 });
+                    }
+                    catch (e) {
+                        logger.error("[FileManager] Write failed", fullPath, e);
+                        return res.status(500).json({
+                            code: "UPLOAD_ERROR",
+                            message: "Failed to write file",
+                            details: e instanceof Error ? e.message : "Unknown error",
+                            suggestedAction: "Check server logs",
+                        });
+                    }
+                }
+                logger.info(`[FileManager] Upload done: serverId=${id}, path="${rawPath}", files=${uploaded.length}, paths=${filePaths ? "yes" : "originalname"}`);
+                const entries = fs.readdirSync(resolvedPath, { withFileTypes: true });
+                const result = entries
+                    .map((e) => {
+                    const entryPath = path.join(resolvedPath, e.name);
+                    const resolvedEntryPath = path.resolve(entryPath);
+                    if (!resolvedEntryPath.startsWith(resolvedRoot))
+                        return null;
+                    try {
+                        const lstats = fs.lstatSync(entryPath);
+                        return {
+                            name: e.name,
+                            size: lstats.isFile() ? lstats.size : 0,
+                            modified: lstats.mtime.toISOString(),
+                            isDirectory: lstats.isDirectory(),
+                        };
+                    }
+                    catch {
+                        return null;
+                    }
+                })
+                    .filter(Boolean);
+                result.sort((a, b) => {
+                    if (a.isDirectory !== b.isDirectory)
+                        return a.isDirectory ? -1 : 1;
+                    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+                });
+                return res.status(201).json({ path: rawPath || "", entries: result });
+            });
+        }
+        catch (error) {
+            if (error instanceof HypanelError) {
+                return res.status(error.statusCode).json(error.toJSON());
+            }
+            res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Failed to upload file",
+                details: error instanceof Error ? error.message : "Unknown error",
+                suggestedAction: "Check server logs for details",
+            });
+        }
+    });
+    // DELETE /api/servers/:id/files - Delete file or empty directory (query path = relative path to file/dir)
+    router.delete("/:id/files", validateParams(serverIdSchema), (req, res) => {
+        try {
+            const pathParam = req.query.path ?? "";
+            if (!pathParam) {
+                return res.status(400).json({
+                    code: "PATH_REQUIRED",
+                    message: "Query parameter 'path' is required for delete",
+                    suggestedAction: "Specify the relative path to the file or directory",
+                });
+            }
+            const { id } = req.params;
+            logger.info(`[FileManager] Delete start: serverId=${id}, path="${pathParam}"`);
+            const dbServer = getServerFromDb(id);
+            if (!dbServer) {
+                return res.status(404).json({
+                    code: "SERVER_NOT_FOUND",
+                    message: `Server ${id} not found`,
+                    suggestedAction: "Verify the server ID is correct",
+                });
+            }
+            const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+            let resolvedPath;
+            let resolvedRoot;
+            try {
+                const out = resolveServerPath(serverRoot, pathParam);
+                resolvedPath = out.resolvedPath;
+                resolvedRoot = out.resolvedRoot;
+            }
+            catch (e) {
+                return res.status(400).json({
+                    code: "PATH_TRAVERSAL_DETECTED",
+                    message: "Invalid path",
+                    suggestedAction: "Use a path within the server directory",
+                });
+            }
+            if (resolvedPath === resolvedRoot) {
+                return res.status(400).json({
+                    code: "CANNOT_DELETE_ROOT",
+                    message: "Cannot delete the server root directory",
+                    suggestedAction: "Delete individual files or folders instead",
+                });
+            }
+            if (!fs.existsSync(resolvedPath)) {
+                return res.status(404).json({
+                    code: "NOT_FOUND",
+                    message: "File or directory not found",
+                    suggestedAction: "Refresh the file list",
+                });
+            }
+            const stat = fs.statSync(resolvedPath);
+            const isDir = stat.isDirectory();
+            if (isDir) {
+                fs.rmSync(resolvedPath, { recursive: true, force: true });
+            }
+            else {
+                fs.unlinkSync(resolvedPath);
+            }
+            logger.info(`[FileManager] Delete done: serverId=${id}, path="${pathParam}", type=${isDir ? "directory" : "file"}`);
+            return res.status(204).send();
+        }
+        catch (error) {
+            logger.error(`[FileManager] Delete error: serverId=${req.params.id}, path="${req.query.path}"`, error);
+            if (res.headersSent)
+                return;
+            if (error instanceof HypanelError) {
+                return res.status(error.statusCode).json(error.toJSON());
+            }
+            res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Failed to delete",
+                details: error instanceof Error ? error.message : "Unknown error",
+                suggestedAction: "Check server logs for details",
+            });
+        }
+    });
+    // GET /api/servers/:id/files/download - Download file (query path = relative path to file)
+    router.get("/:id/files/download", validateParams(serverIdSchema), (req, res) => {
+        try {
+            const pathParam = req.query.path ?? "";
+            if (!pathParam) {
+                return res.status(400).json({
+                    code: "PATH_REQUIRED",
+                    message: "Query parameter 'path' is required for download",
+                    suggestedAction: "Specify the relative path to the file",
+                });
+            }
+            const { id } = req.params;
+            logger.info(`[FileManager] Download start: serverId=${id}, path="${pathParam}"`);
+            const dbServer = getServerFromDb(id);
+            if (!dbServer) {
+                return res.status(404).json({
+                    code: "SERVER_NOT_FOUND",
+                    message: `Server ${id} not found`,
+                    suggestedAction: "Verify the server ID is correct",
+                });
+            }
+            const serverRoot = dbServer.serverRoot || path.join(config.serversDir, id);
+            let resolvedPath;
+            let resolvedRoot;
+            try {
+                const out = resolveServerPath(serverRoot, pathParam);
+                resolvedPath = out.resolvedPath;
+                resolvedRoot = out.resolvedRoot;
+            }
+            catch (e) {
+                return res.status(400).json({
+                    code: "PATH_TRAVERSAL_DETECTED",
+                    message: "Invalid path",
+                    suggestedAction: "Use a path within the server directory",
+                });
+            }
+            if (!fs.existsSync(resolvedPath)) {
+                return res.status(404).json({
+                    code: "NOT_FOUND",
+                    message: "File not found",
+                    suggestedAction: "Check the path",
+                });
+            }
+            const stat = fs.statSync(resolvedPath);
+            if (!stat.isFile()) {
+                return res.status(400).json({
+                    code: "NOT_A_FILE",
+                    message: "Path is not a file",
+                    suggestedAction: "Download a file, not a directory",
+                });
+            }
+            const filename = path.basename(resolvedPath);
+            res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/"/g, '\\"')}"`);
+            res.sendFile(resolvedPath, (err) => {
+                if (err && !res.headersSent) {
+                    res.status(500).json({
+                        code: "INTERNAL_ERROR",
+                        message: "Failed to send file",
+                        suggestedAction: "Try again",
+                    });
+                }
+            });
+        }
+        catch (error) {
+            if (error instanceof HypanelError) {
+                return res.status(error.statusCode).json(error.toJSON());
+            }
+            res.status(500).json({
+                code: "INTERNAL_ERROR",
+                message: "Failed to download file",
                 details: error instanceof Error ? error.message : "Unknown error",
                 suggestedAction: "Check server logs for details",
             });

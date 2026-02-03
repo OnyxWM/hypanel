@@ -3,6 +3,7 @@ import type {
   ConsoleLog,
   SystemStats,
   ModFile,
+  ServerFilesListResponse,
   Notification,
   SystemActionSummary,
   SystemJournalResponse,
@@ -267,6 +268,110 @@ export class ApiClient {
         method: "DELETE",
       }
     )
+  }
+
+  async getServerFiles(serverId: string, path: string = ""): Promise<ServerFilesListResponse> {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : ""
+    return this.request<ServerFilesListResponse>(`/api/servers/${serverId}/files${qs}`)
+  }
+
+  async uploadServerFiles(
+    serverId: string,
+    path: string,
+    files: File[],
+    filePaths?: string[]
+  ): Promise<ServerFilesListResponse> {
+    return this.uploadServerFilesWithProgress(serverId, path, files, filePaths)
+  }
+
+  async uploadServerFilesWithProgress(
+    serverId: string,
+    path: string,
+    files: File[],
+    filePaths?: string[],
+    onProgress?: (percent: number) => void
+  ): Promise<ServerFilesListResponse> {
+    const form = new FormData()
+    if (filePaths && filePaths.length === files.length) {
+      form.append("filePaths", JSON.stringify(filePaths))
+    }
+    files.forEach((file) => {
+      form.append("files", file)
+    })
+    const qs = path ? `?path=${encodeURIComponent(path)}` : ""
+    const url = `${this.baseUrl}/api/servers/${serverId}/files/upload${qs}`
+
+    if (onProgress && typeof XMLHttpRequest !== "undefined") {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open("POST", url)
+        xhr.withCredentials = true
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            onProgress(Math.round((e.loaded / e.total) * 100))
+          } else {
+            onProgress(0)
+          }
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = xhr.responseText ? JSON.parse(xhr.responseText) : undefined
+              resolve(data as ServerFilesListResponse)
+            } catch {
+              reject(new Error("Invalid response"))
+            }
+          } else {
+            try {
+              const err = JSON.parse(xhr.responseText || "{}")
+              const msg = err.error || err.message || `HTTP ${xhr.status}`
+              const error = new Error(msg) as Error & { requiresPassword?: boolean; details?: unknown }
+              if (xhr.status === 401) error.requiresPassword = err.requiresPassword
+              if (xhr.status === 400 && err.details) error.details = err.details
+              reject(error)
+            } catch {
+              reject(new Error(xhr.statusText || `HTTP ${xhr.status}`))
+            }
+          }
+        }
+        xhr.onerror = () => reject(new Error("Network error"))
+        xhr.send(form)
+      })
+    }
+
+    return this.request<ServerFilesListResponse>(`/api/servers/${serverId}/files/upload${qs}`, {
+      method: "POST",
+      body: form,
+    })
+  }
+
+  async deleteServerFile(serverId: string, path: string): Promise<void> {
+    await this.request(
+      `/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" }
+    )
+  }
+
+  async downloadServerFile(serverId: string, path: string): Promise<void> {
+    const url = `${this.baseUrl}/api/servers/${serverId}/files/download?path=${encodeURIComponent(path)}`
+    const response = await fetch(url, { credentials: "include" })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: response.statusText }))
+      throw new Error(errorData.message || errorData.error || `HTTP ${response.status}`)
+    }
+    const blob = await response.blob()
+    const disposition = response.headers.get("Content-Disposition")
+    let filename = path.split("/").pop() || "download"
+    if (disposition) {
+      const match = disposition.match(/filename="?([^";]+)"?/)
+      if (match) filename = match[1].trim()
+    }
+    const objectUrl = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = objectUrl
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(objectUrl)
   }
 
   async getWorldConfig(id: string, world: string): Promise<any> {
