@@ -12,6 +12,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { apiClient } from "@/lib/api-client"
 import type { FileEntry } from "@/lib/api"
 
+/** File System Access API (Chrome/Edge). getAsFileSystemHandle() must be called synchronously in the drop handler. */
+declare global {
+  interface DataTransferItem {
+    getAsFileSystemHandle?(): Promise<FileSystemHandle | null>
+  }
+  interface FileSystemHandle {
+    readonly kind: "file" | "directory"
+    readonly name: string
+  }
+  interface FileSystemFileHandle extends FileSystemHandle {
+    readonly kind: "file"
+    getFile(): Promise<File>
+  }
+  interface FileSystemDirectoryHandle extends FileSystemHandle {
+    readonly kind: "directory"
+    values(): AsyncIterableIterator<FileSystemFileHandle | FileSystemDirectoryHandle>
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
   const units = ["B", "KB", "MB", "GB", "TB"]
@@ -44,30 +63,61 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
   const refreshButtonRef = useRef<HTMLButtonElement | null>(null)
   const deleteTargetPathRef = useRef<string | null>(null)
 
-  /** Collect files from drop. Reads file contents into memory immediately. Catches revoked-access errors (NotFoundError) and surfaces a friendly message. */
+  /** Collect files from File System Access API handles (must be called after getAsFileSystemHandle() was invoked synchronously in drop). Supports folders. */
+  async function collectFilesFromHandles(
+    handlePromises: Promise<FileSystemHandle | null>[]
+  ): Promise<File[]> {
+    const FileCtor = (globalThis as typeof globalThis & { File: typeof File }).File
+    const handles = (await Promise.all(handlePromises)).filter(
+      (h): h is FileSystemHandle => h != null
+    )
+    const out: File[] = []
+
+    async function addFilesFromHandle(
+      handle: FileSystemFileHandle | FileSystemDirectoryHandle,
+      basePath: string
+    ): Promise<void> {
+      if (handle.kind === "file") {
+        const file = await (handle as FileSystemFileHandle).getFile()
+        const path = basePath || file.name
+        const buf = await file.arrayBuffer()
+        out.push(new FileCtor([buf], path, { type: file.type }))
+      } else {
+        const dir = handle as FileSystemDirectoryHandle
+        for await (const entry of dir.values()) {
+          const path = basePath ? `${basePath}/${entry.name}` : entry.name
+          await addFilesFromHandle(entry, path)
+        }
+      }
+    }
+
+    for (const handle of handles) {
+      await addFilesFromHandle(
+        handle as FileSystemFileHandle | FileSystemDirectoryHandle,
+        handle.name
+      )
+    }
+    return out
+  }
+
+  /** Collect files from drop (classic API). Starts all reads synchronously so DataTransfer is not cleared before reads complete. Catches revoked-access errors (NotFoundError) and surfaces a friendly message. */
   async function collectFilesFromDrop(dataTransfer: DataTransfer): Promise<File[]> {
     const FileCtor = (globalThis as typeof globalThis & { File: typeof File }).File
 
-    const readFileIntoMemory = async (f: File, path: string): Promise<File> => {
-      try {
-        const buf = await f.arrayBuffer()
-        return new FileCtor([buf], path, { type: f.type })
-      } catch (err) {
-        if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
-          throw new Error("Dropped files are no longer available. Use the Upload button or drop again.")
-        }
-        throw err
+    const fileUnavailable = (err: unknown): never => {
+      if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
+        throw new Error("Dropped files are no longer available. Use the Upload button or drop again.")
       }
+      throw err
     }
 
     const dtFiles = dataTransfer.files
     if (dtFiles && dtFiles.length > 0) {
-      return Promise.all(
-        Array.from(dtFiles).map(async (f) => {
-          const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
-          return readFileIntoMemory(f, path)
-        })
-      )
+      const promises = Array.from(dtFiles).map((f) => {
+        const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+        return f.arrayBuffer().then((buf) => new FileCtor([buf], path, { type: f.type })).catch(fileUnavailable)
+      })
+      return Promise.all(promises)
     }
     const items = dataTransfer.items
     if (!items || items.length === 0) return []
@@ -75,51 +125,71 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
     const filePromises: Promise<File>[] = []
     const dirPromises: Promise<File[]>[] = []
 
-    const readDir = async (entry: FileSystemDirectoryEntry, basePath: string): Promise<File[]> => {
-      const reader = entry.createReader()
-      const read = (): Promise<FileSystemEntry[]> =>
-        new Promise((resolve, reject) => reader.readEntries(resolve, reject))
-      const out: File[] = []
-      let entries: FileSystemEntry[]
-      try {
-        entries = await read()
-      } catch (err) {
-        if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
-          throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
-        }
-        throw err
+    const dirUnavailable = (err: unknown): never => {
+      if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
+        throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
       }
-      while (entries.length > 0) {
-        for (const e of entries) {
-          const path = basePath ? `${basePath}/${e.name}` : e.name
-          if (e.isFile) {
-            let file: File
-            try {
-              file = await new Promise<File>((resolve, reject) =>
-                (e as FileSystemFileEntry).file(resolve, reject)
-              )
-            } catch (err) {
-              if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
-                throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
-              }
-              throw err
-            }
-            out.push(await readFileIntoMemory(file, path))
-          } else if (e.isDirectory) {
-            out.push(...(await readDir(e as FileSystemDirectoryEntry, path)))
-          }
-        }
-        try {
-          entries = await read()
-        } catch (err) {
-          if (err instanceof Error && (err.name === "NotFoundError" || err.name === "NotReadableError")) {
-            throw new Error("Dropped folder is no longer available. Use the Upload button or drop again.")
-          }
-          throw err
-        }
-      }
-      return out
+      throw err
     }
+
+    const readDir = (entry: FileSystemDirectoryEntry, basePath: string): Promise<File[]> =>
+      new Promise((resolve, reject) => {
+        const reader = entry.createReader()
+        const allFilePromises: Promise<File>[] = []
+        const allDirPromises: Promise<File[]>[] = []
+
+        const processBatch = (entries: FileSystemEntry[]) => {
+          for (const e of entries) {
+            const path = basePath ? `${basePath}/${e.name}` : e.name
+            if (e.isFile) {
+              allFilePromises.push(
+                new Promise<File>((res, rej) =>
+                  (e as FileSystemFileEntry).file((file) => {
+                    file.arrayBuffer().then((buf) => res(new FileCtor([buf], path, { type: file.type }))).catch((err) => {
+                      try {
+                        fileUnavailable(err)
+                      } catch (err2) {
+                        rej(err2)
+                      }
+                    })
+                  }, rej)
+                )
+              )
+            } else if (e.isDirectory) {
+              allDirPromises.push(readDir(e as FileSystemDirectoryEntry, path))
+            }
+          }
+        }
+
+        const readNext = () => {
+          reader.readEntries(
+            (entries) => {
+              try {
+                processBatch(entries)
+                if (entries.length > 0) {
+                  readNext()
+                } else {
+                  Promise.all([Promise.all(allFilePromises), Promise.all(allDirPromises)])
+                    .then(([files, dirFiles]) => resolve([...files, ...dirFiles.flat()]))
+                    .catch(reject)
+                }
+              } catch (err) {
+                dirUnavailable(err)
+                reject(err)
+              }
+            },
+            (err) => {
+              try {
+                dirUnavailable(err)
+              } catch (e) {
+                reject(e)
+              }
+            }
+          )
+        }
+
+        readNext()
+      })
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
@@ -127,8 +197,16 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
       const entry = "webkitGetAsEntry" in item ? (item as DataTransferItem & { webkitGetAsEntry(): FileSystemEntry | null }).webkitGetAsEntry() : null
       if (entry?.isFile) {
         filePromises.push(
-          new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject)).then(
-            async (file) => readFileIntoMemory(file, entry.name)
+          new Promise<File>((resolve, reject) =>
+            (entry as FileSystemFileEntry).file((file) => {
+              file.arrayBuffer().then((buf) => resolve(new FileCtor([buf], entry.name, { type: file.type }))).catch((err) => {
+                try {
+                  fileUnavailable(err)
+                } catch (e) {
+                  reject(e)
+                }
+              })
+            }, reject)
           )
         )
       } else if (entry?.isDirectory) {
@@ -136,7 +214,9 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
       } else {
         const file = item.getAsFile()
         if (file) {
-          filePromises.push(readFileIntoMemory(file, file.name))
+          filePromises.push(
+            file.arrayBuffer().then((buf) => new FileCtor([buf], file.name, { type: file.type })).catch(fileUnavailable)
+          )
         }
       }
     }
@@ -197,31 +277,67 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
     if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false)
   }
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
     const dt = e.dataTransfer
     if (!dt) return
-    const files = await collectFilesFromDrop(dt)
-    if (files.length === 0) return
-    try {
-      setUploading(true)
-      setUploadProgress(0)
-      setError(null)
-      await apiClient.uploadServerFilesWithProgress(
-        serverId,
-        currentPath,
-        files,
-        undefined,
-        setUploadProgress
-      )
-      await loadList()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload")
-    } finally {
-      setUploading(false)
-      setUploadProgress(null)
+
+    const doUpload = async (files: File[]) => {
+      if (files.length === 0) return
+      try {
+        setUploading(true)
+        setUploadProgress(0)
+        setError(null)
+        // Pass each file's path so the backend creates folder structure (e.g. MyFolder/a.txt)
+        const pathsToUpload = files.map((f) => f.name.replace(/\\/g, "/"))
+        await apiClient.uploadServerFilesWithProgress(
+          serverId,
+          currentPath,
+          files,
+          pathsToUpload,
+          setUploadProgress
+        )
+        await loadList()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to upload")
+      } finally {
+        setUploading(false)
+        setUploadProgress(null)
+      }
+    }
+
+    const onDropError = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (
+        msg.includes("Dropped files are no longer available") ||
+        msg.includes("Dropped folder is no longer available")
+      ) {
+        setError(
+          "Folder drag-and-drop is not supported in this browser. Please use the Upload button and choose \"Folder...\" to upload a folder."
+        )
+      } else {
+        setError(msg || "Failed to read dropped files")
+      }
+    }
+
+    // File System Access API: getAsFileSystemHandle() must be called synchronously in the drop handler (no await before it). Handles stay valid so folder drops work (Chrome/Edge 86+).
+    const useFileSystemAccess =
+      typeof DataTransferItem !== "undefined" &&
+      "getAsFileSystemHandle" in DataTransferItem.prototype
+
+    if (useFileSystemAccess && dt.items) {
+      const handlePromises = [...dt.items]
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFileSystemHandle!())
+      queueMicrotask(() => {
+        collectFilesFromHandles(handlePromises).then(doUpload).catch(onDropError)
+      })
+    } else {
+      queueMicrotask(() => {
+        collectFilesFromDrop(dt).then(doUpload).catch(onDropError)
+      })
     }
   }
 
@@ -460,7 +576,7 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
           {loading ? (
             <p className="py-8 text-center text-muted-foreground">Loading...</p>
           ) : entries.length === 0 ? (
-            <p className="py-8 text-center text-muted-foreground">This folder is empty — drag and drop files or folders here</p>
+            <p className="py-8 text-center text-muted-foreground">This folder is empty — drag and drop files here, or use Upload → Folder… for folders</p>
           ) : (
             <div className="space-y-2">
               {entries.map((entry) => {
