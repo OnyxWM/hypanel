@@ -13,6 +13,9 @@ services:
       - hypanel_servers:/opt/hypanel/apps/backend/servers
       - hypanel_logs:/opt/hypanel/apps/backend/logs
       - hypanel_backup:/opt/hypanel/apps/backend/backup
+      # Enables auth persistence Encrypted in Hytale server (Docker lacks DMI/machine-id by default)
+      - /sys/class/dmi/id:/sys/class/dmi/id:ro
+      - /etc/machine-id:/etc/machine-id:ro
     
     ports:
       - "3000:3000"    # Panel HTTP API
