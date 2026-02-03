@@ -253,6 +253,9 @@ Hypanel uses **bridge networking mode** with explicit port mappings to allow gam
 
 #### Troubleshooting
 
+**Auth persistence Encrypted fails (Docker):**
+- Docker containers lack DMI and machine-id from the host by default, so Hytale cannot derive an encryption key for Encrypted credential storage. The `docker-compose.yml` includes read-only mounts of `/sys/class/dmi/id` and `/etc/machine-id` from the host. These work when the host has DMI (e.g., Linux VPS, bare metal). On Docker Desktop for Mac, the underlying Linux VM may still lack usable DMI—if Encrypted still fails after rebuilding, use auth persistence "Memory" (credentials in memory only, lost on restart) or run hypanel natively on Linux (`install.sh`) for full hardware UUID support.
+
 **Native Linux: service fails with `ERR_MODULE_NOT_FOUND` (e.g. bcryptjs) after in-app update:**
 - The update is applied by the previously running backend; a bootstrap step runs at service start to fix missing deps. Ensure the systemd unit runs the bootstrap: re-run the installer once so the unit gets `ExecStartPre` for `ensure-deps.js`: `sudo bash install.sh` (or re-download and run). Alternatively, fix the current install once: `sudo chown -R hypanel:hypanel /opt/hypanel/apps/backend && sudo -u hypanel bash -c 'cd /opt/hypanel/apps/backend && npm install --omit=dev && npm rebuild better-sqlite3 && npm rebuild authenticate-pam' && sudo chown -R root:root /opt/hypanel/apps/backend && sudo systemctl restart hypanel`.
 
