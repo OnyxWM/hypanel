@@ -25,6 +25,8 @@ export interface Server {
     jarPath?: string;
     assetsPath?: string;
     serverRoot?: string;
+    effectiveStartupArgs?: string[];
+    customStartupArgs?: string[];
 }
 export interface ConsoleLog {
     id: string;
@@ -54,6 +56,7 @@ export interface ServerConfig {
     backupMaxCount?: number;
     aotCacheEnabled?: boolean;
     acceptEarlyPlugins?: boolean;
+    customStartupArgs?: string[];
 }
 export interface ServerStats {
     serverId: string;

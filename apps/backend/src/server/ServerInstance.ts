@@ -10,6 +10,71 @@ import { createServerError, createFilesystemError, HypanelError } from "../error
 import { config as appConfig } from "../config/config.js";
 import { getPlayerTracker } from "./PlayerTracker.js";
 
+export interface BuildStartupArgsOptions {
+  jarPath: string;
+  assetsPath: string;
+  serverId: string;
+}
+
+/**
+ * Builds the startup argument list from config (sync). Used when customStartupArgs is not set.
+ */
+export function buildStartupArgs(config: ServerConfig, options: BuildStartupArgsOptions): string[] {
+  const { jarPath, assetsPath, serverId } = options;
+  const serverBackupDir = path.join(appConfig.backupDir, `${serverId}-back`);
+
+  const maxMemoryGB = Math.max(1, Math.round(config.maxMemory / 1024));
+  let initialHeapGB: number;
+  if (maxMemoryGB >= 5) {
+    initialHeapGB = 4;
+  } else if (maxMemoryGB === 4) {
+    initialHeapGB = 3;
+  } else {
+    initialHeapGB = Math.max(1, maxMemoryGB - 1);
+  }
+  if (initialHeapGB >= maxMemoryGB) {
+    initialHeapGB = Math.max(1, maxMemoryGB - 1);
+  }
+
+  const args: string[] = [
+    `-Xms${initialHeapGB}G`,
+    `-Xmx${maxMemoryGB}G`,
+  ];
+
+  if (config.aotCacheEnabled === true) {
+    args.push("-XX:AOTCache=HytaleServer.aot");
+  }
+
+  args.push("-jar", jarPath, "--assets", assetsPath);
+
+  if (config.acceptEarlyPlugins === true) {
+    args.push("--accept-early-plugins");
+  }
+
+  const bindAddress = config.bindAddress || config.ip || "0.0.0.0";
+  args.push("--bind", `${bindAddress}:${config.port}`);
+  args.push("--backup-dir", serverBackupDir);
+
+  if (config.backupEnabled === true) {
+    args.push("--backup");
+    args.push("--backup-frequency", String(config.backupFrequency ?? 30));
+    args.push("--backup-max-count", String(config.backupMaxCount ?? 5));
+  }
+
+  if (config.sessionToken) {
+    args.push("--session-token", config.sessionToken);
+  }
+  if (config.identityToken) {
+    args.push("--identity-token", config.identityToken);
+  }
+
+  if (config.args && config.args.length > 0) {
+    args.push(...config.args);
+  }
+
+  return args;
+}
+
 export class ServerInstance extends EventEmitter {
   public readonly id: string;
   public config: ServerConfig;
@@ -139,87 +204,23 @@ export class ServerInstance extends EventEmitter {
         this.logger.info(`Created working directory: ${workingDir}`);
       }
       
-      // Build command args using official Hytale launch requirements
-      // Calculate max memory in GB
-      const maxMemoryGB = Math.max(1, Math.round(this.config.maxMemory / 1024)); // Ensure at least 1GB
-      // Initial heap size: use 4GB if maxMemory > 4GB, otherwise use maxMemory-1GB (but at least 1GB) to ensure Xms < Xmx
-      // If maxMemory is exactly 4GB, use 3GB for initial to ensure Xms < Xmx
-      let initialHeapGB: number;
-      if (maxMemoryGB >= 5) {
-        initialHeapGB = 4; // Use 4GB for initial if max is 5GB or more
-      } else if (maxMemoryGB === 4) {
-        initialHeapGB = 3; // Use 3GB for initial if max is exactly 4GB
-      } else {
-        initialHeapGB = Math.max(1, maxMemoryGB - 1); // Use max-1GB, but at least 1GB
-      }
-      
-      // Ensure initialHeapGB is never greater than or equal to maxMemoryGB
-      if (initialHeapGB >= maxMemoryGB) {
-        initialHeapGB = Math.max(1, maxMemoryGB - 1);
-      }
-      
-      this.logger.info(`Memory settings: maxMemory=${this.config.maxMemory}MB, maxMemoryGB=${maxMemoryGB}G, initialHeapGB=${initialHeapGB}G`);
-      
-      const args: string[] = [
-        `-Xms${initialHeapGB}G`, // Initial heap size (always < Xmx)
-        `-Xmx${maxMemoryGB}G`, // Max memory from config (MB to GB)
-      ];
-
-      if (this.config.aotCacheEnabled === true) {
-        // Ahead-of-time caching (writes/uses cache file in working directory)
-        args.push("-XX:AOTCache=HytaleServer.aot");
-      }
-
-      args.push(
-        "-jar",
-        jarPath,
-        "--assets",
-        assetsPath
-      );
-
-      // Application args (after -jar): passed to Hytale server, not the JVM
-      if (this.config.acceptEarlyPlugins === true) {
-        args.push("--accept-early-plugins");
-      }
-      
-      // Add bind address (default to 0.0.0.0:port if not specified)
-      const bindAddress = this.config.bindAddress || this.config.ip || "0.0.0.0";
-      args.push("--bind", `${bindAddress}:${this.config.port}`);
-      
-      // Always add backup directory argument
-      const backupDir = appConfig.backupDir;
-      const serverBackupDir = path.join(backupDir, `${this.id}-back`);
-
-      // Ensure the backup directory exists even if backups are disabled.
-      // (We still pass --backup-dir to the server process.)
+      // Build command args: use custom override or build from config
+      const serverBackupDir = path.join(appConfig.backupDir, `${this.id}-back`);
       try {
         await fs.mkdir(serverBackupDir, { recursive: true, mode: 0o755 });
       } catch (e) {
         this.logger.warn(`Failed to ensure backup directory exists (${serverBackupDir}): ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      args.push("--backup-dir", serverBackupDir);
-      
-      // Add --backup flag and backup settings only if backups are enabled
-      if (this.config.backupEnabled === true) {
-        args.push("--backup");
-        args.push("--backup-frequency", String(this.config.backupFrequency ?? 30));
-        args.push("--backup-max-count", String(this.config.backupMaxCount ?? 5));
+      let args: string[];
+      if (this.config.customStartupArgs && this.config.customStartupArgs.length > 0) {
+        args = [...this.config.customStartupArgs];
+      } else {
+        const maxMemoryGB = Math.max(1, Math.round(this.config.maxMemory / 1024));
+        this.logger.info(`Memory settings: maxMemory=${this.config.maxMemory}MB, maxMemoryGB=${maxMemoryGB}G`);
+        args = buildStartupArgs(this.config, { jarPath, assetsPath, serverId: this.id });
       }
-      
-      // Add optional session tokens
-      if (this.config.sessionToken) {
-        args.push("--session-token", this.config.sessionToken);
-      }
-      if (this.config.identityToken) {
-        args.push("--identity-token", this.config.identityToken);
-      }
-      
-      // Add any additional args
-      if (this.config.args && this.config.args.length > 0) {
-        args.push(...this.config.args);
-      }
-      
+
       // Prepare environment variables
       const env: NodeJS.ProcessEnv = { 
         ...process.env, 
@@ -235,10 +236,23 @@ export class ServerInstance extends EventEmitter {
         env.HYTALE_SERVER_IDENTITY_TOKEN = this.config.identityToken;
       }
 
-      this.logger.info(`Starting server with official Hytale command: ${executable} ${args.join(" ")}`);
+      this.logger.info(`Starting server: ${executable}`);
       this.logger.info(`Working directory: ${workingDir}`);
       this.logger.info(`Using jar: ${jarPath}`);
       this.logger.info(`Using assets: ${assetsPath}`);
+      this.logger.info(`Start arguments (${args.length}):`);
+      args.forEach((arg, i) => {
+        this.logger.info(`  [${i + 1}] ${arg}`);
+      });
+
+      // Log start arguments to main hypanel log so they appear in the main console/UI
+      logServerStart(this.id, "start_arguments", `Start arguments (${args.length})`, {
+        executable,
+        workingDir,
+        jarPath,
+        assetsPath,
+        args,
+      });
 
       const childProcess = spawn(executable, args, {
         cwd: workingDir,

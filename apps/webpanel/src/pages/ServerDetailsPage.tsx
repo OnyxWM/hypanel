@@ -545,6 +545,7 @@ export default function ServerDetailsPage() {
               <ServerSettings
                 serverId={server.id}
                 serverStatus={server.status}
+                isOpen={isSettingsOpen}
                 onUpdated={(updated) => setServer(updated)}
               />
             </DialogContent>

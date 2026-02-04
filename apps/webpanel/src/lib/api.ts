@@ -27,6 +27,8 @@ export interface Server {
   jarPath?: string
   assetsPath?: string
   serverRoot?: string
+  effectiveStartupArgs?: string[]
+  customStartupArgs?: string[]
 }
 
 export interface ConsoleLog {

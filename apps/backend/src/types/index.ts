@@ -26,6 +26,8 @@ export interface Server {
   jarPath?: string;
   assetsPath?: string;
   serverRoot?: string;
+  effectiveStartupArgs?: string[];
+  customStartupArgs?: string[];
 }
 
 export interface ConsoleLog {
@@ -59,6 +61,7 @@ export interface ServerConfig {
   backupMaxCount?: number; // Default: 5
   aotCacheEnabled?: boolean; // Default: false
   acceptEarlyPlugins?: boolean; // Default: false
+  customStartupArgs?: string[]; // When set, used as full args list instead of building from simple options
 }
 
 export interface ServerStats {

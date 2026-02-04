@@ -1,4 +1,4 @@
-import { ServerInstance } from "./ServerInstance.js";
+import { ServerInstance, buildStartupArgs } from "./ServerInstance.js";
 import { ConfigManager } from "../storage/ConfigManager.js";
 import { config as appConfig } from "../config/config.js";
 import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, insertNotification, pruneNotifications, } from "../database/db.js";
@@ -248,6 +248,7 @@ export class ServerManager extends EventEmitter {
                         backupEnabled: config.backupEnabled,
                         aotCacheEnabled: config.aotCacheEnabled,
                         acceptEarlyPlugins: config.acceptEarlyPlugins,
+                        customStartupArgs: config.customStartupArgs,
                     };
                     const instance = new ServerInstance(finalConfig);
                     this.setupInstanceListeners(instance);
@@ -603,6 +604,7 @@ export class ServerManager extends EventEmitter {
                 backupEnabled: config.backupEnabled,
                 aotCacheEnabled: config.aotCacheEnabled,
                 acceptEarlyPlugins: config.acceptEarlyPlugins,
+                customStartupArgs: config.customStartupArgs,
             };
             // Double-check path is still valid
             if (!finalConfig.path || typeof finalConfig.path !== 'string' || finalConfig.path.trim() === '') {
@@ -767,6 +769,42 @@ export class ServerManager extends EventEmitter {
     getServerInstance(id) {
         return this.instances.get(id);
     }
+    getEffectiveStartupArgs(config, dbServer, serverId) {
+        if (config.customStartupArgs && config.customStartupArgs.length > 0) {
+            return config.customStartupArgs;
+        }
+        if (dbServer.jarPath && dbServer.assetsPath) {
+            return buildStartupArgs(config, {
+                jarPath: dbServer.jarPath,
+                assetsPath: dbServer.assetsPath,
+                serverId,
+            });
+        }
+        return [];
+    }
+    /**
+     * Parse -Xmx value from startup args for display (e.g. -Xmx5G -> 5120 MB).
+     * Returns null if none or multiple -Xmx found.
+     */
+    parseXmxMB(args) {
+        const xmxRe = /^-Xmx(\d+)([GgMm])$/;
+        let lastMatch = null;
+        let count = 0;
+        for (const arg of args) {
+            const m = arg.match(xmxRe);
+            if (m) {
+                count++;
+                lastMatch = m;
+            }
+        }
+        if (count !== 1 || !lastMatch || lastMatch[1] === undefined || lastMatch[2] === undefined)
+            return null;
+        const num = parseInt(lastMatch[1], 10);
+        const unit = lastMatch[2].toLowerCase();
+        if (unit === "g")
+            return num * 1024;
+        return num; // "m" -> MB
+    }
     getServer(id) {
         const instance = this.instances.get(id);
         const dbServer = getServerFromDb(id);
@@ -783,6 +821,8 @@ export class ServerManager extends EventEmitter {
         let backupMaxCount = undefined;
         let aotCacheEnabled = undefined;
         let acceptEarlyPlugins = undefined;
+        let effectiveStartupArgs = [];
+        let configForArgs = null;
         if (!instance) {
             try {
                 const serverRoot = dbServer.serverRoot && typeof dbServer.serverRoot === "string" && dbServer.serverRoot.trim() !== ""
@@ -790,6 +830,7 @@ export class ServerManager extends EventEmitter {
                     : undefined;
                 const config = this.configManager.loadConfig(id, serverRoot);
                 if (config) {
+                    configForArgs = config;
                     maxMemory = config.maxMemory || 0;
                     maxPlayers = config.maxPlayers || 0;
                     backupEnabled = config.backupEnabled;
@@ -797,6 +838,12 @@ export class ServerManager extends EventEmitter {
                     backupMaxCount = config.backupMaxCount;
                     aotCacheEnabled = config.aotCacheEnabled;
                     acceptEarlyPlugins = config.acceptEarlyPlugins;
+                    effectiveStartupArgs = this.getEffectiveStartupArgs(config, dbServer, id);
+                    if (config.customStartupArgs && config.customStartupArgs.length > 0) {
+                        const xmxMB = this.parseXmxMB(effectiveStartupArgs);
+                        if (xmxMB !== null)
+                            maxMemory = xmxMB;
+                    }
                 }
             }
             catch (error) {
@@ -816,6 +863,8 @@ export class ServerManager extends EventEmitter {
                 backupMaxCount,
                 aotCacheEnabled,
                 acceptEarlyPlugins,
+                effectiveStartupArgs,
+                customStartupArgs: configForArgs?.customStartupArgs,
                 uptime: 0,
                 // Replace "0.0.0.0" with actual server IP for display
                 ip: dbServer.ip === "0.0.0.0" ? actualServerIP : dbServer.ip,
@@ -828,16 +877,25 @@ export class ServerManager extends EventEmitter {
             : 0;
         const config = instance.config;
         const status = instance.getStatus();
+        effectiveStartupArgs = this.getEffectiveStartupArgs(config, dbServer, id);
+        let displayMaxMemory = config.maxMemory;
+        if (config.customStartupArgs && config.customStartupArgs.length > 0) {
+            const xmxMB = this.parseXmxMB(effectiveStartupArgs);
+            if (xmxMB !== null)
+                displayMaxMemory = xmxMB;
+        }
         return {
             ...dbServer,
             status,
-            maxMemory: config.maxMemory,
+            maxMemory: displayMaxMemory,
             maxPlayers: hytaleMaxPlayers ?? config.maxPlayers,
             backupEnabled: config.backupEnabled,
             backupFrequency: config.backupFrequency,
             backupMaxCount: config.backupMaxCount,
             aotCacheEnabled: config.aotCacheEnabled,
             acceptEarlyPlugins: config.acceptEarlyPlugins,
+            effectiveStartupArgs,
+            customStartupArgs: config.customStartupArgs,
             uptime,
             // Clear stats if server is offline
             cpu: status === "online" ? dbServer.cpu : 0,
@@ -881,6 +939,12 @@ export class ServerManager extends EventEmitter {
                         backupEnabled = config.backupEnabled;
                         aotCacheEnabled = config.aotCacheEnabled;
                         acceptEarlyPlugins = config.acceptEarlyPlugins;
+                        if (config.customStartupArgs && config.customStartupArgs.length > 0) {
+                            const effectiveStartupArgs = this.getEffectiveStartupArgs(config, dbServer, dbServer.id);
+                            const xmxMB = this.parseXmxMB(effectiveStartupArgs);
+                            if (xmxMB !== null)
+                                maxMemory = xmxMB;
+                        }
                     }
                 }
                 catch (error) {
@@ -909,10 +973,17 @@ export class ServerManager extends EventEmitter {
                 : 0;
             const config = instance.config;
             const status = instance.getStatus();
+            let displayMaxMemory = config.maxMemory;
+            if (config.customStartupArgs && config.customStartupArgs.length > 0) {
+                const effectiveStartupArgs = this.getEffectiveStartupArgs(config, dbServer, dbServer.id);
+                const xmxMB = this.parseXmxMB(effectiveStartupArgs);
+                if (xmxMB !== null)
+                    displayMaxMemory = xmxMB;
+            }
             return {
                 ...dbServer,
                 status,
-                maxMemory: config.maxMemory,
+                maxMemory: displayMaxMemory,
                 maxPlayers: hytaleMaxPlayers ?? config.maxPlayers,
                 backupEnabled: config.backupEnabled,
                 aotCacheEnabled: config.aotCacheEnabled,

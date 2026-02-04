@@ -155,6 +155,7 @@ const createServerSchema = z.object({
     backupMaxCount: z.number().int().positive().default(5).optional(),
     aotCacheEnabled: z.boolean().default(false),
     acceptEarlyPlugins: z.boolean().default(false),
+    customStartupArgs: z.array(z.string()).optional(),
 });
 const serverIdSchema = z.object({
     id: z.string().min(1),

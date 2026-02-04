@@ -35,6 +35,7 @@ export declare class ServerManager extends EventEmitter {
         backupMaxCount?: number;
         aotCacheEnabled?: boolean;
         acceptEarlyPlugins?: boolean;
+        customStartupArgs?: string[];
     }>): Promise<Server>;
     deleteServer(id: string): Promise<void>;
     startServer(id: string): Promise<void>;
@@ -43,6 +44,12 @@ export declare class ServerManager extends EventEmitter {
     installServer(id: string): Promise<void>;
     sendCommand(id: string, command: string): void;
     getServerInstance(id: string): ServerInstance | undefined;
+    private getEffectiveStartupArgs;
+    /**
+     * Parse -Xmx value from startup args for display (e.g. -Xmx5G -> 5120 MB).
+     * Returns null if none or multiple -Xmx found.
+     */
+    private parseXmxMB;
     getServer(id: string): Server | null;
     /**
      * Gets the server's actual IP address, with caching.

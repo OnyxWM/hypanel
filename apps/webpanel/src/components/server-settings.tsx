@@ -9,10 +9,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 interface ServerSettingsProps {
   serverId: string
   serverStatus: ServerStatus
+  isOpen?: boolean
   onUpdated?: (server: Server) => void
 }
 
@@ -26,7 +35,7 @@ function gbToMb(gb: number): number {
   return Math.max(1024, Math.round(gb) * 1024)
 }
 
-export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSettingsProps) {
+export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: ServerSettingsProps) {
   const [server, setServer] = useState<Server | null>(null)
   const [original, setOriginal] = useState<Server | null>(null)
 
@@ -43,6 +52,11 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
+  const [advancedMode, setAdvancedMode] = useState(false)
+  const [advancedScript, setAdvancedScript] = useState("")
+  const [confirmAdvancedOpen, setConfirmAdvancedOpen] = useState(false)
+  const [confirmSimpleOpen, setConfirmSimpleOpen] = useState(false)
 
   const canEdit = serverStatus === "offline"
 
@@ -61,6 +75,9 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
       setBackupMaxCount(s.backupMaxCount ?? 5)
       setAotCacheEnabled(s.aotCacheEnabled ?? false)
       setAcceptEarlyPlugins(s.acceptEarlyPlugins ?? false)
+      const hasCustomArgs = (s.customStartupArgs?.length ?? 0) > 0
+      setAdvancedMode(hasCustomArgs)
+      setAdvancedScript((s.effectiveStartupArgs ?? []).join("\n"))
       setSuccess(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load server")
@@ -74,7 +91,20 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId])
 
+  // When modal opens, refetch so mode and state stay in sync with server (fixes wrong mode after navigate-away-and-back)
+  useEffect(() => {
+    if (isOpen) {
+      load()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
+  const effectiveStartupArgsJoined = (server?.effectiveStartupArgs ?? []).join("\n")
+
   const hasChanges = useMemo(() => {
+    if (advancedMode) {
+      return advancedScript.trim() !== effectiveStartupArgsJoined.trim()
+    }
     if (!original) return false
     const nextName = title.trim()
     const nextMaxMemory = gbToMb(ramGb)
@@ -94,9 +124,15 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
       nextAotCacheEnabled !== (original.aotCacheEnabled ?? false) ||
       nextAcceptEarlyPlugins !== (original.acceptEarlyPlugins ?? false)
     )
-  }, [original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled, acceptEarlyPlugins])
+  }, [advancedMode, advancedScript, effectiveStartupArgsJoined, original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled, acceptEarlyPlugins])
 
   const handleReset = () => {
+    if (advancedMode && server) {
+      setAdvancedScript((server.effectiveStartupArgs ?? []).join("\n"))
+      setError(null)
+      setSuccess(false)
+      return
+    }
     if (!original) return
     setTitle(original.name || "")
     setRamGb(mbToGbRounded(original.maxMemory))
@@ -111,6 +147,30 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
   }
 
   const handleSave = async () => {
+    if (advancedMode) {
+      const parsed = advancedScript
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+      try {
+        setIsSaving(true)
+        setError(null)
+        setSuccess(false)
+        const updated = await apiClient.updateServer(serverId, { customStartupArgs: parsed })
+        setServer(updated)
+        setOriginal(updated)
+        onUpdated?.(updated)
+        setAdvancedScript((updated.effectiveStartupArgs ?? []).join("\n"))
+        setSuccess(true)
+        setTimeout(() => setSuccess(false), 3000)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save settings")
+      } finally {
+        setIsSaving(false)
+      }
+      return
+    }
+
     if (!original) return
 
     try {
@@ -127,6 +187,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
         backupMaxCount,
         aotCacheEnabled,
         acceptEarlyPlugins,
+        customStartupArgs: [],
       })
 
       setServer(updated)
@@ -189,6 +250,13 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
           <p className="text-sm text-muted-foreground">Update server resources and backups</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => (advancedMode ? setConfirmSimpleOpen(true) : setConfirmAdvancedOpen(true))}
+            disabled={isSaving}
+          >
+            {advancedMode ? "Simple mode" : "Advanced mode"}
+          </Button>
           <Button variant="outline" onClick={handleReset} disabled={!hasChanges || isSaving}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Reset
@@ -200,6 +268,77 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
         </div>
       </div>
 
+      <Dialog open={confirmAdvancedOpen} onOpenChange={setConfirmAdvancedOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Advanced mode</DialogTitle>
+            <DialogDescription>
+              This is an advanced users mode, allowing you to manually adjust the start up script. You can add or
+              remove arguments, one per line. Changes take effect when you save.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAdvancedOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setAdvancedMode(true)
+                setAdvancedScript((server?.effectiveStartupArgs ?? []).join("\n"))
+                setConfirmAdvancedOpen(false)
+              }}
+            >
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmSimpleOpen} onOpenChange={setConfirmSimpleOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Switch to simple mode</DialogTitle>
+            <DialogDescription>
+              All changes in advanced mode will be overwritten. The startup will revert to the simple mode settings
+              controlled by the UI options when you save.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmSimpleOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setAdvancedMode(false)
+                setConfirmSimpleOpen(false)
+              }}
+            >
+              Switch to simple
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {advancedMode ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Startup arguments</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              One argument per line. These are passed to the server process after the executable.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <textarea
+              id="advancedStartupScript"
+              value={advancedScript}
+              onChange={(e) => setAdvancedScript(e.target.value)}
+              disabled={!canEdit}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[280px]"
+              placeholder={"-Xms2G\n-Xmx4G\n-jar ..."}
+            />
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -363,6 +502,7 @@ export function ServerSettings({ serverId, serverStatus, onUpdated }: ServerSett
           </CardContent>
         </Card>
       </div>
+      )}
     </div>
   )
 }

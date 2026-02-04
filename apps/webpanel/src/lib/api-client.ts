@@ -182,6 +182,7 @@ export class ApiClient {
       backupMaxCount?: number
       aotCacheEnabled?: boolean
       acceptEarlyPlugins?: boolean
+      customStartupArgs?: string[]
     }>
   ): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}`, {
