@@ -1,5 +1,14 @@
 import { ServerConfig, ServerStatus, ServerProcess } from "../types/index.js";
 import { EventEmitter } from "events";
+export interface BuildStartupArgsOptions {
+    jarPath: string;
+    assetsPath: string;
+    serverId: string;
+}
+/**
+ * Builds the startup argument list from config (sync). Used when customStartupArgs is not set.
+ */
+export declare function buildStartupArgs(config: ServerConfig, options: BuildStartupArgsOptions): string[];
 export declare class ServerInstance extends EventEmitter {
     readonly id: string;
     config: ServerConfig;
