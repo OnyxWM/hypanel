@@ -335,9 +335,8 @@ export function ServerFileManager({ serverId }: ServerFileManagerProps) {
         collectFilesFromHandles(handlePromises).then(doUpload).catch(onDropError)
       })
     } else {
-      queueMicrotask(() => {
-        collectFilesFromDrop(dt).then(doUpload).catch(onDropError)
-      })
+      // Classic API: read DataTransfer in the same turn so it isn't cleared (no queueMicrotask).
+      collectFilesFromDrop(dt).then(doUpload).catch(onDropError)
     }
   }
 

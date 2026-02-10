@@ -181,6 +181,18 @@ If you need to generate a password hash manually, see instructions in `.env.exam
 node -e "const bcrypt = require('bcrypt'); bcrypt.hash('your-password', 10).then(h => console.log(h));"
 ```
 
+**Changing the Docker login password:**
+
+From the directory that contains `docker-compose.yml` (repo root or your `hypanel/` folder), run:
+```bash
+./change-password-docker.sh
+```
+You will be prompted for a new password. To set it non-interactively or to restart the stack after updating, use:
+```bash
+./change-password-docker.sh --password 'your-new-password' --restart
+```
+The script updates the secret file (`./secrets/hypanel_password_hash`) if it exists, otherwise your `.env` (bcrypt hash). Use `--env-only` or `--secret-only` to force which one to update.
+
 #### Docker Commands
 
 ```bash
