@@ -2018,9 +2018,6 @@ export class ServerManager extends EventEmitter {
         const freq = server.restartFrequency;
         if (freq === "daily") {
             const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
-            if (next.getTime() <= now.getTime()) {
-                next.setDate(next.getDate() + 1);
-            }
             return next.getTime();
         }
         if (freq === "every_6h") {
