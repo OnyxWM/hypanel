@@ -88,12 +88,28 @@ export function initDatabase(): Database.Database {
   // (CREATE TABLE IF NOT EXISTS won't alter existing tables.)
   try {
     const cols = db.prepare(`PRAGMA table_info(servers)`).all() as Array<{ name: string }>;
-    const hasAutostart = Array.isArray(cols) && cols.some((c) => c?.name === "autostart");
-    if (!hasAutostart) {
+    const colNames = Array.isArray(cols) ? cols.map((c) => c?.name).filter(Boolean) : [];
+    if (!colNames.includes("autostart")) {
       db.exec(`ALTER TABLE servers ADD COLUMN autostart INTEGER NOT NULL DEFAULT 0;`);
     }
+    // Scheduled restart columns
+    if (!colNames.includes("restart_schedule_enabled")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_schedule_enabled INTEGER NOT NULL DEFAULT 0;`);
+    }
+    if (!colNames.includes("restart_frequency")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_frequency TEXT;`);
+    }
+    if (!colNames.includes("restart_time")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_time TEXT;`);
+    }
+    if (!colNames.includes("restart_day_of_week")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_day_of_week INTEGER;`);
+    }
+    if (!colNames.includes("last_scheduled_restart_at")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN last_scheduled_restart_at INTEGER;`);
+    }
   } catch {
-    // Ignore migration errors; absence will be handled as default false in reads.
+    // Ignore migration errors; absence will be handled as default in reads.
   }
 
   return db;
@@ -117,8 +133,8 @@ export function closeDatabase(): void {
 export function createServer(server: Omit<Server, "players" | "cpu" | "memory" | "uptime">): void {
   const database = getDatabase();
   const stmt = database.prepare(`
-    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart, restart_schedule_enabled, restart_frequency, restart_time, restart_day_of_week, last_scheduled_restart_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const now = Date.now();
   stmt.run(
@@ -136,7 +152,12 @@ export function createServer(server: Omit<Server, "players" | "cpu" | "memory" |
     server.jarPath || null,
     server.assetsPath || null,
     server.serverRoot || null,
-    server.autostart ? 1 : 0
+    server.autostart ? 1 : 0,
+    server.restartScheduleEnabled ? 1 : 0,
+    server.restartFrequency ?? null,
+    server.restartTime ?? null,
+    server.restartDayOfWeek ?? null,
+    server.lastScheduledRestartAt ?? null
   );
 }
 
@@ -181,6 +202,11 @@ export function getServer(id: string): Server | null {
     assetsPath: row.assets_path,
     serverRoot: row.server_root,
     autostart: Boolean(row.autostart),
+    restartScheduleEnabled: Boolean(row.restart_schedule_enabled),
+    restartFrequency: row.restart_frequency ?? undefined,
+    restartTime: row.restart_time ?? undefined,
+    restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
+    lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
   };
 }
 
@@ -225,6 +251,11 @@ export function getAllServers(): Server[] {
       assetsPath: row.assets_path,
       serverRoot: row.server_root,
       autostart: Boolean(row.autostart),
+      restartScheduleEnabled: Boolean(row.restart_schedule_enabled),
+      restartFrequency: row.restart_frequency ?? undefined,
+      restartTime: row.restart_time ?? undefined,
+      restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
+      lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
     };
   });
 }
@@ -315,6 +346,10 @@ export function updateServerConfig(id: string, config: Partial<{
   identityToken?: string;
   bindAddress?: string;
   autostart?: boolean;
+  restartScheduleEnabled?: boolean;
+  restartFrequency?: string;
+  restartTime?: string;
+  restartDayOfWeek?: number;
 }>): void {
   const database = getDatabase();
   
@@ -346,6 +381,23 @@ export function updateServerConfig(id: string, config: Partial<{
     updates.push("autostart = ?");
     values.push(config.autostart ? 1 : 0);
   }
+
+  if (config.restartScheduleEnabled !== undefined) {
+    updates.push("restart_schedule_enabled = ?");
+    values.push(config.restartScheduleEnabled ? 1 : 0);
+  }
+  if (config.restartFrequency !== undefined) {
+    updates.push("restart_frequency = ?");
+    values.push(config.restartFrequency);
+  }
+  if (config.restartTime !== undefined) {
+    updates.push("restart_time = ?");
+    values.push(config.restartTime);
+  }
+  if (config.restartDayOfWeek !== undefined) {
+    updates.push("restart_day_of_week = ?");
+    values.push(config.restartDayOfWeek);
+  }
   
   if (updates.length === 0) {
     return; // No database fields to update
@@ -361,6 +413,16 @@ export function updateServerConfig(id: string, config: Partial<{
     WHERE id = ?
   `);
   stmt.run(...values);
+}
+
+export function setLastScheduledRestartAt(serverId: string, timestamp: number): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET last_scheduled_restart_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(timestamp, Date.now(), serverId);
 }
 
 export function deleteServer(id: string): void {

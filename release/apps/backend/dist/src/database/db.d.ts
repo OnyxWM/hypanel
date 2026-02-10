@@ -26,7 +26,12 @@ export declare function updateServerConfig(id: string, config: Partial<{
     identityToken?: string;
     bindAddress?: string;
     autostart?: boolean;
+    restartScheduleEnabled?: boolean;
+    restartFrequency?: string;
+    restartTime?: string;
+    restartDayOfWeek?: number;
 }>): void;
+export declare function setLastScheduledRestartAt(serverId: string, timestamp: number): void;
 export declare function deleteServer(id: string): void;
 export declare function insertServerStats(stats: ServerStats): void;
 export declare function getServerStats(serverId: string, limit?: number): ServerStats[];

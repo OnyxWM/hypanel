@@ -96,6 +96,11 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
           <p className="text-xs text-muted-foreground">
             {server.ip}:{server.port}
           </p>
+          {server.restartScheduleEnabled && server.restartTime && (
+            <p className="text-xs text-muted-foreground">
+              Restarts at {server.restartTime} (with update check)
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className={cn("text-xs", status.className)}>

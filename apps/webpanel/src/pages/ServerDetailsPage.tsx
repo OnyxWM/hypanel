@@ -534,6 +534,21 @@ export default function ServerDetailsPage() {
                 </Button>
               )}
             </div>
+            {server.restartScheduleEnabled && server.restartTime && (
+              <p className="text-sm text-muted-foreground mt-2 w-full">
+                Restarts{" "}
+                {server.restartFrequency === "daily"
+                  ? "daily"
+                  : server.restartFrequency === "every_12h"
+                    ? "every 12 hours"
+                    : server.restartFrequency === "every_6h"
+                      ? "every 6 hours"
+                      : server.restartFrequency === "weekly"
+                        ? `weekly (${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][server.restartDayOfWeek ?? 0]})`
+                        : "on schedule"}{" "}
+                at {server.restartTime} (with update check).
+              </p>
+            )}
           </div>
 
           <Dialog open={isSettingsOpen} onOpenChange={handleSettingsOpenChange}>

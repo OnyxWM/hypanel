@@ -182,6 +182,10 @@ export class ApiClient {
       aotCacheEnabled?: boolean
       acceptEarlyPlugins?: boolean
       customStartupArgs?: string[]
+      restartScheduleEnabled?: boolean
+      restartFrequency?: "daily" | "every_6h" | "every_12h" | "weekly"
+      restartTime?: string
+      restartDayOfWeek?: number
     }>
   ): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}`, {

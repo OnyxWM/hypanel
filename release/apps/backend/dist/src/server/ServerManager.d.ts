@@ -7,6 +7,7 @@ export declare class ServerManager extends EventEmitter {
     private installer;
     private playerListPollingInterval;
     private backupCleanupInterval;
+    private scheduledRestartInterval;
     private playerTracker;
     private cachedServerIP;
     constructor();
@@ -36,6 +37,10 @@ export declare class ServerManager extends EventEmitter {
         aotCacheEnabled?: boolean;
         acceptEarlyPlugins?: boolean;
         customStartupArgs?: string[];
+        restartScheduleEnabled?: boolean;
+        restartFrequency?: string;
+        restartTime?: string;
+        restartDayOfWeek?: number;
     }>): Promise<Server>;
     deleteServer(id: string): Promise<void>;
     startServer(id: string): Promise<void>;
@@ -112,6 +117,16 @@ export declare class ServerManager extends EventEmitter {
      * Keeps the 10 most recent backups and deletes older ones
      */
     cleanupOldBackups(): void;
+    /**
+     * Compute the next scheduled restart time (ms since epoch) in the daemon's local time.
+     * Returns null if config is invalid or no next run.
+     */
+    private getNextScheduledRestartTime;
+    /**
+     * Run scheduled restarts: for each server that is due, check for update then update or restart.
+     */
+    private runScheduledRestarts;
+    private startScheduledRestarts;
     /**
      * Start periodic polling of player lists via /who command
      * Runs every 5 minutes for all online servers

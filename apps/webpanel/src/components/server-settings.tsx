@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Loader2, Save, RefreshCw } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
-import type { Server, ServerStatus } from "@/lib/api"
+import type { Server, ServerStatus, RestartFrequency } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,10 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
   const [backupMaxCount, setBackupMaxCount] = useState(5)
   const [aotCacheEnabled, setAotCacheEnabled] = useState(false)
   const [acceptEarlyPlugins, setAcceptEarlyPlugins] = useState(false)
+  const [restartScheduleEnabled, setRestartScheduleEnabled] = useState(false)
+  const [restartFrequency, setRestartFrequency] = useState<RestartFrequency>("daily")
+  const [restartTime, setRestartTime] = useState("03:00")
+  const [restartDayOfWeek, setRestartDayOfWeek] = useState(0)
 
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -75,6 +80,10 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
       setBackupMaxCount(s.backupMaxCount ?? 5)
       setAotCacheEnabled(s.aotCacheEnabled ?? false)
       setAcceptEarlyPlugins(s.acceptEarlyPlugins ?? false)
+      setRestartScheduleEnabled(s.restartScheduleEnabled ?? false)
+      setRestartFrequency((s.restartFrequency as RestartFrequency) ?? "daily")
+      setRestartTime(s.restartTime ?? "03:00")
+      setRestartDayOfWeek(s.restartDayOfWeek ?? 0)
       const hasCustomArgs = (s.customStartupArgs?.length ?? 0) > 0
       setAdvancedMode(hasCustomArgs)
       setAdvancedScript((s.effectiveStartupArgs ?? []).join("\n"))
@@ -114,6 +123,10 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
     const nextBackupMaxCount = backupMaxCount
     const nextAotCacheEnabled = aotCacheEnabled
     const nextAcceptEarlyPlugins = acceptEarlyPlugins
+    const nextRestartScheduleEnabled = restartScheduleEnabled
+    const nextRestartFrequency = restartFrequency
+    const nextRestartTime = restartTime
+    const nextRestartDayOfWeek = restartDayOfWeek
     return (
       nextName !== original.name ||
       nextMaxMemory !== original.maxMemory ||
@@ -122,9 +135,13 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
       nextBackupFrequency !== (original.backupFrequency ?? 30) ||
       nextBackupMaxCount !== (original.backupMaxCount ?? 5) ||
       nextAotCacheEnabled !== (original.aotCacheEnabled ?? false) ||
-      nextAcceptEarlyPlugins !== (original.acceptEarlyPlugins ?? false)
+      nextAcceptEarlyPlugins !== (original.acceptEarlyPlugins ?? false) ||
+      nextRestartScheduleEnabled !== (original.restartScheduleEnabled ?? false) ||
+      nextRestartFrequency !== (original.restartFrequency ?? "daily") ||
+      nextRestartTime !== (original.restartTime ?? "03:00") ||
+      nextRestartDayOfWeek !== (original.restartDayOfWeek ?? 0)
     )
-  }, [advancedMode, advancedScript, effectiveStartupArgsJoined, original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled, acceptEarlyPlugins])
+  }, [advancedMode, advancedScript, effectiveStartupArgsJoined, original, title, ramGb, port, backupEnabled, backupFrequency, backupMaxCount, aotCacheEnabled, acceptEarlyPlugins, restartScheduleEnabled, restartFrequency, restartTime, restartDayOfWeek])
 
   const handleReset = () => {
     if (advancedMode && server) {
@@ -142,6 +159,10 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
     setBackupMaxCount(original.backupMaxCount ?? 5)
     setAotCacheEnabled(original.aotCacheEnabled ?? false)
     setAcceptEarlyPlugins(original.acceptEarlyPlugins ?? false)
+    setRestartScheduleEnabled(original.restartScheduleEnabled ?? false)
+    setRestartFrequency((original.restartFrequency as RestartFrequency) ?? "daily")
+    setRestartTime(original.restartTime ?? "03:00")
+    setRestartDayOfWeek(original.restartDayOfWeek ?? 0)
     setError(null)
     setSuccess(false)
   }
@@ -188,6 +209,10 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
         aotCacheEnabled,
         acceptEarlyPlugins,
         customStartupArgs: [],
+        restartScheduleEnabled,
+        restartFrequency,
+        restartTime,
+        restartDayOfWeek,
       })
 
       setServer(updated)
@@ -499,6 +524,86 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Scheduled restart</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Automatically restart the server on a schedule. Each run checks for updates and applies them before restarting.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="restartScheduleEnabled"
+                checked={restartScheduleEnabled}
+                onCheckedChange={(checked) => setRestartScheduleEnabled(checked === true)}
+                disabled={!canEdit}
+              />
+              <Label htmlFor="restartScheduleEnabled" className="text-sm font-normal cursor-pointer">
+                Enable scheduled restart
+              </Label>
+            </div>
+            {restartScheduleEnabled && (
+              <>
+                <div className="space-y-2">
+                  <Label>Frequency</Label>
+                  <Select
+                    value={restartFrequency}
+                    onValueChange={(v) => setRestartFrequency(v as RestartFrequency)}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="every_12h">Every 12 hours</SelectItem>
+                      <SelectItem value="every_6h">Every 6 hours</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="restartTime">Time</Label>
+                  <Input
+                    id="restartTime"
+                    type="time"
+                    value={restartTime}
+                    onChange={(e) => setRestartTime(e.target.value)}
+                    disabled={!canEdit}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Time is in the panel server&apos;s local timezone.
+                  </p>
+                </div>
+                {restartFrequency === "weekly" && (
+                  <div className="space-y-2">
+                    <Label>Day of week</Label>
+                    <Select
+                      value={String(restartDayOfWeek)}
+                      onValueChange={(v) => setRestartDayOfWeek(parseInt(v, 10))}
+                      disabled={!canEdit}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">Sunday</SelectItem>
+                        <SelectItem value="1">Monday</SelectItem>
+                        <SelectItem value="2">Tuesday</SelectItem>
+                        <SelectItem value="3">Wednesday</SelectItem>
+                        <SelectItem value="4">Thursday</SelectItem>
+                        <SelectItem value="5">Friday</SelectItem>
+                        <SelectItem value="6">Saturday</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

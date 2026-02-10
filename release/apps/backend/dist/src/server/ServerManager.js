@@ -1,7 +1,7 @@
 import { ServerInstance, buildStartupArgs } from "./ServerInstance.js";
 import { ConfigManager } from "../storage/ConfigManager.js";
 import { config as appConfig } from "../config/config.js";
-import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, insertNotification, pruneNotifications, } from "../database/db.js";
+import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, setLastScheduledRestartAt, insertNotification, pruneNotifications, } from "../database/db.js";
 import { logger, logConfigOperation, logWorldConfigOperation, logError } from "../logger/Logger.js";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
@@ -21,6 +21,7 @@ export class ServerManager extends EventEmitter {
     installer;
     playerListPollingInterval = null;
     backupCleanupInterval = null;
+    scheduledRestartInterval = null;
     playerTracker = getPlayerTracker();
     cachedServerIP = null;
     constructor() {
@@ -35,6 +36,7 @@ export class ServerManager extends EventEmitter {
         this.startAutostartServersOnBoot();
         this.startPlayerListPolling();
         this.startBackupCleanup();
+        this.startScheduledRestarts();
     }
     startAutostartServersOnBoot() {
         // Defer a bit to let the daemon finish initializing and installer recovery settle.
@@ -406,8 +408,8 @@ export class ServerManager extends EventEmitter {
             // Update config in filesystem
             const currentConfig = instance.config;
             // Only write config fields that belong in the on-disk config.json.
-            // `autostart` is stored in the database only.
-            const { autostart: _autostart, ...fsConfig } = config;
+            // `autostart` and restart schedule are stored in the database only.
+            const { autostart: _autostart, restartScheduleEnabled: _re, restartFrequency: _rf, restartTime: _rt, restartDayOfWeek: _rd, ...fsConfig } = config;
             const updatedConfig = { ...currentConfig, ...fsConfig };
             logConfigOperation(id, "filesystem", "Saving server config to filesystem");
             this.configManager.saveConfig(updatedConfig);
@@ -1997,6 +1999,124 @@ export class ServerManager extends EventEmitter {
         catch (error) {
             logger.error(`Failed to cleanup old backups: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+    /**
+     * Compute the next scheduled restart time (ms since epoch) in the daemon's local time.
+     * Returns null if config is invalid or no next run.
+     */
+    getNextScheduledRestartTime(server) {
+        if (!server.restartScheduleEnabled || !server.restartFrequency || !server.restartTime) {
+            return null;
+        }
+        const parts = server.restartTime.split(":");
+        const hh = Number(parts[0]);
+        const mm = Number(parts[1] ?? 0);
+        if (Number.isNaN(hh) || Number.isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+            return null;
+        }
+        const now = new Date();
+        const freq = server.restartFrequency;
+        if (freq === "daily") {
+            const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+            if (next.getTime() <= now.getTime()) {
+                next.setDate(next.getDate() + 1);
+            }
+            return next.getTime();
+        }
+        if (freq === "every_6h") {
+            const slots = [0, 6, 12, 18]; // hours
+            let next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+            for (const hour of slots) {
+                next.setHours(hour, 0, 0, 0);
+                if (next.getTime() > now.getTime())
+                    return next.getTime();
+            }
+            next.setDate(next.getDate() + 1);
+            next.setHours(0, 0, 0, 0);
+            return next.getTime();
+        }
+        if (freq === "every_12h") {
+            let next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+            if (next.getTime() > now.getTime())
+                return next.getTime();
+            next.setHours(12, 0, 0, 0);
+            if (next.getTime() > now.getTime())
+                return next.getTime();
+            next.setDate(next.getDate() + 1);
+            next.setHours(0, 0, 0, 0);
+            return next.getTime();
+        }
+        if (freq === "weekly" && server.restartDayOfWeek !== undefined && server.restartDayOfWeek !== null) {
+            const targetDay = server.restartDayOfWeek; // 0 = Sunday
+            const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+            let daysToAdd = (targetDay - next.getDay() + 7) % 7;
+            if (daysToAdd === 0 && next.getTime() <= now.getTime())
+                daysToAdd = 7;
+            next.setDate(next.getDate() + daysToAdd);
+            return next.getTime();
+        }
+        return null;
+    }
+    /**
+     * Run scheduled restarts: for each server that is due, check for update then update or restart.
+     */
+    async runScheduledRestarts() {
+        let servers;
+        try {
+            servers = getAllServers();
+        }
+        catch (err) {
+            logger.warn(`Scheduled restarts: failed to get servers: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+        }
+        const candidates = servers.filter((s) => s.restartScheduleEnabled === true &&
+            s.restartFrequency &&
+            s.restartTime &&
+            s.installState === "INSTALLED");
+        if (candidates.length === 0)
+            return;
+        const now = Date.now();
+        for (const server of candidates) {
+            const nextRun = this.getNextScheduledRestartTime(server);
+            if (nextRun === null)
+                continue;
+            const lastRun = server.lastScheduledRestartAt ?? 0;
+            if (now < nextRun || nextRun <= lastRun)
+                continue;
+            const instance = this.instances.get(server.id);
+            const status = instance?.getStatus() ?? server.status;
+            if (status === "starting" || status === "stopping")
+                continue;
+            try {
+                setLastScheduledRestartAt(server.id, now);
+                logger.info(`Scheduled restart (with update check) for server ${server.id} (${server.name})`);
+                const result = await this.checkServerUpdate(server.id);
+                if (result.updateAvailable) {
+                    await this.updateServer(server.id);
+                }
+                else {
+                    if (instance && status === "online") {
+                        await this.restartServer(server.id);
+                    }
+                }
+            }
+            catch (err) {
+                logger.error(`Scheduled restart failed for server ${server.id} (${server.name}): ${err instanceof Error ? err.message : String(err)}`);
+                this.notify({
+                    type: "server.restart_failed",
+                    title: "Scheduled restart failed",
+                    message: `Scheduled restart for "${server.name}" failed: ${err instanceof Error ? err.message : String(err)}`,
+                    serverId: server.id,
+                    serverName: server.name,
+                });
+            }
+        }
+    }
+    startScheduledRestarts() {
+        this.scheduledRestartInterval = setInterval(() => {
+            this.runScheduledRestarts();
+        }, 60 * 1000);
+        logger.info("Scheduled restarts started (every minute)");
     }
     /**
      * Start periodic polling of player lists via /who command
