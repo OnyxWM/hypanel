@@ -122,7 +122,7 @@ const createServerSchema = z.object({
   acceptEarlyPlugins: z.boolean().default(false),
   customStartupArgs: z.array(z.string()).optional(),
   restartScheduleEnabled: z.boolean().default(false).optional(),
-  restartFrequency: z.enum(["daily", "every_6h", "every_12h", "weekly"]).optional(),
+  restartFrequency: z.enum(["daily", "every_1h", "every_6h", "every_12h", "weekly"]).optional(),
   restartTime: z.string().regex(/^([01]?\d|2[0-3]):([0-5]\d)$/, "Must be HH:mm in 24h format").optional(),
   restartDayOfWeek: z.number().int().min(0).max(6).optional(),
 });

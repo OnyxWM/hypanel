@@ -1,7 +1,7 @@
 import { ServerInstance, buildStartupArgs } from "./ServerInstance.js";
 import { ConfigManager } from "../storage/ConfigManager.js";
 import { config as appConfig } from "../config/config.js";
-import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, setLastScheduledRestartAt, insertNotification, pruneNotifications, } from "../database/db.js";
+import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, setLastScheduledRestartAt, setLastRestartWarningForRunAt, insertNotification, pruneNotifications, } from "../database/db.js";
 import { logger, logConfigOperation, logWorldConfigOperation, logError } from "../logger/Logger.js";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
@@ -2020,25 +2020,35 @@ export class ServerManager extends EventEmitter {
             const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
             return next.getTime();
         }
+        if (freq === "every_1h") {
+            const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
+            return next.getTime();
+        }
         if (freq === "every_6h") {
             const slots = [0, 6, 12, 18]; // hours
             let next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+            let lastPassed = null;
             for (const hour of slots) {
                 next.setHours(hour, 0, 0, 0);
-                if (next.getTime() > now.getTime())
-                    return next.getTime();
+                if (next.getTime() <= now.getTime())
+                    lastPassed = next.getTime();
             }
+            if (lastPassed !== null)
+                return lastPassed;
             next.setDate(next.getDate() + 1);
             next.setHours(0, 0, 0, 0);
             return next.getTime();
         }
         if (freq === "every_12h") {
             let next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-            if (next.getTime() > now.getTime())
-                return next.getTime();
+            let lastPassed = null;
+            if (next.getTime() <= now.getTime())
+                lastPassed = next.getTime();
             next.setHours(12, 0, 0, 0);
-            if (next.getTime() > now.getTime())
-                return next.getTime();
+            if (next.getTime() <= now.getTime())
+                lastPassed = next.getTime();
+            if (lastPassed !== null)
+                return lastPassed;
             next.setDate(next.getDate() + 1);
             next.setHours(0, 0, 0, 0);
             return next.getTime();
@@ -2046,9 +2056,7 @@ export class ServerManager extends EventEmitter {
         if (freq === "weekly" && server.restartDayOfWeek !== undefined && server.restartDayOfWeek !== null) {
             const targetDay = server.restartDayOfWeek; // 0 = Sunday
             const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
-            let daysToAdd = (targetDay - next.getDay() + 7) % 7;
-            if (daysToAdd === 0 && next.getTime() <= now.getTime())
-                daysToAdd = 7;
+            const daysToAdd = (targetDay - next.getDay() + 7) % 7;
             next.setDate(next.getDate() + daysToAdd);
             return next.getTime();
         }
@@ -2109,9 +2117,53 @@ export class ServerManager extends EventEmitter {
             }
         }
     }
+    /**
+     * Send in-game "restarting in 15 minutes" warning once per scheduled run when we enter the 15-min window.
+     */
+    runScheduledRestartWarnings() {
+        let servers;
+        try {
+            servers = getAllServers();
+        }
+        catch (err) {
+            logger.warn(`Scheduled restart warnings: failed to get servers: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+        }
+        const candidates = servers.filter((s) => s.restartScheduleEnabled === true &&
+            s.restartFrequency &&
+            s.restartTime &&
+            s.installState === "INSTALLED");
+        if (candidates.length === 0)
+            return;
+        const now = Date.now();
+        const fifteenMinutesMs = 15 * 60 * 1000;
+        for (const server of candidates) {
+            const nextRun = this.getNextScheduledRestartTime(server);
+            if (nextRun === null || now >= nextRun)
+                continue;
+            const instance = this.instances.get(server.id);
+            const status = instance?.getStatus() ?? server.status;
+            if (status !== "online")
+                continue;
+            const windowStart = nextRun - fifteenMinutesMs;
+            if (now < windowStart)
+                continue;
+            if (server.lastRestartWarningForRunAt === nextRun)
+                continue;
+            try {
+                this.sendCommand(server.id, "say Server restarting in 15 minutes.");
+                setLastRestartWarningForRunAt(server.id, nextRun);
+                logger.info(`Sent 15-minute restart warning for server ${server.id} (${server.name})`);
+            }
+            catch (err) {
+                logger.warn(`Failed to send 15-minute restart warning for server ${server.id} (${server.name}): ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+    }
     startScheduledRestarts() {
         this.scheduledRestartInterval = setInterval(() => {
             this.runScheduledRestarts();
+            this.runScheduledRestartWarnings();
         }, 60 * 1000);
         logger.info("Scheduled restarts started (every minute)");
     }

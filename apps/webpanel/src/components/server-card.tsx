@@ -96,9 +96,17 @@ export function ServerCard({ server, onStart, onStop, onRestart, onDelete, onIns
           <p className="text-xs text-muted-foreground">
             {server.ip}:{server.port}
           </p>
-          {server.restartScheduleEnabled && server.restartTime && (
+          {server.restartScheduleEnabled &&
+            (server.restartTime || ["every_1h", "every_6h", "every_12h"].includes(server.restartFrequency ?? "")) && (
             <p className="text-xs text-muted-foreground">
-              Restarts at {server.restartTime} (with update check)
+              {server.restartFrequency === "every_1h"
+                ? "Restarts every hour"
+                : server.restartFrequency === "every_6h"
+                  ? "Restarts every 6 hours"
+                  : server.restartFrequency === "every_12h"
+                    ? "Restarts every 12 hours"
+                    : `Restarts at ${server.restartTime}`}{" "}
+              (with update check)
             </p>
           )}
         </div>

@@ -183,7 +183,7 @@ export class ApiClient {
       acceptEarlyPlugins?: boolean
       customStartupArgs?: string[]
       restartScheduleEnabled?: boolean
-      restartFrequency?: "daily" | "every_6h" | "every_12h" | "weekly"
+      restartFrequency?: "daily" | "every_1h" | "every_6h" | "every_12h" | "weekly"
       restartTime?: string
       restartDayOfWeek?: number
     }>
@@ -307,8 +307,20 @@ export class ApiClient {
     })
   }
 
+  async clearDownloaderCredentials(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>("/api/downloader/auth/clear", {
+      method: "POST",
+    })
+  }
+
   async getSystemStats(): Promise<SystemStats> {
     return this.request<SystemStats>("/api/system/stats")
+  }
+
+  async getSystemStatsHistory(window: "1h" | "12h" | "24h" | "1w"): Promise<{ data: Array<{ timestamp: number; cpu: number; memory: number }> }> {
+    return this.request<{ data: Array<{ timestamp: number; cpu: number; memory: number }> }>(
+      `/api/system/stats/history?window=${window}`
+    )
   }
 
   async stopAllServers(force: boolean = false): Promise<SystemActionSummary> {

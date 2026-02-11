@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { RotateCcw, Power, RefreshCw, Download, Copy } from "lucide-react"
+import { RotateCcw, Power, RefreshCw, Download, Copy, Trash2 } from "lucide-react"
 
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
@@ -43,6 +43,7 @@ export default function SettingsPage() {
   const [restartDaemonState, setRestartDaemonState] = useState<ActionState>("idle")
   const [checkUpdateState, setCheckUpdateState] = useState<ActionState>("idle")
   const [updateState, setUpdateState] = useState<ActionState>("idle")
+  const [clearCredentialsState, setClearCredentialsState] = useState<ActionState>("idle")
   const [updateProgress, setUpdateProgress] = useState<string | null>(null)
   const [showPasswordDialog, setShowPasswordDialog] = useState(false)
   const [password, setPassword] = useState("")
@@ -59,7 +60,7 @@ export default function SettingsPage() {
   const journalCursorRef = useRef<string | undefined>(undefined)
 
   const canRunActions =
-    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle" && checkUpdateState === "idle" && updateState === "idle"
+    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle" && checkUpdateState === "idle" && updateState === "idle" && clearCredentialsState === "idle"
 
   useEffect(() => {
     journalCursorRef.current = journalCursor
@@ -240,6 +241,23 @@ export default function SettingsPage() {
       setActionError(e instanceof Error ? e.message : "Failed to restart daemon")
     } finally {
       setRestartDaemonState("idle")
+    }
+  }
+
+  const runClearCredentials = async () => {
+    if (!canRunActions) return
+    if (!window.confirm("Clear Hytale downloader credentials? You will need to re-authenticate before downloading or updating servers.")) return
+
+    setActionError(null)
+    setActionSuccess(null)
+    setClearCredentialsState("running")
+    try {
+      await apiClient.clearDownloaderCredentials()
+      setActionSuccess("Credentials cleared. Re-authenticate when installing or updating servers.")
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to clear credentials")
+    } finally {
+      setClearCredentialsState("idle")
     }
   }
 
@@ -447,6 +465,17 @@ export default function SettingsPage() {
                     {updateState === "running" ? "Updating..." : "Update Application"}
                   </Button>
                 )}
+
+                <Button
+                  variant="outline"
+                  onClick={runClearCredentials}
+                  disabled={!canRunActions}
+                  className="md:w-64"
+                  title="Use if you revoked OAuth tokens via the Hytale account portal"
+                >
+                  <Trash2 className={cn("h-4 w-4 mr-2", clearCredentialsState === "running" && "animate-spin")} />
+                  {clearCredentialsState === "running" ? "Clearing..." : "Clear Hytale credentials"}
+                </Button>
               </div>
 
               {updateCheckResult && updateCheckResult.updateAvailable && updateCheckResult.isDocker && (

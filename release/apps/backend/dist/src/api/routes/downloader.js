@@ -236,6 +236,34 @@ router.post("/auth/cancel", (req, res) => {
         message: "Authentication cancelled"
     });
 });
+router.post("/auth/clear", (req, res) => {
+    const credentialsPath = config.downloaderCredentialsPath;
+    if (!credentialsPath) {
+        return res.status(500).json({
+            code: "NO_CREDENTIALS_PATH",
+            message: "Credentials path not configured"
+        });
+    }
+    try {
+        if (fs.existsSync(credentialsPath)) {
+            fs.unlinkSync(credentialsPath);
+            logger.info("Cleared Hytale downloader credentials file");
+        }
+        oauthState = null;
+        return res.json({
+            success: true,
+            message: "Credentials cleared"
+        });
+    }
+    catch (error) {
+        logger.error(`Failed to clear credentials: ${error}`);
+        res.status(500).json({
+            code: "CLEAR_FAILED",
+            message: "Failed to clear credentials",
+            details: error instanceof Error ? error.message : "Unknown error"
+        });
+    }
+});
 export function createDownloaderRoutes() {
     return router;
 }

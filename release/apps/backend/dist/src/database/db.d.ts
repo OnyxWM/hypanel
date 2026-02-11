@@ -32,9 +32,18 @@ export declare function updateServerConfig(id: string, config: Partial<{
     restartDayOfWeek?: number;
 }>): void;
 export declare function setLastScheduledRestartAt(serverId: string, timestamp: number): void;
+export declare function setLastRestartWarningForRunAt(serverId: string, runAt: number): void;
 export declare function deleteServer(id: string): void;
 export declare function insertServerStats(stats: ServerStats): void;
 export declare function getServerStats(serverId: string, limit?: number): ServerStats[];
+export interface SystemStatRow {
+    timestamp: number;
+    cpu: number;
+    memory: number;
+}
+export declare function insertSystemStats(stats: SystemStatRow): void;
+export declare function getSystemStatsHistory(sinceMs: number, limit?: number): SystemStatRow[];
+export declare function pruneSystemStats(olderThanMs: number): void;
 export declare function insertConsoleLog(log: Omit<ConsoleLog, "id"> & {
     serverId: string;
 }): void;

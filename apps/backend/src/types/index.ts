@@ -1,7 +1,7 @@
 export type ServerStatus = "online" | "offline" | "starting" | "stopping" | "auth_required";
 export type InstallState = "NOT_INSTALLED" | "INSTALLING" | "INSTALLED" | "FAILED";
 
-export type RestartFrequency = "daily" | "every_6h" | "every_12h" | "weekly";
+export type RestartFrequency = "daily" | "every_1h" | "every_6h" | "every_12h" | "weekly";
 
 export interface Server {
   id: string;
@@ -35,6 +35,7 @@ export interface Server {
   restartTime?: string;
   restartDayOfWeek?: number;
   lastScheduledRestartAt?: number | null;
+  lastRestartWarningForRunAt?: number | null;
 }
 
 export interface ConsoleLog {

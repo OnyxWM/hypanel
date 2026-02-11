@@ -126,6 +126,10 @@ export declare class ServerManager extends EventEmitter {
      * Run scheduled restarts: for each server that is due, check for update then update or restart.
      */
     private runScheduledRestarts;
+    /**
+     * Send in-game "restarting in 15 minutes" warning once per scheduled run when we enter the 15-min window.
+     */
+    private runScheduledRestartWarnings;
     private startScheduledRestarts;
     /**
      * Start periodic polling of player lists via /who command

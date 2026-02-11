@@ -560,6 +560,7 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="every_1h">Every hour</SelectItem>
                       <SelectItem value="every_12h">Every 12 hours</SelectItem>
                       <SelectItem value="every_6h">Every 6 hours</SelectItem>
                       <SelectItem value="weekly">Weekly</SelectItem>

@@ -77,6 +77,14 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_players_server_id ON players(server_id);
     CREATE INDEX IF NOT EXISTS idx_players_name ON players(player_name);
     CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+
+    CREATE TABLE IF NOT EXISTS system_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      cpu REAL NOT NULL,
+      memory REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_system_stats_timestamp ON system_stats(timestamp);
   `);
     // Best-effort migration for older installs: add servers.autostart if missing.
     // (CREATE TABLE IF NOT EXISTS won't alter existing tables.)
@@ -102,9 +110,30 @@ export function initDatabase() {
         if (!colNames.includes("last_scheduled_restart_at")) {
             db.exec(`ALTER TABLE servers ADD COLUMN last_scheduled_restart_at INTEGER;`);
         }
+        if (!colNames.includes("last_restart_warning_for_run_at")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN last_restart_warning_for_run_at INTEGER;`);
+        }
     }
     catch {
         // Ignore migration errors; absence will be handled as default in reads.
+    }
+    // Migration: create system_stats table if missing (for existing installs)
+    try {
+        const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='system_stats'`).all();
+        if (!tables.length) {
+            db.exec(`
+        CREATE TABLE system_stats (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp INTEGER NOT NULL,
+          cpu REAL NOT NULL,
+          memory REAL NOT NULL
+        );
+        CREATE INDEX idx_system_stats_timestamp ON system_stats(timestamp);
+      `);
+        }
+    }
+    catch {
+        // Ignore migration errors
     }
     return db;
 }
@@ -124,11 +153,11 @@ export function closeDatabase() {
 export function createServer(server) {
     const database = getDatabase();
     const stmt = database.prepare(`
-    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart, restart_schedule_enabled, restart_frequency, restart_time, restart_day_of_week, last_scheduled_restart_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart, restart_schedule_enabled, restart_frequency, restart_time, restart_day_of_week, last_scheduled_restart_at, last_restart_warning_for_run_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     const now = Date.now();
-    stmt.run(server.id, server.name, server.status, null, server.ip, server.port, server.version || null, now, now, server.installState || "NOT_INSTALLED", server.lastError || null, server.jarPath || null, server.assetsPath || null, server.serverRoot || null, server.autostart ? 1 : 0, server.restartScheduleEnabled ? 1 : 0, server.restartFrequency ?? null, server.restartTime ?? null, server.restartDayOfWeek ?? null, server.lastScheduledRestartAt ?? null);
+    stmt.run(server.id, server.name, server.status, null, server.ip, server.port, server.version || null, now, now, server.installState || "NOT_INSTALLED", server.lastError || null, server.jarPath || null, server.assetsPath || null, server.serverRoot || null, server.autostart ? 1 : 0, server.restartScheduleEnabled ? 1 : 0, server.restartFrequency ?? null, server.restartTime ?? null, server.restartDayOfWeek ?? null, server.lastScheduledRestartAt ?? null, server.lastRestartWarningForRunAt ?? null);
 }
 export function getServer(id) {
     const database = getDatabase();
@@ -176,6 +205,7 @@ export function getServer(id) {
         restartTime: row.restart_time ?? undefined,
         restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
         lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
+        lastRestartWarningForRunAt: row.last_restart_warning_for_run_at !== undefined && row.last_restart_warning_for_run_at !== null ? row.last_restart_warning_for_run_at : undefined,
     };
 }
 export function getAllServers() {
@@ -223,6 +253,7 @@ export function getAllServers() {
             restartTime: row.restart_time ?? undefined,
             restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
             lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
+            lastRestartWarningForRunAt: row.last_restart_warning_for_run_at !== undefined && row.last_restart_warning_for_run_at !== null ? row.last_restart_warning_for_run_at : undefined,
         };
     });
 }
@@ -350,6 +381,15 @@ export function setLastScheduledRestartAt(serverId, timestamp) {
   `);
     stmt.run(timestamp, Date.now(), serverId);
 }
+export function setLastRestartWarningForRunAt(serverId, runAt) {
+    const database = getDatabase();
+    const stmt = database.prepare(`
+    UPDATE servers
+    SET last_restart_warning_for_run_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+    stmt.run(runAt, Date.now(), serverId);
+}
 export function deleteServer(id) {
     const database = getDatabase();
     const stmt = database.prepare("DELETE FROM servers WHERE id = ?");
@@ -382,6 +422,36 @@ export function getServerStats(serverId, limit = 100) {
         players: row.players,
         maxPlayers: row.maxPlayers,
     }));
+}
+export function insertSystemStats(stats) {
+    const database = getDatabase();
+    const stmt = database.prepare(`
+    INSERT INTO system_stats (timestamp, cpu, memory)
+    VALUES (?, ?, ?)
+  `);
+    stmt.run(stats.timestamp, stats.cpu, stats.memory);
+}
+export function getSystemStatsHistory(sinceMs, limit = 10000) {
+    const database = getDatabase();
+    const since = Date.now() - sinceMs;
+    const stmt = database.prepare(`
+    SELECT timestamp, cpu, memory
+    FROM system_stats
+    WHERE timestamp >= ?
+    ORDER BY timestamp ASC
+    LIMIT ?
+  `);
+    const rows = stmt.all(since, limit);
+    return rows.map((row) => ({
+        timestamp: row.timestamp,
+        cpu: row.cpu,
+        memory: row.memory,
+    }));
+}
+export function pruneSystemStats(olderThanMs) {
+    const database = getDatabase();
+    const cutoff = Date.now() - olderThanMs;
+    database.prepare(`DELETE FROM system_stats WHERE timestamp < ?`).run(cutoff);
 }
 // Console log operations
 export function insertConsoleLog(log) {

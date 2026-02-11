@@ -534,19 +534,21 @@ export default function ServerDetailsPage() {
                 </Button>
               )}
             </div>
-            {server.restartScheduleEnabled && server.restartTime && (
+            {server.restartScheduleEnabled && (server.restartTime || ["every_1h", "every_6h", "every_12h"].includes(server.restartFrequency ?? "")) && (
               <p className="text-sm text-muted-foreground mt-2 w-full">
                 Restarts{" "}
                 {server.restartFrequency === "daily"
-                  ? "daily"
-                  : server.restartFrequency === "every_12h"
-                    ? "every 12 hours"
-                    : server.restartFrequency === "every_6h"
-                      ? "every 6 hours"
-                      : server.restartFrequency === "weekly"
-                        ? `weekly (${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][server.restartDayOfWeek ?? 0]})`
-                        : "on schedule"}{" "}
-                at {server.restartTime} (with update check).
+                  ? `daily at ${server.restartTime}`
+                  : server.restartFrequency === "every_1h"
+                    ? "every hour"
+                    : server.restartFrequency === "every_12h"
+                      ? "every 12 hours"
+                      : server.restartFrequency === "every_6h"
+                        ? "every 6 hours"
+                        : server.restartFrequency === "weekly"
+                          ? `weekly (${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][server.restartDayOfWeek ?? 0]}) at ${server.restartTime}`
+                          : "on schedule"}{" "}
+                (with update check).
               </p>
             )}
           </div>
