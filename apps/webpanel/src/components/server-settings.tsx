@@ -567,19 +567,21 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="restartTime">Time</Label>
-                  <Input
-                    id="restartTime"
-                    type="time"
-                    value={restartTime}
-                    onChange={(e) => setRestartTime(e.target.value)}
-                    disabled={!canEdit}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Time is in the panel server&apos;s local timezone.
-                  </p>
-                </div>
+                {!["every_1h", "every_6h", "every_12h"].includes(restartFrequency) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="restartTime">Time</Label>
+                    <Input
+                      id="restartTime"
+                      type="time"
+                      value={restartTime}
+                      onChange={(e) => setRestartTime(e.target.value)}
+                      disabled={!canEdit}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Time is in the panel server&apos;s local timezone.
+                    </p>
+                  </div>
+                )}
                 {restartFrequency === "weekly" && (
                   <div className="space-y-2">
                     <Label>Day of week</Label>
