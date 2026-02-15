@@ -108,6 +108,19 @@ export declare class ServerManager extends EventEmitter {
     private resolveBackupPath;
     getBackupPath(serverId: string, backupName: string): string;
     /**
+     * Determine backup type from path (official vs advanced).
+     */
+    private getBackupTypeFromPath;
+    /**
+     * Restore a backup. Server must be stopped.
+     * Official backups: copy into serverRoot/universe
+     * Advanced backups: extract tar.gz over server root (replaces all)
+     */
+    restoreBackup(serverId: string, backupName: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    /**
      * Find hytale-downloader executable
      */
     private findDownloader;

@@ -95,6 +95,13 @@ test('merge()', function (t) {
             s2t.end();
         });
 
+        st.test('with strictMerge, wraps object and primitive in array', function (s2t) {
+            var obj = { foo: 'bar' };
+            var merged = utils.merge(obj, 'baz', { strictMerge: true });
+            s2t.deepEqual(merged, [{ foo: 'bar' }, 'baz'], 'wraps in array with strictMerge');
+            s2t.end();
+        });
+
         st.test('merges overflow object into primitive', function (s2t) {
             // Create an overflow object via combine: 2 elements (indices 0-1) with limit 0
             var overflow = utils.combine(['a'], 'b', 0, false);

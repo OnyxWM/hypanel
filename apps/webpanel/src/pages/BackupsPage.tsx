@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
-import { HardDrive, Calendar, FileArchive, Download, Trash2, Folder } from "lucide-react"
+import { HardDrive, Calendar, FileArchive, Download, Trash2, Folder, RotateCcw, Loader2, CheckCircle, XCircle } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -40,6 +40,9 @@ export default function BackupsPage() {
   const [serverBackups, setServerBackups] = useState<ServerBackups[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [restoring, setRestoring] = useState<string | null>(null)
+  const [restoreOverlay, setRestoreOverlay] = useState<"restoring" | "restored" | "error" | null>(null)
+  const [restoreOverlayError, setRestoreOverlayError] = useState<string | null>(null)
 
   const requestedServerId = searchParams.get("serverId") || ""
 
@@ -112,6 +115,45 @@ export default function BackupsPage() {
     window.open(url, "_blank")
   }
 
+  const handleRestore = async (
+    serverId: string,
+    backupName: string,
+    backupType: "official" | "advanced"
+  ) => {
+    if (
+      !confirm(
+        `Restore this ${backupType} backup? This will overwrite the current server data. The server must be stopped.`
+      )
+    ) {
+      return
+    }
+
+    const key = `${serverId}:${backupName}`
+    setRestoring(key)
+    setError(null)
+    setRestoreOverlayError(null)
+    setRestoreOverlay("restoring")
+    try {
+      await apiClient.restoreBackup(serverId, backupName)
+      setRestoreOverlay("restored")
+      await loadServers()
+      await loadBackups()
+      setTimeout(() => setRestoreOverlay(null), 2000)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Failed to restore backup"
+      setError(errMsg)
+      setRestoreOverlayError(errMsg)
+      setRestoreOverlay("error")
+    } finally {
+      setRestoring(null)
+    }
+  }
+
+  const dismissRestoreOverlay = () => {
+    setRestoreOverlay(null)
+    setRestoreOverlayError(null)
+  }
+
   const server = servers.find((s) => s.id === selectedServer)
   const currentServerBackups = serverBackups.find((sb) => sb.serverId === selectedServer)
   const officialBackups = currentServerBackups?.backups.filter((b) => b.backupType !== "advanced") ?? []
@@ -171,6 +213,16 @@ export default function BackupsPage() {
         <Button
           variant="outline"
           size="sm"
+          onClick={() => handleRestore(serverId, backup.name, backup.backupType ?? "official")}
+          disabled={server?.status === "online" || restoring === `${serverId}:${backup.name}`}
+          className="gap-2"
+        >
+          <RotateCcw className={`h-4 w-4 ${restoring === `${serverId}:${backup.name}` ? "animate-spin" : ""}`} />
+          {restoring === `${serverId}:${backup.name}` ? "Restoring..." : "Restore"}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => handleDelete(serverId, backup.name)}
           className="gap-2 text-destructive hover:text-destructive"
         >
@@ -183,6 +235,52 @@ export default function BackupsPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {restoreOverlay && (
+        <div
+          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-4 bg-background/95 backdrop-blur-sm"
+          aria-modal="true"
+          aria-label="Restore in progress"
+          role="alertdialog"
+        >
+          {restoreOverlay === "restoring" && (
+            <>
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <div className="flex flex-col items-center gap-2 text-center px-4">
+                <h2 className="text-xl font-semibold">Restoring backup</h2>
+                <p className="text-muted-foreground max-w-md">Please wait. Do not close this window.</p>
+              </div>
+            </>
+          )}
+          {restoreOverlay === "restored" && (
+            <>
+              <CheckCircle className="h-12 w-12 text-green-500" />
+              <div className="flex flex-col items-center gap-2 text-center px-4">
+                <h2 className="text-xl font-semibold">Backup restored</h2>
+                <p className="text-muted-foreground max-w-md">The server data has been restored successfully.</p>
+              </div>
+            </>
+          )}
+          {restoreOverlay === "error" && (
+            <>
+              <XCircle className="h-12 w-12 text-destructive" />
+              <div className="flex flex-col items-center gap-2 text-center px-4">
+                <h2 className="text-xl font-semibold">Restore failed</h2>
+                {restoreOverlayError && (
+                  <p className="text-muted-foreground max-w-md rounded-md bg-destructive/10 border border-destructive/20 p-3 text-destructive">
+                    {restoreOverlayError}
+                  </p>
+                )}
+                <button
+                  onClick={dismissRestoreOverlay}
+                  className="mt-4 rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <Sidebar />
       <main className="pl-0 md:pl-64">
         <Header title="Backups" subtitle="View and manage server backups" />

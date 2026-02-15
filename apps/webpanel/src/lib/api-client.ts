@@ -403,6 +403,13 @@ export class ApiClient {
     })
   }
 
+  async restoreBackup(serverId: string, backupName: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(
+      `/api/servers/backups/${encodeURIComponent(serverId)}/${encodeURIComponent(backupName)}/restore`,
+      { method: "POST" }
+    )
+  }
+
   async getAllPlayers(): Promise<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>> {
     return this.request<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>>("/api/players")
   }

@@ -885,6 +885,37 @@ export function createServerRoutes(serverManager: ServerManager): Router {
     }
   });
 
+  // POST /api/servers/backups/:serverId/:backupName/restore - Restore a backup
+  router.post("/backups/:serverId/:backupName/restore", async (req: Request, res: Response) => {
+    try {
+      const { serverId, backupName } = req.params as { serverId: string; backupName: string };
+      if (!serverId || !backupName) {
+        return res.status(400).json({
+          code: "INVALID_PARAMS",
+          message: "Server ID and backup name are required"
+        });
+      }
+      const decodedBackupName = decodeURIComponent(backupName);
+      const result = await serverManager.restoreBackup(serverId, decodedBackupName);
+      res.status(200).json(result);
+    } catch (error) {
+      const sid = req.params?.serverId ?? "?";
+      const bname = req.params?.backupName ?? "?";
+      logger.error(
+        `Restore backup failed for server ${sid} ${bname}: ${error instanceof Error ? error.message : String(error)}`
+      );
+      if (error instanceof HypanelError) {
+        return res.status(error.statusCode).json(error.toJSON());
+      }
+      res.status(500).json({
+        code: "INTERNAL_ERROR",
+        message: "Failed to restore backup",
+        details: error instanceof Error ? error.message : "Unknown error",
+        suggestedAction: "Check server logs for details"
+      });
+    }
+  });
+
   // GET /api/servers/:id/mods - List mods in serverRoot/mods
   router.get(
     "/:id/mods",

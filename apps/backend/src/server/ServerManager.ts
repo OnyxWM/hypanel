@@ -1824,6 +1824,132 @@ export class ServerManager extends EventEmitter {
   }
 
   /**
+   * Determine backup type from path (official vs advanced).
+   */
+  private getBackupTypeFromPath(serverId: string, backupPath: string): "official" | "advanced" {
+    const backupDir = appConfig.backupDir;
+    const officialDir = path.resolve(path.join(backupDir, `${serverId}-back`));
+    const advancedDir = path.resolve(path.join(backupDir, "advanced", serverId));
+    const resolved = path.resolve(backupPath);
+    if (resolved.startsWith(advancedDir)) return "advanced";
+    if (resolved.startsWith(officialDir)) return "official";
+    throw createFilesystemError("access", backupPath, "Backup path is not under official or advanced backup directory", serverId);
+  }
+
+  /**
+   * Restore a backup. Server must be stopped.
+   * Official backups: copy into serverRoot/universe
+   * Advanced backups: extract tar.gz over server root (replaces all)
+   */
+  async restoreBackup(serverId: string, backupName: string): Promise<{ success: boolean; message: string }> {
+    const dbServer = getServerFromDb(serverId);
+    if (!dbServer) {
+      throw createFilesystemError("access", serverId, "Server not found", serverId);
+    }
+
+    const backupPath = this.resolveBackupPath(serverId, backupName);
+    const backupType = this.getBackupTypeFromPath(serverId, backupPath);
+    logger.info(`Starting backup restore for server ${serverId} (${dbServer.name}): ${backupName} (${backupType})`);
+
+    const serverRoot = dbServer.serverRoot || path.join(appConfig.serversDir, serverId);
+    const resolvedRoot = path.resolve(serverRoot);
+    const resolvedServersDir = path.resolve(appConfig.serversDir);
+
+    if (!resolvedRoot.startsWith(resolvedServersDir)) {
+      throw createFilesystemError("access", serverRoot, "Server path must be under servers directory", serverId);
+    }
+
+    const instance = this.instances.get(serverId);
+    const status = instance?.getStatus() ?? dbServer.status;
+    if (status === "online") {
+      throw new HypanelError(
+        "SERVER_MUST_BE_STOPPED",
+        "Server must be stopped before restoring a backup",
+        "Stop the server first, then try again",
+        { serverId },
+        400
+      );
+    }
+
+    const stats = fs.statSync(backupPath);
+
+    if (backupType === "official") {
+      const universeDir = path.join(serverRoot, "universe");
+      fs.mkdirSync(universeDir, { recursive: true, mode: 0o755 });
+
+      if (stats.isDirectory()) {
+        const copyRecursive = (src: string, dest: string) => {
+          const entries = fs.readdirSync(src, { withFileTypes: true });
+          for (const entry of entries) {
+            const srcPath = path.join(src, entry.name);
+            const destPath = path.join(dest, entry.name);
+            if (entry.isDirectory()) {
+              fs.mkdirSync(destPath, { recursive: true, mode: 0o755 });
+              copyRecursive(srcPath, destPath);
+            } else {
+              fs.copyFileSync(srcPath, destPath);
+            }
+          }
+        };
+        copyRecursive(backupPath, universeDir);
+      } else if (stats.isFile()) {
+        if (backupName.endsWith(".tar.gz") || backupName.endsWith(".tgz")) {
+          await execAsync(`tar -xzf "${backupPath}" -C "${universeDir}"`);
+        } else if (backupName.endsWith(".zip")) {
+          await execAsync(`unzip -o "${backupPath}" -d "${universeDir}"`);
+        } else {
+          throw createFilesystemError(
+            "restore",
+            backupPath,
+            "Official backup must be a directory or .tar.gz/.zip archive",
+            serverId
+          );
+        }
+      } else {
+        throw createFilesystemError("restore", backupPath, "Backup is neither a file nor directory", serverId);
+      }
+
+      logger.info(`Restored official backup for server ${serverId} (${dbServer.name}): ${backupName}`);
+      this.notify({
+        type: "server.backup_restored",
+        title: "Backup restored",
+        message: `Official backup restored for "${dbServer.name}"`,
+        serverId,
+        serverName: dbServer.name,
+      });
+      return { success: true, message: "Official backup restored successfully" };
+    }
+
+    if (backupType === "advanced") {
+      if (!stats.isFile() || !backupName.endsWith(".tar.gz")) {
+        throw createFilesystemError("restore", backupPath, "Advanced backup must be a .tar.gz file", serverId);
+      }
+
+      logger.info(`Extracting advanced backup for server ${serverId} (${dbServer.name}): ${backupName}`);
+
+      const parentDir = path.dirname(serverRoot);
+
+      if (fs.existsSync(serverRoot)) {
+        fs.rmSync(serverRoot, { recursive: true, force: true });
+      }
+
+      await execAsync(`tar -xzf "${backupPath}" -C "${parentDir}"`);
+
+      logger.info(`Restored advanced backup for server ${serverId} (${dbServer.name}): ${backupName}`);
+      this.notify({
+        type: "server.backup_restored",
+        title: "Backup restored",
+        message: `Advanced backup restored for "${dbServer.name}"`,
+        serverId,
+        serverName: dbServer.name,
+      });
+      return { success: true, message: "Advanced backup restored successfully" };
+    }
+
+    throw createFilesystemError("restore", backupPath, "Unknown backup type", serverId);
+  }
+
+  /**
    * Find hytale-downloader executable
    */
   private async findDownloader(): Promise<string | null> {
