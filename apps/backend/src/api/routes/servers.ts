@@ -125,6 +125,11 @@ const createServerSchema = z.object({
   restartFrequency: z.enum(["daily", "every_1h", "every_6h", "every_12h", "weekly"]).optional(),
   restartTime: z.string().regex(/^([01]?\d|2[0-3]):([0-5]\d)$/, "Must be HH:mm in 24h format").optional(),
   restartDayOfWeek: z.number().int().min(0).max(6).optional(),
+  advancedBackupEnabled: z.boolean().default(false).optional(),
+  advancedBackupFrequency: z.enum(["daily", "weekly"]).optional(),
+  advancedBackupTime: z.string().regex(/^([01]?\d|2[0-3]):([0-5]\d)$/, "Must be HH:mm in 24h format").optional(),
+  advancedBackupDayOfWeek: z.number().int().min(0).max(6).optional(),
+  advancedBackupMaxCount: z.number().int().min(1).default(1).optional(),
 });
 
 const serverIdSchema = z.object({
@@ -1260,6 +1265,37 @@ export function createServerRoutes(serverManager: ServerManager): Router {
           message: "Failed to update server",
           details: error instanceof Error ? error.message : "Unknown error",
           suggestedAction: "Check server logs for details"
+        });
+      }
+    }
+  );
+
+  // POST /api/servers/:id/advanced-backup - Trigger advanced backup now
+  router.post(
+    "/:id/advanced-backup",
+    validateParams(serverIdSchema),
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params as { id: string };
+        await serverManager.runAdvancedBackup(id);
+        const server = serverManager.getServer(id);
+        res.json({ success: true, message: "Advanced backup started", server });
+      } catch (error) {
+        if (error instanceof HypanelError) {
+          return res.status(error.statusCode).json(error.toJSON());
+        }
+        if (error instanceof Error && error.message.includes("not found")) {
+          return res.status(404).json({
+            code: "SERVER_NOT_FOUND",
+            message: error.message,
+            suggestedAction: "Verify the server ID is correct",
+          });
+        }
+        res.status(500).json({
+          code: "INTERNAL_ERROR",
+          message: "Failed to run advanced backup",
+          details: error instanceof Error ? error.message : "Unknown error",
+          suggestedAction: "Check server logs for details",
         });
       }
     }

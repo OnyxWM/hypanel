@@ -4,6 +4,7 @@ import ServersPage from "./pages/ServersPage"
 import ConsolePage from "./pages/ConsolePage"
 import ServerDetailsPage from "./pages/ServerDetailsPage"
 import BackupsPage from "./pages/BackupsPage"
+import AutomationPage from "./pages/AutomationPage"
 import PlayersPage from "./pages/PlayersPage"
 import SettingsPage from "./pages/SettingsPage"
 import LoginPage from "./pages/LoginPage"
@@ -64,6 +65,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <BackupsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/automation"
+            element={
+              <RequireAuth>
+                <AutomationPage />
               </RequireAuth>
             }
           />

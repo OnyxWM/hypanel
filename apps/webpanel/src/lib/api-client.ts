@@ -186,6 +186,11 @@ export class ApiClient {
       restartFrequency?: "daily" | "every_1h" | "every_6h" | "every_12h" | "weekly"
       restartTime?: string
       restartDayOfWeek?: number
+      advancedBackupEnabled?: boolean
+      advancedBackupFrequency?: "daily" | "weekly"
+      advancedBackupTime?: string
+      advancedBackupDayOfWeek?: number
+      advancedBackupMaxCount?: number
     }>
   ): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}`, {
@@ -208,6 +213,12 @@ export class ApiClient {
 
   async restartServer(id: string): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}/restart`, {
+      method: "POST",
+    })
+  }
+
+  async triggerAdvancedBackup(id: string): Promise<{ success: boolean; message: string; server: Server }> {
+    return this.request<{ success: boolean; message: string; server: Server }>(`/api/servers/${id}/advanced-backup`, {
       method: "POST",
     })
   }
@@ -377,12 +388,12 @@ export class ApiClient {
   async getBackups(): Promise<Array<{ 
     serverId: string
     serverName: string
-    backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean }>
+    backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean; backupType?: "official" | "advanced" }>
   }>> {
     return this.request<Array<{ 
       serverId: string
       serverName: string
-      backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean }>
+      backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean; backupType?: "official" | "advanced" }>
     }>>("/api/servers/backups")
   }
 

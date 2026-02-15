@@ -113,6 +113,25 @@ export function initDatabase() {
         if (!colNames.includes("last_restart_warning_for_run_at")) {
             db.exec(`ALTER TABLE servers ADD COLUMN last_restart_warning_for_run_at INTEGER;`);
         }
+        // Advanced backup columns
+        if (!colNames.includes("advanced_backup_enabled")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_enabled INTEGER NOT NULL DEFAULT 0;`);
+        }
+        if (!colNames.includes("advanced_backup_frequency")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_frequency TEXT;`);
+        }
+        if (!colNames.includes("advanced_backup_time")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_time TEXT;`);
+        }
+        if (!colNames.includes("advanced_backup_day_of_week")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_day_of_week INTEGER;`);
+        }
+        if (!colNames.includes("advanced_backup_max_count")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_max_count INTEGER NOT NULL DEFAULT 1;`);
+        }
+        if (!colNames.includes("last_advanced_backup_at")) {
+            db.exec(`ALTER TABLE servers ADD COLUMN last_advanced_backup_at INTEGER;`);
+        }
     }
     catch {
         // Ignore migration errors; absence will be handled as default in reads.
@@ -206,6 +225,12 @@ export function getServer(id) {
         restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
         lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
         lastRestartWarningForRunAt: row.last_restart_warning_for_run_at !== undefined && row.last_restart_warning_for_run_at !== null ? row.last_restart_warning_for_run_at : undefined,
+        advancedBackupEnabled: Boolean(row.advanced_backup_enabled),
+        advancedBackupFrequency: row.advanced_backup_frequency ?? undefined,
+        advancedBackupTime: row.advanced_backup_time ?? undefined,
+        advancedBackupDayOfWeek: row.advanced_backup_day_of_week !== undefined && row.advanced_backup_day_of_week !== null ? row.advanced_backup_day_of_week : undefined,
+        advancedBackupMaxCount: row.advanced_backup_max_count !== undefined && row.advanced_backup_max_count !== null ? row.advanced_backup_max_count : 1,
+        lastAdvancedBackupAt: row.last_advanced_backup_at !== undefined && row.last_advanced_backup_at !== null ? row.last_advanced_backup_at : undefined,
     };
 }
 export function getAllServers() {
@@ -254,6 +279,12 @@ export function getAllServers() {
             restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
             lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
             lastRestartWarningForRunAt: row.last_restart_warning_for_run_at !== undefined && row.last_restart_warning_for_run_at !== null ? row.last_restart_warning_for_run_at : undefined,
+            advancedBackupEnabled: Boolean(row.advanced_backup_enabled),
+            advancedBackupFrequency: row.advanced_backup_frequency ?? undefined,
+            advancedBackupTime: row.advanced_backup_time ?? undefined,
+            advancedBackupDayOfWeek: row.advanced_backup_day_of_week !== undefined && row.advanced_backup_day_of_week !== null ? row.advanced_backup_day_of_week : undefined,
+            advancedBackupMaxCount: row.advanced_backup_max_count !== undefined && row.advanced_backup_max_count !== null ? row.advanced_backup_max_count : 1,
+            lastAdvancedBackupAt: row.last_advanced_backup_at !== undefined && row.last_advanced_backup_at !== null ? row.last_advanced_backup_at : undefined,
         };
     });
 }
@@ -359,6 +390,26 @@ export function updateServerConfig(id, config) {
         updates.push("restart_day_of_week = ?");
         values.push(config.restartDayOfWeek);
     }
+    if (config.advancedBackupEnabled !== undefined) {
+        updates.push("advanced_backup_enabled = ?");
+        values.push(config.advancedBackupEnabled ? 1 : 0);
+    }
+    if (config.advancedBackupFrequency !== undefined) {
+        updates.push("advanced_backup_frequency = ?");
+        values.push(config.advancedBackupFrequency);
+    }
+    if (config.advancedBackupTime !== undefined) {
+        updates.push("advanced_backup_time = ?");
+        values.push(config.advancedBackupTime);
+    }
+    if (config.advancedBackupDayOfWeek !== undefined) {
+        updates.push("advanced_backup_day_of_week = ?");
+        values.push(config.advancedBackupDayOfWeek);
+    }
+    if (config.advancedBackupMaxCount !== undefined) {
+        updates.push("advanced_backup_max_count = ?");
+        values.push(config.advancedBackupMaxCount);
+    }
     if (updates.length === 0) {
         return; // No database fields to update
     }
@@ -389,6 +440,15 @@ export function setLastRestartWarningForRunAt(serverId, runAt) {
     WHERE id = ?
   `);
     stmt.run(runAt, Date.now(), serverId);
+}
+export function setLastAdvancedBackupAt(serverId, timestamp) {
+    const database = getDatabase();
+    const stmt = database.prepare(`
+    UPDATE servers
+    SET last_advanced_backup_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+    stmt.run(timestamp, Date.now(), serverId);
 }
 export function deleteServer(id) {
     const database = getDatabase();

@@ -12,6 +12,7 @@ interface BackupItem {
   size: number
   modified: string
   isDirectory: boolean
+  backupType?: "official" | "advanced"
 }
 
 interface ServerBackups {
@@ -131,11 +132,16 @@ export default function BackupsPage() {
                                 )}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <p className="font-medium text-sm truncate">{backup.name}</p>
                                   {backup.isDirectory && (
                                     <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">
                                       Directory
+                                    </span>
+                                  )}
+                                  {backup.backupType === "advanced" && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                                      Advanced
                                     </span>
                                   )}
                                 </div>

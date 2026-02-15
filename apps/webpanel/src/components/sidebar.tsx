@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Download, X, Copy } from "lucide-react"
+import { LayoutDashboard, Server, Terminal, Settings, Users, HardDrive, Download, X, Copy, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/contexts/sidebar-context"
 import { useEffect, useState } from "react"
@@ -14,6 +14,7 @@ const navigation = [
   { name: "Console", href: "/console", icon: Terminal },
   { name: "Players", href: "/players", icon: Users },
   { name: "Backups", href: "/backups", icon: HardDrive },
+  { name: "Automation", href: "/automation", icon: Zap },
   { name: "Settings", href: "/settings", icon: Settings },
 ]
 

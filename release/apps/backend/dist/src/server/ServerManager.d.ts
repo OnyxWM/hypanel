@@ -8,6 +8,7 @@ export declare class ServerManager extends EventEmitter {
     private playerListPollingInterval;
     private backupCleanupInterval;
     private scheduledRestartInterval;
+    private advancedBackupInterval;
     private playerTracker;
     private cachedServerIP;
     constructor();
@@ -41,6 +42,11 @@ export declare class ServerManager extends EventEmitter {
         restartFrequency?: string;
         restartTime?: string;
         restartDayOfWeek?: number;
+        advancedBackupEnabled?: boolean;
+        advancedBackupFrequency?: string;
+        advancedBackupTime?: string;
+        advancedBackupDayOfWeek?: number;
+        advancedBackupMaxCount?: number;
     }>): Promise<Server>;
     deleteServer(id: string): Promise<void>;
     startServer(id: string): Promise<void>;
@@ -92,9 +98,14 @@ export declare class ServerManager extends EventEmitter {
             size: number;
             modified: Date;
             isDirectory: boolean;
+            backupType?: "official" | "advanced";
         }>;
     }>;
     deleteBackup(serverId: string, backupName: string): Promise<void>;
+    /**
+     * Resolve backup path for both official ({serverId}-back) and advanced (advanced/{serverId}) backups.
+     */
+    private resolveBackupPath;
     getBackupPath(serverId: string, backupName: string): string;
     /**
      * Find hytale-downloader executable
@@ -131,6 +142,24 @@ export declare class ServerManager extends EventEmitter {
      */
     private runScheduledRestartWarnings;
     private startScheduledRestarts;
+    /**
+     * Compute the next advanced backup time (ms since epoch). Returns null if config invalid.
+     */
+    private getNextAdvancedBackupTime;
+    /**
+     * Run advanced backup: tar.gz the whole server folder into backupDir/advanced/{serverId}/
+     */
+    runAdvancedBackup(serverId: string): Promise<void>;
+    /**
+     * Delete old advanced backup archives beyond advancedBackupMaxCount for a server.
+     */
+    private cleanupOldAdvancedBackups;
+    /**
+     * Run scheduled advanced backups for servers that are due.
+     */
+    private runScheduledAdvancedBackups;
+    private startAdvancedBackupScheduler;
+    private stopAdvancedBackupScheduler;
     /**
      * Start periodic polling of player lists via /who command
      * Runs every 5 minutes for all online servers

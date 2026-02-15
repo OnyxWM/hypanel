@@ -30,9 +30,15 @@ export declare function updateServerConfig(id: string, config: Partial<{
     restartFrequency?: string;
     restartTime?: string;
     restartDayOfWeek?: number;
+    advancedBackupEnabled?: boolean;
+    advancedBackupFrequency?: string;
+    advancedBackupTime?: string;
+    advancedBackupDayOfWeek?: number;
+    advancedBackupMaxCount?: number;
 }>): void;
 export declare function setLastScheduledRestartAt(serverId: string, timestamp: number): void;
 export declare function setLastRestartWarningForRunAt(serverId: string, runAt: number): void;
+export declare function setLastAdvancedBackupAt(serverId: string, timestamp: number): void;
 export declare function deleteServer(id: string): void;
 export declare function insertServerStats(stats: ServerStats): void;
 export declare function getServerStats(serverId: string, limit?: number): ServerStats[];

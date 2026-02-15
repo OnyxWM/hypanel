@@ -12,6 +12,7 @@ import {
   updateServerConfig,
   setLastScheduledRestartAt,
   setLastRestartWarningForRunAt,
+  setLastAdvancedBackupAt,
   insertNotification,
   pruneNotifications,
 } from "../database/db.js";
@@ -39,6 +40,7 @@ export class ServerManager extends EventEmitter {
   private playerListPollingInterval: NodeJS.Timeout | null = null;
   private backupCleanupInterval: NodeJS.Timeout | null = null;
   private scheduledRestartInterval: NodeJS.Timeout | null = null;
+  private advancedBackupInterval: NodeJS.Timeout | null = null;
   private playerTracker = getPlayerTracker();
   private cachedServerIP: string | null = null;
 
@@ -57,6 +59,7 @@ export class ServerManager extends EventEmitter {
     this.startPlayerListPolling();
     this.startBackupCleanup();
     this.startScheduledRestarts();
+    this.startAdvancedBackupScheduler();
   }
 
   private startAutostartServersOnBoot(): void {
@@ -485,6 +488,11 @@ export class ServerManager extends EventEmitter {
     restartFrequency?: string;
     restartTime?: string;
     restartDayOfWeek?: number;
+    advancedBackupEnabled?: boolean;
+    advancedBackupFrequency?: string;
+    advancedBackupTime?: string;
+    advancedBackupDayOfWeek?: number;
+    advancedBackupMaxCount?: number;
   }>): Promise<Server> {
     logConfigOperation(id, "validation", "Starting server config update");
 
@@ -503,8 +511,20 @@ export class ServerManager extends EventEmitter {
       // Update config in filesystem
       const currentConfig = instance.config;
       // Only write config fields that belong in the on-disk config.json.
-      // `autostart` and restart schedule are stored in the database only.
-      const { autostart: _autostart, restartScheduleEnabled: _re, restartFrequency: _rf, restartTime: _rt, restartDayOfWeek: _rd, ...fsConfig } = config;
+      // `autostart`, restart schedule, and advanced backup are stored in the database only.
+      const {
+        autostart: _autostart,
+        restartScheduleEnabled: _re,
+        restartFrequency: _rf,
+        restartTime: _rt,
+        restartDayOfWeek: _rd,
+        advancedBackupEnabled: _abe,
+        advancedBackupFrequency: _abf,
+        advancedBackupTime: _abt,
+        advancedBackupDayOfWeek: _abd,
+        advancedBackupMaxCount: _abm,
+        ...fsConfig
+      } = config;
       const updatedConfig = { ...currentConfig, ...fsConfig };
       
       logConfigOperation(id, "filesystem", "Saving server config to filesystem");
@@ -1580,24 +1600,33 @@ export class ServerManager extends EventEmitter {
     this.instances.clear();
     this.stopPlayerListPolling();
     this.stopBackupCleanup();
+    this.stopAdvancedBackupScheduler();
     logger.info("All servers shut down");
   }
 
   getBackups(): Array<{ 
     serverId: string; 
     serverName: string; 
-    backups: Array<{ name: string; path: string; size: number; modified: Date; isDirectory: boolean }> 
+    backups: Array<{ name: string; path: string; size: number; modified: Date; isDirectory: boolean; backupType?: "official" | "advanced" }> 
   }> {
-    const serverBackups: Map<string, { serverId: string; serverName: string; backups: Array<{ name: string; path: string; size: number; modified: Date; isDirectory: boolean }> }> = new Map();
+    const serverBackups: Map<string, { serverId: string; serverName: string; backups: Array<{ name: string; path: string; size: number; modified: Date; isDirectory: boolean; backupType?: "official" | "advanced" }> }> = new Map();
     const backupDir = appConfig.backupDir;
 
     if (!fs.existsSync(backupDir)) {
       return Array.from(serverBackups.values());
     }
 
+    const ensureServerEntry = (serverId: string, serverName: string) => {
+      if (!serverBackups.has(serverId)) {
+        serverBackups.set(serverId, { serverId, serverName, backups: [] });
+      }
+      return serverBackups.get(serverId)!;
+    };
+
     try {
       const entries = fs.readdirSync(backupDir, { withFileTypes: true });
       
+      // Official backups: {backupDir}/{serverId}-back/
       for (const entry of entries) {
         if (entry.isDirectory() && entry.name.endsWith("-back")) {
           const serverId = entry.name.replace("-back", "");
@@ -1605,9 +1634,7 @@ export class ServerManager extends EventEmitter {
           
           if (dbServer) {
             const serverBackupDir = path.join(backupDir, entry.name);
-            
-            // List all items in the server's backup directory
-            const backupItems: Array<{ name: string; path: string; size: number; modified: Date; isDirectory: boolean }> = [];
+            const entry2 = ensureServerEntry(serverId, dbServer.name);
             
             try {
               const items = fs.readdirSync(serverBackupDir, { withFileTypes: true });
@@ -1622,7 +1649,6 @@ export class ServerManager extends EventEmitter {
                   modified = stats.mtime;
                   
                   if (item.isDirectory()) {
-                    // Calculate directory size recursively
                     const calculateSize = (dirPath: string): number => {
                       let totalSize = 0;
                       try {
@@ -1635,12 +1661,12 @@ export class ServerManager extends EventEmitter {
                             try {
                               totalSize += fs.statSync(dirItemPath).size;
                             } catch {
-                              // Ignore errors for individual files
+                              // Ignore
                             }
                           }
                         }
                       } catch {
-                        // Ignore errors
+                        // Ignore
                       }
                       return totalSize;
                     };
@@ -1649,53 +1675,89 @@ export class ServerManager extends EventEmitter {
                     size = stats.size;
                   }
                   
-                  backupItems.push({
+                  entry2.backups.push({
                     name: item.name,
                     path: itemPath,
                     size,
                     modified,
                     isDirectory: item.isDirectory(),
+                    backupType: "official",
                   });
                 } catch {
                   // Skip items we can't access
                 }
               }
             } catch {
-              // If we can't read the directory, skip it
+              // Skip
             }
-            
-            // Sort by modified date, most recent first
-            backupItems.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-            
-            // Cleanup old backups for this server before returning (but only if we have more than 10)
-            if (backupItems.length > 10) {
-              const MAX_BACKUPS_PER_SERVER = 10;
-              const backupsToDelete = backupItems.slice(MAX_BACKUPS_PER_SERVER);
-              
-              for (const backup of backupsToDelete) {
-                try {
-                  const stats = fs.statSync(backup.path);
-                  if (stats.isDirectory()) {
-                    fs.rmSync(backup.path, { recursive: true, force: true });
-                  } else {
-                    fs.unlinkSync(backup.path);
-                  }
-                  logger.info(`Deleted old backup for server ${serverId}: ${backup.name} (modified: ${backup.modified.toISOString()})`);
-                } catch (error) {
-                  logger.warn(`Failed to delete old backup ${backup.path} for server ${serverId}: ${error instanceof Error ? error.message : String(error)}`);
-                }
-              }
-              
-              // Update backupItems to only include the kept backups
-              backupItems.splice(MAX_BACKUPS_PER_SERVER);
-            }
-            
-            serverBackups.set(serverId, {
-              serverId,
-              serverName: dbServer.name,
-              backups: backupItems,
-            });
           }
+        }
+      }
+
+      // Advanced backups: {backupDir}/advanced/{serverId}/
+      const advancedDir = path.join(backupDir, "advanced");
+      if (fs.existsSync(advancedDir)) {
+        try {
+          const advEntries = fs.readdirSync(advancedDir, { withFileTypes: true });
+          for (const advEntry of advEntries) {
+            if (advEntry.isDirectory()) {
+              const serverId = advEntry.name;
+              const dbServer = getServerFromDb(serverId);
+              const serverName = dbServer?.name ?? serverId;
+              const serverAdvDir = path.join(advancedDir, serverId);
+              const entry2 = ensureServerEntry(serverId, serverName);
+              
+              try {
+                const items = fs.readdirSync(serverAdvDir, { withFileTypes: true });
+                for (const item of items) {
+                  if (!item.isFile() || !item.name.endsWith(".tar.gz")) continue;
+                  const itemPath = path.join(serverAdvDir, item.name);
+                  try {
+                    const stats = fs.statSync(itemPath);
+                    entry2.backups.push({
+                      name: item.name,
+                      path: itemPath,
+                      size: stats.size,
+                      modified: stats.mtime,
+                      isDirectory: false,
+                      backupType: "advanced",
+                    });
+                  } catch {
+                    // Skip
+                  }
+                }
+              } catch {
+                // Skip
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug(`Failed to read advanced backup directory: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      // Sort each server's backups by modified date (most recent first), and cleanup official backups beyond 10
+      for (const [, entry] of serverBackups) {
+        entry.backups.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+        
+        const officialBackups = entry.backups.filter((b) => b.backupType === "official");
+        if (officialBackups.length > 10) {
+          const toDelete = officialBackups.slice(10);
+          for (const backup of toDelete) {
+            try {
+              const stats = fs.statSync(backup.path);
+              if (stats.isDirectory()) {
+                fs.rmSync(backup.path, { recursive: true, force: true });
+              } else {
+                fs.unlinkSync(backup.path);
+              }
+              logger.info(`Deleted old backup for server ${entry.serverId}: ${backup.name}`);
+            } catch (error) {
+              logger.warn(`Failed to delete old backup ${backup.path}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+          entry.backups = entry.backups.filter((b) => !toDelete.includes(b));
+          entry.backups.sort((a, b) => b.modified.getTime() - a.modified.getTime());
         }
       }
     } catch (error) {
@@ -1706,21 +1768,7 @@ export class ServerManager extends EventEmitter {
   }
 
   async deleteBackup(serverId: string, backupName: string): Promise<void> {
-    const backupDir = appConfig.backupDir;
-    const serverBackupDir = path.join(backupDir, `${serverId}-back`);
-    const backupPath = path.join(serverBackupDir, backupName);
-    
-    // Verify the backup path is within the expected directory
-    const resolvedPath = path.resolve(backupPath);
-    const resolvedServerDir = path.resolve(serverBackupDir);
-    
-    if (!resolvedPath.startsWith(resolvedServerDir)) {
-      throw createFilesystemError("delete", backupPath, "Path traversal attempt detected", serverId);
-    }
-    
-    if (!fs.existsSync(backupPath)) {
-      throw createFilesystemError("delete", backupPath, "Backup not found", serverId);
-    }
+    const backupPath = this.resolveBackupPath(serverId, backupName);
     
     try {
       const stats = fs.statSync(backupPath);
@@ -1736,24 +1784,43 @@ export class ServerManager extends EventEmitter {
     }
   }
 
-  getBackupPath(serverId: string, backupName: string): string {
+  /**
+   * Resolve backup path for both official ({serverId}-back) and advanced (advanced/{serverId}) backups.
+   */
+  private resolveBackupPath(serverId: string, backupName: string): string {
     const backupDir = appConfig.backupDir;
-    const serverBackupDir = path.join(backupDir, `${serverId}-back`);
-    const backupPath = path.join(serverBackupDir, backupName);
     
-    // Verify the backup path is within the expected directory
-    const resolvedPath = path.resolve(backupPath);
-    const resolvedServerDir = path.resolve(serverBackupDir);
-    
-    if (!resolvedPath.startsWith(resolvedServerDir)) {
-      throw createFilesystemError("access", backupPath, "Path traversal attempt detected", serverId);
+    // Sanitize backupName to prevent path traversal
+    const safeName = path.basename(backupName).replace(/\.\./g, "");
+    if (!safeName) {
+      throw createFilesystemError("access", backupName, "Invalid backup name", serverId);
     }
+
+    // Try official backup path first
+    const officialDir = path.join(backupDir, `${serverId}-back`);
+    const officialPath = path.join(officialDir, safeName);
+    const resolvedOfficial = path.resolve(officialPath);
+    const resolvedOfficialDir = path.resolve(officialDir);
     
-    if (!fs.existsSync(backupPath)) {
-      throw createFilesystemError("access", backupPath, "Backup not found", serverId);
+    if (resolvedOfficial.startsWith(resolvedOfficialDir) && fs.existsSync(officialPath)) {
+      return officialPath;
     }
+
+    // Try advanced backup path
+    const advancedDir = path.join(backupDir, "advanced", serverId);
+    const advancedPath = path.join(advancedDir, safeName);
+    const resolvedAdvanced = path.resolve(advancedPath);
+    const resolvedAdvancedDir = path.resolve(advancedDir);
     
-    return backupPath;
+    if (resolvedAdvanced.startsWith(resolvedAdvancedDir) && fs.existsSync(advancedPath)) {
+      return advancedPath;
+    }
+
+    throw createFilesystemError("access", backupName, "Backup not found", serverId);
+  }
+
+  getBackupPath(serverId: string, backupName: string): string {
+    return this.resolveBackupPath(serverId, backupName);
   }
 
   /**
@@ -2553,6 +2620,198 @@ export class ServerManager extends EventEmitter {
       this.runScheduledRestartWarnings();
     }, 60 * 1000);
     logger.info("Scheduled restarts started (every minute)");
+  }
+
+  /**
+   * Compute the next advanced backup time (ms since epoch). Returns null if config invalid.
+   */
+  private getNextAdvancedBackupTime(server: Server): number | null {
+    if (!server.advancedBackupEnabled || !server.advancedBackupFrequency || !server.advancedBackupTime) {
+      return null;
+    }
+    const parts = server.advancedBackupTime.split(":");
+    const hh = Number(parts[0]);
+    const mm = Number(parts[1] ?? 0);
+    if (Number.isNaN(hh) || Number.isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+      return null;
+    }
+    const now = new Date();
+    const freq = server.advancedBackupFrequency;
+
+    if (freq === "daily") {
+      let next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+      if (next.getTime() <= now.getTime()) {
+        next.setDate(next.getDate() + 1);
+      }
+      return next.getTime();
+    }
+
+    if (freq === "weekly" && server.advancedBackupDayOfWeek !== undefined && server.advancedBackupDayOfWeek !== null) {
+      const targetDay = server.advancedBackupDayOfWeek;
+      let next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+      const daysToAdd = (targetDay - next.getDay() + 7) % 7;
+      if (daysToAdd === 0 && next.getTime() <= now.getTime()) {
+        next.setDate(next.getDate() + 7);
+      } else {
+        next.setDate(next.getDate() + daysToAdd);
+      }
+      return next.getTime();
+    }
+
+    return null;
+  }
+
+  /**
+   * Run advanced backup: tar.gz the whole server folder into backupDir/advanced/{serverId}/
+   */
+  async runAdvancedBackup(serverId: string): Promise<void> {
+    const dbServer = getServerFromDb(serverId);
+    if (!dbServer) {
+      throw new Error(`Server ${serverId} not found`);
+    }
+
+    const serverRoot = dbServer.serverRoot || path.join(appConfig.serversDir, serverId);
+    const resolvedRoot = path.resolve(serverRoot);
+    const resolvedServersDir = path.resolve(appConfig.serversDir);
+
+    if (!resolvedRoot.startsWith(resolvedServersDir)) {
+      throw createFilesystemError("access", serverRoot, "Server path must be under servers directory", serverId);
+    }
+
+    if (!fs.existsSync(serverRoot)) {
+      throw createFilesystemError("access", serverRoot, "Server directory not found", serverId);
+    }
+
+    const advancedDir = path.join(appConfig.backupDir, "advanced", serverId);
+    fs.mkdirSync(advancedDir, { recursive: true, mode: 0o755 });
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const archiveName = `server-${timestamp}.tar.gz`;
+    const archivePath = path.join(advancedDir, archiveName);
+
+    const parentDir = path.dirname(serverRoot);
+    const folderName = path.basename(serverRoot);
+
+    try {
+      await execAsync(`tar -czf "${archivePath}" -C "${parentDir}" "${folderName}"`);
+      setLastAdvancedBackupAt(serverId, Date.now());
+      this.cleanupOldAdvancedBackups(serverId);
+      logger.info(`Advanced backup completed for server ${serverId} (${dbServer.name}): ${archiveName}`);
+      this.notify({
+        type: "server.advanced_backup_complete",
+        title: "Advanced backup complete",
+        message: `Backup created for "${dbServer.name}"`,
+        serverId,
+        serverName: dbServer.name,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Advanced backup failed for server ${serverId}: ${msg}`);
+      this.notify({
+        type: "server.advanced_backup_failed",
+        title: "Advanced backup failed",
+        message: `Backup failed for "${dbServer.name}": ${msg}`,
+        serverId,
+        serverName: dbServer.name,
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Delete old advanced backup archives beyond advancedBackupMaxCount for a server.
+   */
+  private cleanupOldAdvancedBackups(serverId: string): void {
+    const dbServer = getServerFromDb(serverId);
+    const maxCount = dbServer?.advancedBackupMaxCount ?? 1;
+    const advancedDir = path.join(appConfig.backupDir, "advanced", serverId);
+
+    if (!fs.existsSync(advancedDir)) return;
+
+    try {
+      const items = fs.readdirSync(advancedDir, { withFileTypes: true });
+      const archives: Array<{ name: string; path: string; modified: Date }> = [];
+
+      for (const item of items) {
+        if (!item.isFile() || !item.name.endsWith(".tar.gz")) continue;
+        const itemPath = path.join(advancedDir, item.name);
+        try {
+          const stats = fs.statSync(itemPath);
+          archives.push({ name: item.name, path: itemPath, modified: stats.mtime });
+        } catch {
+          // Skip inaccessible files
+        }
+      }
+
+      archives.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+
+      if (archives.length > maxCount) {
+        const toDelete = archives.slice(maxCount);
+        for (const f of toDelete) {
+          try {
+            fs.unlinkSync(f.path);
+            logger.info(`Deleted old advanced backup for server ${serverId}: ${f.name}`);
+          } catch (error) {
+            logger.warn(`Failed to delete old advanced backup ${f.path}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+    } catch (error) {
+      logger.debug(`Failed to cleanup advanced backups for server ${serverId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Run scheduled advanced backups for servers that are due.
+   */
+  private async runScheduledAdvancedBackups(): Promise<void> {
+    let servers: Server[];
+    try {
+      servers = getAllServers();
+    } catch (err) {
+      logger.warn(`Scheduled advanced backups: failed to get servers: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    const candidates = servers.filter(
+      (s) =>
+        s.advancedBackupEnabled === true &&
+        s.advancedBackupFrequency &&
+        s.advancedBackupTime &&
+        s.installState === "INSTALLED"
+    );
+    if (candidates.length === 0) return;
+
+    const now = Date.now();
+    for (const server of candidates) {
+      const nextRun = this.getNextAdvancedBackupTime(server);
+      if (nextRun === null) continue;
+      const lastRun = server.lastAdvancedBackupAt ?? 0;
+      if (now < nextRun || nextRun <= lastRun) continue;
+
+      try {
+        await this.runAdvancedBackup(server.id);
+      } catch (err) {
+        logger.error(
+          `Scheduled advanced backup failed for server ${server.id} (${server.name}): ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  private startAdvancedBackupScheduler(): void {
+    this.advancedBackupInterval = setInterval(() => {
+      this.runScheduledAdvancedBackups();
+    }, 60 * 1000);
+    logger.info("Advanced backup scheduler started (every minute)");
+  }
+
+  private stopAdvancedBackupScheduler(): void {
+    if (this.advancedBackupInterval) {
+      clearInterval(this.advancedBackupInterval);
+      this.advancedBackupInterval = null;
+      logger.info("Advanced backup scheduler stopped");
+    }
   }
 
   /**
