@@ -10,6 +10,7 @@ import type {
   UpdateResponse,
   VersionResponse,
 } from "./api"
+import { emitDownloaderAuthExpired } from "./downloader-auth-expired-events"
 
 // Get API base URL dynamically from current location
 function getApiBaseUrl(): string {
@@ -47,6 +48,14 @@ function getWebSocketUrl(): string {
 const API_BASE_URL = getApiBaseUrl()
 const WS_URL = getWebSocketUrl()
 
+type ApiRequestError = Error & {
+  code?: string
+  requiresPassword?: boolean
+  details?: any
+  context?: any
+  downloaderCredentialsCleared?: boolean
+}
+
 // API Client
 export class ApiClient {
   private baseUrl: string
@@ -72,19 +81,31 @@ export class ApiClient {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      const error = new Error(
+        errorData.error || errorData.message || `HTTP ${response.status}`
+      ) as ApiRequestError
+      error.code = errorData.code
+      error.details = errorData.details
+      error.context = errorData.context
+      error.downloaderCredentialsCleared = Boolean(
+        errorData.downloaderCredentialsCleared ||
+          errorData.context?.details?.downloaderCredentialsCleared
+      )
+
+      if (error.downloaderCredentialsCleared) {
+        emitDownloaderAuthExpired()
+      }
+
       // For 401 errors, preserve the full error object (including requiresPassword)
       if (response.status === 401) {
-        const error = new Error(errorData.error || errorData.message || `HTTP ${response.status}`) as Error & { requiresPassword?: boolean; details?: any }
         error.requiresPassword = errorData.requiresPassword
         throw error
       }
       // For validation errors (400), preserve the details
       if (response.status === 400 && errorData.details) {
-        const error = new Error(errorData.error || errorData.message || `HTTP ${response.status}`) as Error & { details?: any }
-        error.details = errorData.details
         throw error
       }
-      throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`)
+      throw error
     }
 
     // Handle 204 No Content responses (no body)
@@ -299,6 +320,12 @@ export class ApiClient {
 
   async cancelDownloaderAuth(): Promise<{ success: boolean }> {
     return this.request<{ success: boolean }>("/api/downloader/auth/cancel", {
+      method: "POST",
+    })
+  }
+
+  async clearDownloaderCredentials(): Promise<{ success: boolean; message?: string }> {
+    return this.request<{ success: boolean; message?: string }>("/api/downloader/auth/clear", {
       method: "POST",
     })
   }

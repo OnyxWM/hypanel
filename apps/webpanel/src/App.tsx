@@ -10,6 +10,7 @@ import LoginPage from "./pages/LoginPage"
 import { AuthProvider, RequireAuth } from "@/lib/auth"
 import { SidebarProvider } from "@/contexts/sidebar-context"
 import { AppUpdateProvider } from "@/contexts/app-update-context"
+import { DownloaderAuthExpiredModal } from "@/components/downloader-auth-expired-modal"
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
       <AuthProvider>
         <AppUpdateProvider>
         <SidebarProvider>
+          <DownloaderAuthExpiredModal />
           <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route

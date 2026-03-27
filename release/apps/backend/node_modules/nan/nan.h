@@ -13,7 +13,7 @@
  *
  * MIT License <https://github.com/nodejs/nan/blob/master/LICENSE.md>
  *
- * Version 2.25.0: current Node 25.4.0, Node 0.12: 0.12.18, Node 0.10: 0.10.48, iojs: 3.3.1
+ * Version 2.26.2: current Node 25.8.1, Node 0.12: 0.12.18, Node 0.10: 0.10.48, iojs: 3.3.1
  *
  * See https://github.com/nodejs/nan for the latest update to this file
  **********************************************************************************/
@@ -819,14 +819,30 @@ inline uv_loop_t* GetCurrentEventLoop() {
   inline void* GetInternalFieldPointer(
       v8::Local<v8::Object> object
     , int index) {
+#if (V8_MAJOR_VERSION > 14) || \
+    (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION > 2) || \
+    (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION == 2 && V8_BUILD_NUMBER >= 194)
+    return object->GetAlignedPointerFromInternalField(
+        index, v8::kEmbedderDataTypeTagDefault
+    );
+# else
     return object->GetAlignedPointerFromInternalField(index);
+# endif
   }
 
   inline void SetInternalFieldPointer(
       v8::Local<v8::Object> object
     , int index
     , void* value) {
+#if (V8_MAJOR_VERSION > 14) || \
+    (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION > 2) || \
+    (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION == 2 && V8_BUILD_NUMBER >= 194)
+    object->SetAlignedPointerInInternalField(
+        index, value, v8::kEmbedderDataTypeTagDefault
+    );
+# else
     object->SetAlignedPointerInInternalField(index, value);
+# endif
   }
 
 # define NAN_GC_CALLBACK(name)                                                 \

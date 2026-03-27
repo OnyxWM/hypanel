@@ -43,8 +43,10 @@ export default function SettingsPage() {
   const [restartDaemonState, setRestartDaemonState] = useState<ActionState>("idle")
   const [checkUpdateState, setCheckUpdateState] = useState<ActionState>("idle")
   const [updateState, setUpdateState] = useState<ActionState>("idle")
+  const [clearDownloaderState, setClearDownloaderState] = useState<ActionState>("idle")
   const [updateProgress, setUpdateProgress] = useState<string | null>(null)
   const [showPasswordDialog, setShowPasswordDialog] = useState(false)
+  const [showClearDownloaderDialog, setShowClearDownloaderDialog] = useState(false)
   const [password, setPassword] = useState("")
   const [passwordError, setPasswordError] = useState<string | null>(null)
 
@@ -59,7 +61,12 @@ export default function SettingsPage() {
   const journalCursorRef = useRef<string | undefined>(undefined)
 
   const canRunActions =
-    stopAllState === "idle" && restartAllState === "idle" && restartDaemonState === "idle" && checkUpdateState === "idle" && updateState === "idle"
+    stopAllState === "idle" &&
+    restartAllState === "idle" &&
+    restartDaemonState === "idle" &&
+    checkUpdateState === "idle" &&
+    updateState === "idle" &&
+    clearDownloaderState === "idle"
 
   useEffect(() => {
     journalCursorRef.current = journalCursor
@@ -360,6 +367,24 @@ export default function SettingsPage() {
     runUpdateApplication(true, password)
   }
 
+  const runClearDownloaderCredentials = async () => {
+    if (!canRunActions) return
+
+    setActionError(null)
+    setActionSuccess(null)
+    setClearDownloaderState("running")
+
+    try {
+      await apiClient.clearDownloaderCredentials()
+      setActionSuccess("Downloader credentials cleared. Re-authenticate before downloading or updating servers.")
+      setShowClearDownloaderDialog(false)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to clear downloader credentials")
+    } finally {
+      setClearDownloaderState("idle")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
@@ -555,8 +580,63 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardHeader>
+              <CardTitle className="text-lg">Hytale downloader</CardTitle>
+              <CardDescription>
+                Clear the saved downloader OAuth credentials stored on the server. Use this if the token has expired or if you want to force a fresh sign-in.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm text-muted-foreground">
+                This removes the stored credentials file and resets the downloader auth state.
+              </p>
+              <Button
+                variant="destructive"
+                onClick={() => setShowClearDownloaderDialog(true)}
+                disabled={!canRunActions}
+                className="md:w-auto"
+              >
+                {clearDownloaderState === "running" ? "Clearing..." : "Clear downloader credentials"}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </main>
+
+      <Dialog
+        open={showClearDownloaderDialog}
+        onOpenChange={(open) => {
+          if (clearDownloaderState === "running") return
+          setShowClearDownloaderDialog(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear downloader credentials?</DialogTitle>
+            <DialogDescription>
+              This removes the saved Hytale downloader OAuth credentials from the server. You will need to authenticate the downloader again before installing new servers or updating existing ones.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowClearDownloaderDialog(false)}
+              disabled={clearDownloaderState === "running"}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={runClearDownloaderCredentials}
+              disabled={clearDownloaderState === "running"}
+            >
+              {clearDownloaderState === "running" ? "Clearing..." : "Clear credentials"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Password Dialog for Update */}
       <Dialog 

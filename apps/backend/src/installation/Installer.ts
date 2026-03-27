@@ -9,6 +9,10 @@ import fs from "fs/promises";
 import { createInstallationError, createFilesystemError, HypanelError } from "../errors/index.js";
 import { exec } from "child_process";
 import { promisify } from "util";
+import {
+  clearDownloaderCredentials,
+  isLikelyCredentialAuthFailure,
+} from "../downloader/downloaderCredentials.js";
 
 const execAsync = promisify(exec);
 
@@ -106,7 +110,13 @@ export class Installer extends EventEmitter {
 
        // Execute hytale-downloader (or mock in development)
        const isDev = process.env.NODE_ENV !== "production";
-       let downloadResult: { success: boolean; error?: string; stdout?: string; stderr?: string };
+       let downloadResult: {
+         success: boolean;
+         error?: string;
+         stdout?: string;
+         stderr?: string;
+         downloaderCredentialsCleared?: boolean;
+       };
 
        if (isDev) {
          // In development, create mock server files for testing UI
@@ -130,7 +140,12 @@ export class Installer extends EventEmitter {
            "downloading",
            downloadResult.error || "Unknown download error",
            serverId,
-           "Check network connectivity and disk space, then retry installation"
+           downloadResult.downloaderCredentialsCleared
+             ? "Downloader credentials expired. Open Auth Downloader and sign in again."
+             : "Check network connectivity and disk space, then retry installation",
+           downloadResult.downloaderCredentialsCleared
+             ? { downloaderCredentialsCleared: true }
+             : undefined
          );
          logError(error, "install", serverId);
          throw error;
@@ -444,7 +459,13 @@ export class Installer extends EventEmitter {
     downloaderPath: string,
     serverRoot: string,
     serverId: string
-  ): Promise<{ success: boolean; error?: string; stdout?: string; stderr?: string }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    stdout?: string;
+    stderr?: string;
+    downloaderCredentialsCleared?: boolean;
+  }> {
     return new Promise((resolve) => {
       const args = [
         "-download-path", serverRoot
@@ -490,6 +511,7 @@ export class Installer extends EventEmitter {
           }
           resolve({ success: true, stdout, stderr });
         } else {
+          const output = `${stdout}\n${stderr}`;
           const error = stderr || stdout || `Process exited with code ${code}`;
           logger.error(`hytale-downloader failed for server ${serverId}: ${error}`);
           if (stdout.trim()) {
@@ -498,12 +520,53 @@ export class Installer extends EventEmitter {
           if (stderr.trim()) {
             logger.error(`[hytale-downloader][${serverId}] stderr:\n${stderr}`);
           }
+          if (isLikelyCredentialAuthFailure(output)) {
+            void clearDownloaderCredentials()
+              .then(() => {
+                logger.warn(
+                  `Cleared downloader credentials after authentication failure during install for server ${serverId}`
+                );
+              })
+              .catch((clearError) => {
+                logger.error(
+                  `Failed to clear downloader credentials after install auth failure for server ${serverId}: ${
+                    clearError instanceof Error ? clearError.message : String(clearError)
+                  }`
+                );
+              })
+              .finally(() => {
+                resolve({ success: false, error, stdout, stderr, downloaderCredentialsCleared: true });
+              });
+            return;
+          }
+
           resolve({ success: false, error, stdout, stderr });
         }
       });
 
       process.on("error", (error) => {
         logger.error(`Failed to execute hytale-downloader for server ${serverId}: ${error.message}`);
+        const output = `${stdout}\n${stderr}\n${error.message}`;
+        if (isLikelyCredentialAuthFailure(output)) {
+          void clearDownloaderCredentials()
+            .then(() => {
+              logger.warn(
+                `Cleared downloader credentials after downloader spawn auth failure during install for server ${serverId}`
+              );
+            })
+            .catch((clearError) => {
+              logger.error(
+                `Failed to clear downloader credentials after install spawn auth failure for server ${serverId}: ${
+                  clearError instanceof Error ? clearError.message : String(clearError)
+                }`
+              );
+            })
+            .finally(() => {
+              resolve({ success: false, error: error.message, stdout, stderr, downloaderCredentialsCleared: true });
+            });
+          return;
+        }
+
         resolve({ success: false, error: error.message, stdout, stderr });
       });
     });
