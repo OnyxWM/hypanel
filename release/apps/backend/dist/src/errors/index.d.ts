@@ -14,6 +14,7 @@ export interface HypanelErrorResponse {
     details?: string;
     suggestedAction?: string;
     context?: HypanelErrorContext;
+    downloaderCredentialsCleared?: boolean;
 }
 export declare class HypanelError extends Error {
     readonly code: string;
@@ -57,7 +58,7 @@ export declare const ERROR_CODES: {
 };
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 export declare function createHypanelError(code: ErrorCode, message: string, suggestedAction?: string, context?: HypanelErrorContext, statusCode?: number): HypanelError;
-export declare const createInstallationError: (phase: string, reason: string, serverId: string, suggestedAction?: string) => HypanelError;
+export declare const createInstallationError: (phase: string, reason: string, serverId: string, suggestedAction?: string, extraDetails?: Record<string, any>) => HypanelError;
 export declare const createServerError: (action: "start" | "stop", reason: string, serverId: string, suggestedAction?: string) => HypanelError;
 export declare const createConfigError: (operation: "read" | "write" | "validate" | "update" | "parse", reason: string, serverId?: string, suggestedAction?: string) => HypanelError;
 export declare const createFilesystemError: (operation: string, filePath: string, reason: string, serverId?: string) => HypanelError;

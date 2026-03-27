@@ -4,8 +4,8 @@ import fs from "fs";
 import path from "path";
 import { config } from "../../config/config.js";
 import { logger } from "../../logger/Logger.js";
+import { clearDownloaderCredentials, getOAuthState, setOAuthState, } from "../../downloader/downloaderCredentials.js";
 const router = Router();
-let oauthState = null;
 function parseOAuthOutput(output) {
     const urlMatch = output.match(/https:\/\/oauth\.accounts\.hytale\.com\/oauth2\/device\/verify[^\s\n]*/);
     // Try to extract code from "Authorization code:" line (might be on same or next line)
@@ -39,6 +39,7 @@ function parseOAuthOutput(output) {
 }
 router.post("/auth/start", (req, res) => {
     try {
+        setOAuthState(null);
         const downloaderPath = "/opt/hytale-downloader/hytale-downloader";
         if (!fs.existsSync(downloaderPath)) {
             return res.status(404).json({
@@ -70,6 +71,7 @@ router.post("/auth/start", (req, res) => {
             stdout += text;
             logger.debug(`[downloader-auth] ${text}`);
             const parsed = parseOAuthOutput(text);
+            const oauthState = getOAuthState();
             // Update stdout/stderr in existing oauthState or create new one
             if (oauthState) {
                 oauthState.stdout = stdout;
@@ -77,7 +79,7 @@ router.post("/auth/start", (req, res) => {
             }
             if (parsed.url && parsed.code) {
                 if (!oauthState) {
-                    oauthState = {
+                    setOAuthState({
                         processId: process.pid?.toString() || Date.now().toString(),
                         url: parsed.url,
                         code: parsed.code,
@@ -85,7 +87,7 @@ router.post("/auth/start", (req, res) => {
                         createdAt: Date.now(),
                         stdout: stdout,
                         stderr: stderr
-                    };
+                    });
                 }
                 else {
                     // Update existing state with new url/code if found
@@ -98,13 +100,14 @@ router.post("/auth/start", (req, res) => {
             stderr += data.toString();
             logger.debug(`[downloader-auth][error] ${data}`);
             // Update stderr in existing oauthState
+            const oauthState = getOAuthState();
             if (oauthState) {
                 oauthState.stderr = stderr;
             }
         });
         process.on("error", (error) => {
             logger.error(`Downloader auth process error: ${error.message}`);
-            oauthState = {
+            setOAuthState({
                 processId: Date.now().toString(),
                 url: "",
                 code: "",
@@ -112,10 +115,11 @@ router.post("/auth/start", (req, res) => {
                 createdAt: Date.now(),
                 stdout: stdout,
                 stderr: stderr
-            };
+            });
         });
         process.on("close", (code) => {
             // Update output in oauthState when process closes
+            const oauthState = getOAuthState();
             if (oauthState) {
                 oauthState.stdout = stdout;
                 oauthState.stderr = stderr;
@@ -129,6 +133,7 @@ router.post("/auth/start", (req, res) => {
         });
         setTimeout(() => {
             if (!res.headersSent) {
+                const oauthState = getOAuthState();
                 if (oauthState && oauthState.status === "pending") {
                     return res.json({
                         success: true,
@@ -163,10 +168,12 @@ router.get("/auth/status", (req, res) => {
     if (credentialsPath && fs.existsSync(credentialsPath)) {
         credentialsExist = true;
         // If credentials exist and we have a pending state, mark it as authenticated
+        const oauthState = getOAuthState();
         if (oauthState && oauthState.status === "pending") {
             oauthState.status = "authenticated";
         }
     }
+    const oauthState = getOAuthState();
     if (!oauthState) {
         // If credentials exist but no oauth state, user is authenticated
         if (credentialsExist) {
@@ -182,7 +189,7 @@ router.get("/auth/status", (req, res) => {
     }
     const isExpired = Date.now() - oauthState.createdAt > 600000;
     if (isExpired && oauthState.status === "pending") {
-        oauthState = null;
+        setOAuthState(null);
         return res.json({
             authenticated: false,
             status: "expired"
@@ -208,7 +215,7 @@ router.post("/auth/complete", (req, res) => {
     }
     try {
         if (fs.existsSync(credentialsPath)) {
-            oauthState = null;
+            setOAuthState(null);
             return res.json({
                 success: true,
                 message: "Downloader authenticated successfully"
@@ -230,11 +237,27 @@ router.post("/auth/complete", (req, res) => {
     }
 });
 router.post("/auth/cancel", (req, res) => {
-    oauthState = null;
+    setOAuthState(null);
     res.json({
         success: true,
         message: "Authentication cancelled"
     });
+});
+router.post("/auth/clear", async (req, res) => {
+    try {
+        await clearDownloaderCredentials();
+        res.json({
+            success: true,
+            message: "Downloader credentials cleared"
+        });
+    }
+    catch (error) {
+        res.status(500).json({
+            code: "CLEAR_CREDENTIALS_FAILED",
+            message: "Failed to clear downloader credentials",
+            details: error instanceof Error ? error.message : "Unknown error"
+        });
+    }
 });
 export function createDownloaderRoutes() {
     return router;

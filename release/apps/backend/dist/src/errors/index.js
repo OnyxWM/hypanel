@@ -15,12 +15,14 @@ export class HypanelError extends Error {
         this.statusCode = statusCode;
     }
     toJSON() {
+        const downloaderCredentialsCleared = this.context?.details?.downloaderCredentialsCleared === true;
         return {
             code: this.code,
             message: this.message,
             details: this.context?.details?.error || this.context?.details?.reason,
             suggestedAction: this.suggestedAction,
-            context: this.context
+            context: this.context,
+            downloaderCredentialsCleared,
         };
     }
 }
@@ -69,8 +71,8 @@ export function createHypanelError(code, message, suggestedAction, context, stat
     return new HypanelError(code, message, suggestedAction, context, statusCode);
 }
 // Specific error creators for common operations
-export const createInstallationError = (phase, reason, serverId, suggestedAction) => {
-    return createHypanelError(`INSTALL_${phase.toUpperCase().replace(/\s+/g, '_')}`, `Installation failed during ${phase}: ${reason}`, suggestedAction || 'Check the installation logs and retry the installation', { serverId, action: 'install', phase: phase.toLowerCase(), details: { reason } });
+export const createInstallationError = (phase, reason, serverId, suggestedAction, extraDetails) => {
+    return createHypanelError(`INSTALL_${phase.toUpperCase().replace(/\s+/g, '_')}`, `Installation failed during ${phase}: ${reason}`, suggestedAction || 'Check the installation logs and retry the installation', { serverId, action: 'install', phase: phase.toLowerCase(), details: { reason, ...extraDetails } });
 };
 export const createServerError = (action, reason, serverId, suggestedAction) => {
     return createHypanelError(`SERVER_${action.toUpperCase()}_FAILED`, `Server ${action} failed: ${reason}`, suggestedAction || `Check server logs and try to ${action} again`, { serverId, action, phase: action, details: { reason } });

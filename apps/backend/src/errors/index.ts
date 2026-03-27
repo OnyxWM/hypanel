@@ -16,6 +16,7 @@ export interface HypanelErrorResponse {
   details?: string;
   suggestedAction?: string;
   context?: HypanelErrorContext;
+  downloaderCredentialsCleared?: boolean;
 }
 
 export class HypanelError extends Error {
@@ -40,12 +41,16 @@ export class HypanelError extends Error {
   }
 
   toJSON(): HypanelErrorResponse {
+    const downloaderCredentialsCleared =
+      this.context?.details?.downloaderCredentialsCleared === true;
+
     return {
       code: this.code,
       message: this.message,
       details: this.context?.details?.error || this.context?.details?.reason,
       suggestedAction: this.suggestedAction,
-      context: this.context
+      context: this.context,
+      downloaderCredentialsCleared,
     };
   }
 }
@@ -115,13 +120,14 @@ export const createInstallationError = (
   phase: string,
   reason: string,
   serverId: string,
-  suggestedAction?: string
+  suggestedAction?: string,
+  extraDetails?: Record<string, any>
 ): HypanelError => {
   return createHypanelError(
     `INSTALL_${phase.toUpperCase().replace(/\s+/g, '_')}` as ErrorCode,
     `Installation failed during ${phase}: ${reason}`,
     suggestedAction || 'Check the installation logs and retry the installation',
-    { serverId, action: 'install', phase: phase.toLowerCase(), details: { reason } }
+    { serverId, action: 'install', phase: phase.toLowerCase(), details: { reason, ...extraDetails } }
   );
 };
 

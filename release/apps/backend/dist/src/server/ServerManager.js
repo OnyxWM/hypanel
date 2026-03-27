@@ -14,6 +14,7 @@ import { getServerIP } from "../utils/network.js";
 import { spawn } from "child_process";
 import { promisify } from "util";
 import { exec } from "child_process";
+import { clearDownloaderCredentials, isLikelyCredentialAuthFailure, } from "../downloader/downloaderCredentials.js";
 const execAsync = promisify(exec);
 export class ServerManager extends EventEmitter {
     instances;
@@ -1597,7 +1598,23 @@ export class ServerManager extends EventEmitter {
                             }
                         }
                         else {
+                            const output = `${stdout}\n${stderr}`;
                             const errorMsg = stderr || stdout || `Process exited with code ${code}`;
+                            if (isLikelyCredentialAuthFailure(output)) {
+                                void clearDownloaderCredentials()
+                                    .then(() => {
+                                    logger.warn(`Cleared downloader credentials after authentication failure during update check for server ${serverId}`);
+                                })
+                                    .catch((clearError) => {
+                                    logger.error(`Failed to clear downloader credentials after update-check auth failure for server ${serverId}: ${clearError instanceof Error ? clearError.message : String(clearError)}`);
+                                })
+                                    .finally(() => {
+                                    const authError = new Error(`hytale-downloader failed: ${errorMsg}`);
+                                    authError.downloaderCredentialsCleared = true;
+                                    reject(authError);
+                                });
+                                return;
+                            }
                             reject(new Error(`hytale-downloader failed: ${errorMsg}`));
                         }
                     });
@@ -1607,6 +1624,22 @@ export class ServerManager extends EventEmitter {
                         }
                         if (!hasResolved) {
                             hasResolved = true;
+                            const output = `${stdout}\n${stderr}\n${error.message}`;
+                            if (isLikelyCredentialAuthFailure(output)) {
+                                void clearDownloaderCredentials()
+                                    .then(() => {
+                                    logger.warn(`Cleared downloader credentials after update-check spawn auth failure for server ${serverId}`);
+                                })
+                                    .catch((clearError) => {
+                                    logger.error(`Failed to clear downloader credentials after update-check spawn auth failure for server ${serverId}: ${clearError instanceof Error ? clearError.message : String(clearError)}`);
+                                })
+                                    .finally(() => {
+                                    const authError = new Error(`Failed to execute hytale-downloader: ${error.message}`);
+                                    authError.downloaderCredentialsCleared = true;
+                                    reject(authError);
+                                });
+                                return;
+                            }
                             reject(new Error(`Failed to execute hytale-downloader: ${error.message}`));
                         }
                     });
@@ -1653,12 +1686,17 @@ export class ServerManager extends EventEmitter {
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            const downloaderCredentialsCleared = error.downloaderCredentialsCleared === true;
             logger.error(`Failed to check for updates for server ${serverId}: ${errorMessage}`);
             // Check if it's a timeout error
             if (errorMessage.includes("timeout") || errorMessage.includes("timed out")) {
                 throw new HypanelError("UPDATE_CHECK_TIMEOUT", "Update check timed out - hytale-downloader did not respond in time. The command may be waiting for network access or authentication.", `Test the command manually: "${downloaderPath}" -print-version. If it hangs, check network connectivity, authentication, or hytale-downloader configuration.`, undefined, 500);
             }
-            throw new HypanelError("UPDATE_CHECK_FAILED", `Failed to check for updates: ${errorMessage}`, `Check that hytale-downloader is properly installed and configured. Test manually: "${downloaderPath}" -print-version`, undefined, 500);
+            throw new HypanelError(downloaderCredentialsCleared ? "DOWNLOADER_AUTH_EXPIRED" : "UPDATE_CHECK_FAILED", `Failed to check for updates: ${errorMessage}`, downloaderCredentialsCleared
+                ? "Downloader credentials expired. Open Auth Downloader and sign in again."
+                : `Check that hytale-downloader is properly installed and configured. Test manually: "${downloaderPath}" -print-version`, downloaderCredentialsCleared
+                ? { serverId, phase: "check-update", details: { reason: errorMessage, downloaderCredentialsCleared: true } }
+                : undefined, 500);
         }
     }
     /**
@@ -1799,6 +1837,20 @@ export class ServerManager extends EventEmitter {
                         if (stderr.trim()) {
                             logger.error(`[hytale-downloader][${serverId}] stderr:\n${stderr}`);
                         }
+                        const output = `${stdout}\n${stderr}`;
+                        if (isLikelyCredentialAuthFailure(output)) {
+                            void clearDownloaderCredentials()
+                                .then(() => {
+                                logger.warn(`Cleared downloader credentials after authentication failure during update download for server ${serverId}`);
+                            })
+                                .catch((clearError) => {
+                                logger.error(`Failed to clear downloader credentials after update-download auth failure for server ${serverId}: ${clearError instanceof Error ? clearError.message : String(clearError)}`);
+                            })
+                                .finally(() => {
+                                resolve({ success: false, error, stdout, stderr, downloaderCredentialsCleared: true });
+                            });
+                            return;
+                        }
                         resolve({ success: false, error, stdout, stderr });
                     }
                 });
@@ -1807,11 +1859,29 @@ export class ServerManager extends EventEmitter {
                         clearTimeout(timeoutId);
                     }
                     logger.error(`Failed to execute hytale-downloader for server ${serverId}: ${error.message}`);
+                    const output = `${stdout}\n${stderr}\n${error.message}`;
+                    if (isLikelyCredentialAuthFailure(output)) {
+                        void clearDownloaderCredentials()
+                            .then(() => {
+                            logger.warn(`Cleared downloader credentials after update-download spawn auth failure for server ${serverId}`);
+                        })
+                            .catch((clearError) => {
+                            logger.error(`Failed to clear downloader credentials after update-download spawn auth failure for server ${serverId}: ${clearError instanceof Error ? clearError.message : String(clearError)}`);
+                        })
+                            .finally(() => {
+                            resolve({ success: false, error: error.message, stdout, stderr, downloaderCredentialsCleared: true });
+                        });
+                        return;
+                    }
                     resolve({ success: false, error: error.message, stdout, stderr });
                 });
             });
             if (!downloadResult.success) {
-                throw new Error(downloadResult.error || "Download failed");
+                const downloadError = new Error(downloadResult.error || "Download failed");
+                if (downloadResult.downloaderCredentialsCleared) {
+                    downloadError.downloaderCredentialsCleared = true;
+                }
+                throw downloadError;
             }
             logger.info(`Update downloaded successfully for server ${serverId}`);
             // Step 3b: Extract the downloaded ZIP file
@@ -1845,7 +1915,19 @@ export class ServerManager extends EventEmitter {
             if (error instanceof HypanelError) {
                 throw error;
             }
-            throw new HypanelError("UPDATE_DOWNLOAD_FAILED", `Failed to download update: ${error instanceof Error ? error.message : "Unknown error"}`, "Check that hytale-downloader is properly configured and has network access", undefined, 500);
+            const downloaderCredentialsCleared = error.downloaderCredentialsCleared === true;
+            throw new HypanelError(downloaderCredentialsCleared ? "DOWNLOADER_AUTH_EXPIRED" : "UPDATE_DOWNLOAD_FAILED", `Failed to download update: ${error instanceof Error ? error.message : "Unknown error"}`, downloaderCredentialsCleared
+                ? "Downloader credentials expired. Open Auth Downloader and sign in again."
+                : "Check that hytale-downloader is properly configured and has network access", downloaderCredentialsCleared
+                ? {
+                    serverId,
+                    phase: "update-download",
+                    details: {
+                        reason: error instanceof Error ? error.message : "Unknown error",
+                        downloaderCredentialsCleared: true,
+                    },
+                }
+                : undefined, 500);
         }
         // Step 4: Get latest version and update in database
         // Use the same spawn approach to avoid hanging
