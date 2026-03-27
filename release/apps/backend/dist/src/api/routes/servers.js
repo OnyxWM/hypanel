@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import os from "os";
 import { getConsoleLogs, getServerStats, getServer as getServerFromDb } from "../../database/db.js";
 import { validateBody, validateParams } from "../middleware/validation.js";
 import fs from "fs";
@@ -10,6 +11,7 @@ import { getPlayerTracker } from "../../server/PlayerTracker.js";
 import { config } from "../../config/config.js";
 import multer from "multer";
 const MOD_UPLOAD_MAX_BYTES = 200 * 1024 * 1024; // 200MB
+const IMPORT_BACKUP_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 const ALLOWED_MOD_EXTENSIONS = new Set([".jar", ".zip"]);
 function sanitizeModFilename(originalName) {
     let name = path.basename(originalName || "");
@@ -75,6 +77,34 @@ const modUpload = multer({
         if (!ALLOWED_MOD_EXTENSIONS.has(ext)) {
             return cb(new Error("INVALID_MOD_EXTENSION"));
         }
+        return cb(null, true);
+    },
+});
+const importHytaleBackupStorage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+    filename: (_req, file, cb) => cb(null, `hypanel-import-hytale-${Date.now()}-${path.basename(file.originalname || "backup.zip").replace(/[^a-zA-Z0-9._-]/g, "_")}`),
+});
+const importHytaleBackupUpload = multer({
+    storage: importHytaleBackupStorage,
+    limits: { files: 1, fileSize: IMPORT_BACKUP_MAX_BYTES },
+    fileFilter: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (ext !== ".zip")
+            return cb(new Error("INVALID_EXTENSION_ZIP"));
+        return cb(null, true);
+    },
+});
+const importHypanelBackupStorage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+    filename: (_req, file, cb) => cb(null, `hypanel-import-adv-${Date.now()}-${path.basename(file.originalname || "backup.tar.gz").replace(/[^a-zA-Z0-9._-]/g, "_")}`),
+});
+const importHypanelBackupUpload = multer({
+    storage: importHypanelBackupStorage,
+    limits: { files: 1, fileSize: IMPORT_BACKUP_MAX_BYTES },
+    fileFilter: (_req, file, cb) => {
+        const name = (file.originalname || "").toLowerCase();
+        if (!name.endsWith(".tar.gz") && !name.endsWith(".tgz"))
+            return cb(new Error("INVALID_EXTENSION_TAR_GZ"));
         return cb(null, true);
     },
 });
@@ -267,6 +297,193 @@ export function createServerRoutes(serverManager) {
                 suggestedAction: "Check server logs for details"
             });
         }
+    });
+    // POST /api/servers/import/hytale-backup - Create server and store official backup zip
+    router.post("/import/hytale-backup", (req, res) => {
+        importHytaleBackupUpload.single("backup")(req, res, async (err) => {
+            if (err) {
+                if (err instanceof multer.MulterError) {
+                    if (err.code === "LIMIT_FILE_SIZE") {
+                        return res.status(413).json({
+                            code: "FILE_TOO_LARGE",
+                            message: `Backup file is too large (max ${Math.floor(IMPORT_BACKUP_MAX_BYTES / (1024 * 1024 * 1024))}GB)`,
+                            suggestedAction: "Upload a smaller file",
+                        });
+                    }
+                    return res.status(400).json({
+                        code: "UPLOAD_ERROR",
+                        message: "Failed to upload backup",
+                        details: err.message,
+                        suggestedAction: "Try again or check server logs",
+                    });
+                }
+                if (err.message === "INVALID_EXTENSION_ZIP") {
+                    return res.status(400).json({
+                        code: "INVALID_EXTENSION",
+                        message: "Only .zip files are supported for Hytale backup import",
+                        suggestedAction: "Upload a .zip backup file",
+                    });
+                }
+                return res.status(500).json({
+                    code: "INTERNAL_ERROR",
+                    message: "Failed to upload backup",
+                    details: err instanceof Error ? err.message : "Unknown error",
+                    suggestedAction: "Check server logs for details",
+                });
+            }
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({
+                    code: "NO_FILE",
+                    message: "No backup file uploaded",
+                    suggestedAction: "Attach a .zip backup file",
+                });
+            }
+            const name = (req.body && req.body.name) ? String(req.body.name).trim() : "";
+            const port = req.body && req.body.port !== undefined ? parseInt(String(req.body.port), 10) : 5520;
+            const maxMemory = req.body && req.body.maxMemory !== undefined ? parseInt(String(req.body.maxMemory), 10) * 1024 : 2048;
+            const backupEnabled = req.body && req.body.backupEnabled !== undefined ? req.body.backupEnabled === true || req.body.backupEnabled === "true" : true;
+            const backupFrequency = req.body && req.body.backupFrequency !== undefined ? parseInt(String(req.body.backupFrequency), 10) : 30;
+            const backupMaxCount = req.body && req.body.backupMaxCount !== undefined ? parseInt(String(req.body.backupMaxCount), 10) : 5;
+            const aotCacheEnabled = req.body && req.body.aotCacheEnabled !== undefined ? req.body.aotCacheEnabled === true || req.body.aotCacheEnabled === "true" : false;
+            const acceptEarlyPlugins = req.body && req.body.acceptEarlyPlugins !== undefined ? req.body.acceptEarlyPlugins === true || req.body.acceptEarlyPlugins === "true" : false;
+            if (!name) {
+                return res.status(400).json({
+                    code: "VALIDATION_ERROR",
+                    message: "Server name is required",
+                    suggestedAction: "Provide a name for the server",
+                });
+            }
+            const serverPath = `hytale/${name.toLowerCase().replace(/\s+/g, "-")}`;
+            try {
+                const server = await serverManager.importFromHytaleBackup({
+                    name,
+                    path: serverPath,
+                    executable: "java",
+                    assetsPath: `${serverPath}/Assets.zip`,
+                    args: [],
+                    env: {},
+                    ip: "0.0.0.0",
+                    port: Number.isNaN(port) ? 5520 : port,
+                    maxMemory: Number.isNaN(maxMemory) ? 2048 : maxMemory,
+                    maxPlayers: 20,
+                    bindAddress: "0.0.0.0",
+                    backupEnabled,
+                    backupFrequency,
+                    backupMaxCount,
+                    aotCacheEnabled,
+                    acceptEarlyPlugins,
+                }, file.path);
+                res.status(201).json(server);
+            }
+            catch (error) {
+                if (error instanceof HypanelError) {
+                    return res.status(error.statusCode).json(error.toJSON());
+                }
+                logger.error(`Import Hytale backup failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+                res.status(500).json({
+                    code: "INTERNAL_ERROR",
+                    message: "Failed to import Hytale backup",
+                    details: error instanceof Error ? error.message : "Unknown error",
+                    suggestedAction: "Check server logs for details",
+                });
+            }
+            finally {
+                try {
+                    if (file.path && fs.existsSync(file.path))
+                        fs.unlinkSync(file.path);
+                }
+                catch (_) { }
+            }
+        });
+    });
+    // POST /api/servers/import/hypanel-backup - Create server from advanced backup tar.gz
+    router.post("/import/hypanel-backup", (req, res) => {
+        importHypanelBackupUpload.single("backup")(req, res, async (err) => {
+            if (err) {
+                if (err instanceof multer.MulterError) {
+                    if (err.code === "LIMIT_FILE_SIZE") {
+                        return res.status(413).json({
+                            code: "FILE_TOO_LARGE",
+                            message: `Backup file is too large (max ${Math.floor(IMPORT_BACKUP_MAX_BYTES / (1024 * 1024 * 1024))}GB)`,
+                            suggestedAction: "Upload a smaller file",
+                        });
+                    }
+                    return res.status(400).json({
+                        code: "UPLOAD_ERROR",
+                        message: "Failed to upload backup",
+                        details: err.message,
+                        suggestedAction: "Try again or check server logs",
+                    });
+                }
+                if (err.message === "INVALID_EXTENSION_TAR_GZ") {
+                    return res.status(400).json({
+                        code: "INVALID_EXTENSION",
+                        message: "Only .tar.gz files are supported for Hypanel backup import",
+                        suggestedAction: "Upload a Hypanel advanced backup .tar.gz file",
+                    });
+                }
+                return res.status(500).json({
+                    code: "INTERNAL_ERROR",
+                    message: "Failed to upload backup",
+                    details: err instanceof Error ? err.message : "Unknown error",
+                    suggestedAction: "Check server logs for details",
+                });
+            }
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({
+                    code: "NO_FILE",
+                    message: "No backup file uploaded",
+                    suggestedAction: "Attach a .tar.gz backup file",
+                });
+            }
+            const name = (req.body && req.body.name) ? String(req.body.name).trim() : "Imported server";
+            const portRaw = req.body && req.body.port !== undefined ? parseInt(String(req.body.port), 10) : undefined;
+            const maxMemoryGB = req.body && req.body.maxMemory !== undefined ? parseInt(String(req.body.maxMemory), 10) : undefined;
+            const port = !Number.isNaN(portRaw) ? (portRaw ?? 5520) : 5520;
+            const maxMemoryMB = maxMemoryGB !== undefined && !Number.isNaN(maxMemoryGB) ? maxMemoryGB * 1024 : 2048;
+            const serverPath = `hytale/${name.toLowerCase().replace(/\s+/g, "-")}`;
+            try {
+                const server = await serverManager.importFromHypanelBackup({
+                    name,
+                    path: serverPath,
+                    executable: "java",
+                    assetsPath: `${serverPath}/Assets.zip`,
+                    args: [],
+                    env: {},
+                    ip: "0.0.0.0",
+                    port,
+                    maxMemory: maxMemoryMB,
+                    maxPlayers: 20,
+                    bindAddress: "0.0.0.0",
+                }, file.path, {
+                    name: name || undefined,
+                    port: portRaw !== undefined && !Number.isNaN(portRaw) ? portRaw : undefined,
+                    maxMemory: maxMemoryGB !== undefined && !Number.isNaN(maxMemoryGB) ? maxMemoryGB * 1024 : undefined,
+                });
+                res.status(201).json(server);
+            }
+            catch (error) {
+                if (error instanceof HypanelError) {
+                    return res.status(error.statusCode).json(error.toJSON());
+                }
+                logger.error(`Import Hypanel backup failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+                res.status(500).json({
+                    code: "INTERNAL_ERROR",
+                    message: "Failed to import Hypanel backup",
+                    details: error instanceof Error ? error.message : "Unknown error",
+                    suggestedAction: "Check server logs for details",
+                });
+            }
+            finally {
+                try {
+                    if (file.path && fs.existsSync(file.path))
+                        fs.unlinkSync(file.path);
+                }
+                catch (_) { }
+            }
+        });
     });
     // All specific /:id/... routes must come BEFORE the generic /:id route
     // POST /api/servers/:id/start - Start server

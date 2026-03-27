@@ -340,7 +340,7 @@ export default function SettingsPage() {
           setShowPasswordDialog(true)
           setPasswordError(null)
         } else {
-          setActionError(result.error || result.message || "Update failed")
+          setActionError(result.message || result.error || "Update failed")
           setUpdateState("idle")
         }
       }

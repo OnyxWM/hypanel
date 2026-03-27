@@ -714,7 +714,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         return res.status(500).json({
           success: false,
           error: "No .tar.gz asset found in release",
-          message: "Release does not contain a downloadable package",
+          message: "This release has no .tar.gz package attached. To use in-app update, create a tarball of the built app (with apps/backend/dist and apps/webpanel/dist), then upload it as an asset when publishing the GitHub release.",
         });
       }
 

@@ -155,6 +155,20 @@ export class ApiClient {
     })
   }
 
+  async importServerFromHytaleBackup(formData: FormData): Promise<Server> {
+    return this.request<Server>("/api/servers/import/hytale-backup", {
+      method: "POST",
+      body: formData,
+    })
+  }
+
+  async importServerFromHypanelBackup(formData: FormData): Promise<Server> {
+    return this.request<Server>("/api/servers/import/hypanel-backup", {
+      method: "POST",
+      body: formData,
+    })
+  }
+
   async deleteServer(id: string): Promise<void> {
     await this.request(`/api/servers/${id}`, {
       method: "DELETE",

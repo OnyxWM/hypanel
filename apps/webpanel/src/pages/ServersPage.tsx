@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
 import { ServerCard } from "@/components/server-card"
 import { CreateServerDialog } from "@/components/create-server-dialog"
+import { ImportServerDialog } from "@/components/import-server-dialog"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { apiClient, wsClient } from "@/lib/api-client"
@@ -178,6 +179,10 @@ export default function ServersPage() {
     }
   }
 
+  const handleImportComplete = (server: Server) => {
+    setServers((prev) => [...prev, server])
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
@@ -230,7 +235,10 @@ export default function ServersPage() {
                   <List className="h-4 w-4" />
                 </Button>
               </div>
-              <CreateServerDialog onCreateServer={handleCreateServer} />
+              <div className="flex items-center gap-2">
+                <ImportServerDialog onImportComplete={handleImportComplete} />
+                <CreateServerDialog onCreateServer={handleCreateServer} />
+              </div>
             </div>
           </div>
 

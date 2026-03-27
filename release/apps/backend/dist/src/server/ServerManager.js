@@ -1,7 +1,7 @@
 import { ServerInstance, buildStartupArgs } from "./ServerInstance.js";
 import { ConfigManager } from "../storage/ConfigManager.js";
 import { config as appConfig } from "../config/config.js";
-import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, setLastScheduledRestartAt, setLastRestartWarningForRunAt, setLastAdvancedBackupAt, insertNotification, pruneNotifications, } from "../database/db.js";
+import { createServer as createServerInDb, getAllServers, getServer as getServerFromDb, deleteServer as deleteServerFromDb, updateServerStatus, updateServerConfig, updateServerInstallState, setLastScheduledRestartAt, setLastRestartWarningForRunAt, setLastAdvancedBackupAt, insertNotification, pruneNotifications, } from "../database/db.js";
 import { logger, logConfigOperation, logWorldConfigOperation, logError } from "../logger/Logger.js";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
@@ -392,6 +392,138 @@ export class ServerManager extends EventEmitter {
             message: `Server "${config.name}" was created`,
             serverId: id,
             serverName: config.name,
+        });
+        return this.getServer(id);
+    }
+    /**
+     * Import from Hytale (official) backup: create server and place the backup zip in its backup folder.
+     * Caller must have uploaded the file to a temp path. Server is NOT_INSTALLED; user installs then restores.
+     */
+    async importFromHytaleBackup(config, backupZipPath) {
+        const server = await this.createServer(config);
+        const id = server.id;
+        const serverBackupDir = path.join(appConfig.backupDir, `${id}-back`);
+        const fsPromises = await import("fs/promises");
+        await fsPromises.mkdir(serverBackupDir, { recursive: true, mode: 0o755 });
+        const destPath = path.join(serverBackupDir, "imported-backup.zip");
+        const resolvedDest = path.resolve(destPath);
+        const resolvedBackupDir = path.resolve(serverBackupDir);
+        if (!resolvedDest.startsWith(resolvedBackupDir)) {
+            throw createFilesystemError("access", destPath, "Path traversal detected", id);
+        }
+        await fsPromises.copyFile(backupZipPath, destPath);
+        logger.info(`Imported Hytale backup for server ${id} (${config.name}): ${destPath}`);
+        return this.getServer(id);
+    }
+    /**
+     * Import from Hypanel advanced backup: create server, extract tar to temp, move contents into server root.
+     * Sets install state to INSTALLED. Optionally merges config from extracted server.json and request overrides.
+     */
+    async importFromHypanelBackup(config, backupTarPath, overrides) {
+        const server = await this.createServer(config);
+        const id = server.id;
+        const serverRoot = path.join(appConfig.serversDir, id);
+        const resolvedRoot = path.resolve(serverRoot);
+        const resolvedServersDir = path.resolve(appConfig.serversDir);
+        if (!resolvedRoot.startsWith(resolvedServersDir)) {
+            throw createFilesystemError("access", serverRoot, "Server path must be under servers directory", id);
+        }
+        const fsPromises = await import("fs/promises");
+        const os = await import("os");
+        const tempDir = path.join(os.tmpdir(), `hypanel-import-${id}-${Date.now()}`);
+        try {
+            await fsPromises.mkdir(tempDir, { recursive: true, mode: 0o755 });
+            await execAsync(`tar -xzf "${backupTarPath}" -C "${tempDir}"`);
+            const entries = await fsPromises.readdir(tempDir, { withFileTypes: true });
+            const dirs = entries.filter((e) => e.isDirectory());
+            const topLevelDir = dirs.length === 1 ? dirs[0] : dirs[0];
+            if (!topLevelDir) {
+                throw createFilesystemError("restore", backupTarPath, "Archive has no top-level directory", id);
+            }
+            const sourceDir = path.join(tempDir, topLevelDir.name);
+            const copyRecursive = async (src, dest) => {
+                await fsPromises.mkdir(dest, { recursive: true, mode: 0o755 });
+                const items = await fsPromises.readdir(src, { withFileTypes: true });
+                for (const item of items) {
+                    const srcPath = path.join(src, item.name);
+                    const destPath = path.join(dest, item.name);
+                    if (item.isDirectory()) {
+                        await copyRecursive(srcPath, destPath);
+                    }
+                    else {
+                        await fsPromises.copyFile(srcPath, destPath);
+                    }
+                }
+            };
+            // Replace server root contents: remove existing (empty) dir contents and copy from backup
+            const existing = await fsPromises.readdir(serverRoot, { withFileTypes: true });
+            for (const e of existing) {
+                const p = path.join(serverRoot, e.name);
+                if (e.isDirectory()) {
+                    await fsPromises.rm(p, { recursive: true, force: true });
+                }
+                else {
+                    await fsPromises.unlink(p);
+                }
+            }
+            await copyRecursive(sourceDir, serverRoot);
+            logger.info(`Extracted Hypanel backup for server ${id} (${config.name}) into ${serverRoot}`);
+        }
+        finally {
+            await fsPromises.rm(tempDir, { recursive: true, force: true }).catch(() => { });
+        }
+        // Optionally load server.json from extracted root and merge overrides
+        const configPath = path.join(serverRoot, "server.json");
+        if (fs.existsSync(configPath)) {
+            try {
+                const content = fs.readFileSync(configPath, "utf-8");
+                const diskConfig = JSON.parse(content);
+                const name = (overrides?.name ?? diskConfig.name ?? config.name);
+                const port = Number(overrides?.port ?? diskConfig.port ?? config.port ?? 5520);
+                const maxMemory = Number(overrides?.maxMemory ?? diskConfig.maxMemory ?? config.maxMemory ?? 2048);
+                updateServerConfig(id, { name, port, maxMemory });
+                const instance = this.instances.get(id);
+                if (instance) {
+                    instance.config = { ...instance.config, name, port, maxMemory };
+                    this.configManager.saveConfig(instance.config);
+                }
+            }
+            catch (err) {
+                logger.warn(`Could not merge config from backup for server ${id}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+        else if (overrides?.name || overrides?.port !== undefined || overrides?.maxMemory !== undefined) {
+            updateServerConfig(id, {
+                ...(overrides.name && { name: overrides.name }),
+                ...(overrides.port !== undefined && { port: overrides.port }),
+                ...(overrides.maxMemory !== undefined && { maxMemory: overrides.maxMemory }),
+            });
+            const instance = this.instances.get(id);
+            if (instance) {
+                const updates = { ...instance.config };
+                if (overrides.name)
+                    updates.name = overrides.name;
+                if (overrides.port !== undefined)
+                    updates.port = overrides.port;
+                if (overrides.maxMemory !== undefined)
+                    updates.maxMemory = overrides.maxMemory;
+                instance.config = updates;
+                this.configManager.saveConfig(updates);
+            }
+        }
+        const jarPath = fs.existsSync(path.join(serverRoot, "HytaleServer.jar"))
+            ? path.join(serverRoot, "HytaleServer.jar")
+            : null;
+        const assetsPath = fs.existsSync(path.join(serverRoot, "Assets.zip"))
+            ? path.join(serverRoot, "Assets.zip")
+            : null;
+        updateServerInstallState(id, "INSTALLED", null, jarPath, assetsPath);
+        this.notify({
+            type: "server.created",
+            title: "Server imported",
+            message: `Hypanel backup imported as "${getServerFromDb(id)?.name ?? config.name}"`,
+            serverId: id,
+            serverName: getServerFromDb(id)?.name ?? config.name,
         });
         return this.getServer(id);
     }

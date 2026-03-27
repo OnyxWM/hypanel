@@ -6,6 +6,7 @@ import { ServerCard } from "@/components/server-card"
 import { StatsCard } from "@/components/stats-card"
 import { ResourceChart } from "@/components/resource-chart"
 import { CreateServerDialog } from "@/components/create-server-dialog"
+import { ImportServerDialog } from "@/components/import-server-dialog"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient, wsClient } from "@/lib/api-client"
 import type { Server as ServerType, SystemStats } from "@/lib/api"
@@ -214,6 +215,10 @@ export default function DashboardPage() {
     }
   }
 
+  const handleImportComplete = (server: ServerType) => {
+    setServers((prev) => [...prev, server])
+  }
+
   const formatChartTime = (ts: number) => {
     const date = new Date(ts)
     if (timeWindow === "24h" || timeWindow === "1w") {
@@ -339,7 +344,10 @@ export default function DashboardPage() {
                 <h2 className="text-lg font-semibold">Your Servers</h2>
                 <p className="text-sm text-muted-foreground">Manage and monitor your Hytale game servers</p>
               </div>
-              <CreateServerDialog onCreateServer={handleCreateServer} />
+              <div className="flex items-center gap-2">
+                <ImportServerDialog onImportComplete={handleImportComplete} />
+                <CreateServerDialog onCreateServer={handleCreateServer} />
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {servers.map((server) => (
