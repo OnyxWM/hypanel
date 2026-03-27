@@ -82,18 +82,82 @@ export function initDatabase(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_players_server_id ON players(server_id);
     CREATE INDEX IF NOT EXISTS idx_players_name ON players(player_name);
     CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+
+    CREATE TABLE IF NOT EXISTS system_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      cpu REAL NOT NULL,
+      memory REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_system_stats_timestamp ON system_stats(timestamp);
   `);
 
   // Best-effort migration for older installs: add servers.autostart if missing.
   // (CREATE TABLE IF NOT EXISTS won't alter existing tables.)
   try {
     const cols = db.prepare(`PRAGMA table_info(servers)`).all() as Array<{ name: string }>;
-    const hasAutostart = Array.isArray(cols) && cols.some((c) => c?.name === "autostart");
-    if (!hasAutostart) {
+    const colNames = Array.isArray(cols) ? cols.map((c) => c?.name).filter(Boolean) : [];
+    if (!colNames.includes("autostart")) {
       db.exec(`ALTER TABLE servers ADD COLUMN autostart INTEGER NOT NULL DEFAULT 0;`);
     }
+    // Scheduled restart columns
+    if (!colNames.includes("restart_schedule_enabled")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_schedule_enabled INTEGER NOT NULL DEFAULT 0;`);
+    }
+    if (!colNames.includes("restart_frequency")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_frequency TEXT;`);
+    }
+    if (!colNames.includes("restart_time")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_time TEXT;`);
+    }
+    if (!colNames.includes("restart_day_of_week")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN restart_day_of_week INTEGER;`);
+    }
+    if (!colNames.includes("last_scheduled_restart_at")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN last_scheduled_restart_at INTEGER;`);
+    }
+    if (!colNames.includes("last_restart_warning_for_run_at")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN last_restart_warning_for_run_at INTEGER;`);
+    }
+    // Advanced backup columns
+    if (!colNames.includes("advanced_backup_enabled")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_enabled INTEGER NOT NULL DEFAULT 0;`);
+    }
+    if (!colNames.includes("advanced_backup_frequency")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_frequency TEXT;`);
+    }
+    if (!colNames.includes("advanced_backup_time")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_time TEXT;`);
+    }
+    if (!colNames.includes("advanced_backup_day_of_week")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_day_of_week INTEGER;`);
+    }
+    if (!colNames.includes("advanced_backup_max_count")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN advanced_backup_max_count INTEGER NOT NULL DEFAULT 1;`);
+    }
+    if (!colNames.includes("last_advanced_backup_at")) {
+      db.exec(`ALTER TABLE servers ADD COLUMN last_advanced_backup_at INTEGER;`);
+    }
   } catch {
-    // Ignore migration errors; absence will be handled as default false in reads.
+    // Ignore migration errors; absence will be handled as default in reads.
+  }
+
+  // Migration: create system_stats table if missing (for existing installs)
+  try {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='system_stats'`).all() as Array<{ name: string }>;
+    if (!tables.length) {
+      db.exec(`
+        CREATE TABLE system_stats (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp INTEGER NOT NULL,
+          cpu REAL NOT NULL,
+          memory REAL NOT NULL
+        );
+        CREATE INDEX idx_system_stats_timestamp ON system_stats(timestamp);
+      `);
+    }
+  } catch {
+    // Ignore migration errors
   }
 
   return db;
@@ -117,8 +181,8 @@ export function closeDatabase(): void {
 export function createServer(server: Omit<Server, "players" | "cpu" | "memory" | "uptime">): void {
   const database = getDatabase();
   const stmt = database.prepare(`
-    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO servers (id, name, status, pid, ip, port, version, created_at, updated_at, install_state, last_error, jar_path, assets_path, server_root, autostart, restart_schedule_enabled, restart_frequency, restart_time, restart_day_of_week, last_scheduled_restart_at, last_restart_warning_for_run_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const now = Date.now();
   stmt.run(
@@ -136,7 +200,13 @@ export function createServer(server: Omit<Server, "players" | "cpu" | "memory" |
     server.jarPath || null,
     server.assetsPath || null,
     server.serverRoot || null,
-    server.autostart ? 1 : 0
+    server.autostart ? 1 : 0,
+    server.restartScheduleEnabled ? 1 : 0,
+    server.restartFrequency ?? null,
+    server.restartTime ?? null,
+    server.restartDayOfWeek ?? null,
+    server.lastScheduledRestartAt ?? null,
+    server.lastRestartWarningForRunAt ?? null
   );
 }
 
@@ -181,6 +251,18 @@ export function getServer(id: string): Server | null {
     assetsPath: row.assets_path,
     serverRoot: row.server_root,
     autostart: Boolean(row.autostart),
+    restartScheduleEnabled: Boolean(row.restart_schedule_enabled),
+    restartFrequency: row.restart_frequency ?? undefined,
+    restartTime: row.restart_time ?? undefined,
+    restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
+    lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
+    lastRestartWarningForRunAt: row.last_restart_warning_for_run_at !== undefined && row.last_restart_warning_for_run_at !== null ? row.last_restart_warning_for_run_at : undefined,
+    advancedBackupEnabled: Boolean(row.advanced_backup_enabled),
+    advancedBackupFrequency: row.advanced_backup_frequency ?? undefined,
+    advancedBackupTime: row.advanced_backup_time ?? undefined,
+    advancedBackupDayOfWeek: row.advanced_backup_day_of_week !== undefined && row.advanced_backup_day_of_week !== null ? row.advanced_backup_day_of_week : undefined,
+    advancedBackupMaxCount: row.advanced_backup_max_count !== undefined && row.advanced_backup_max_count !== null ? row.advanced_backup_max_count : 1,
+    lastAdvancedBackupAt: row.last_advanced_backup_at !== undefined && row.last_advanced_backup_at !== null ? row.last_advanced_backup_at : undefined,
   };
 }
 
@@ -225,6 +307,18 @@ export function getAllServers(): Server[] {
       assetsPath: row.assets_path,
       serverRoot: row.server_root,
       autostart: Boolean(row.autostart),
+      restartScheduleEnabled: Boolean(row.restart_schedule_enabled),
+      restartFrequency: row.restart_frequency ?? undefined,
+      restartTime: row.restart_time ?? undefined,
+      restartDayOfWeek: row.restart_day_of_week !== undefined && row.restart_day_of_week !== null ? row.restart_day_of_week : undefined,
+      lastScheduledRestartAt: row.last_scheduled_restart_at !== undefined && row.last_scheduled_restart_at !== null ? row.last_scheduled_restart_at : undefined,
+      lastRestartWarningForRunAt: row.last_restart_warning_for_run_at !== undefined && row.last_restart_warning_for_run_at !== null ? row.last_restart_warning_for_run_at : undefined,
+      advancedBackupEnabled: Boolean(row.advanced_backup_enabled),
+      advancedBackupFrequency: row.advanced_backup_frequency ?? undefined,
+      advancedBackupTime: row.advanced_backup_time ?? undefined,
+      advancedBackupDayOfWeek: row.advanced_backup_day_of_week !== undefined && row.advanced_backup_day_of_week !== null ? row.advanced_backup_day_of_week : undefined,
+      advancedBackupMaxCount: row.advanced_backup_max_count !== undefined && row.advanced_backup_max_count !== null ? row.advanced_backup_max_count : 1,
+      lastAdvancedBackupAt: row.last_advanced_backup_at !== undefined && row.last_advanced_backup_at !== null ? row.last_advanced_backup_at : undefined,
     };
   });
 }
@@ -315,6 +409,15 @@ export function updateServerConfig(id: string, config: Partial<{
   identityToken?: string;
   bindAddress?: string;
   autostart?: boolean;
+  restartScheduleEnabled?: boolean;
+  restartFrequency?: string;
+  restartTime?: string;
+  restartDayOfWeek?: number;
+  advancedBackupEnabled?: boolean;
+  advancedBackupFrequency?: string;
+  advancedBackupTime?: string;
+  advancedBackupDayOfWeek?: number;
+  advancedBackupMaxCount?: number;
 }>): void {
   const database = getDatabase();
   
@@ -346,7 +449,44 @@ export function updateServerConfig(id: string, config: Partial<{
     updates.push("autostart = ?");
     values.push(config.autostart ? 1 : 0);
   }
-  
+
+  if (config.restartScheduleEnabled !== undefined) {
+    updates.push("restart_schedule_enabled = ?");
+    values.push(config.restartScheduleEnabled ? 1 : 0);
+  }
+  if (config.restartFrequency !== undefined) {
+    updates.push("restart_frequency = ?");
+    values.push(config.restartFrequency);
+  }
+  if (config.restartTime !== undefined) {
+    updates.push("restart_time = ?");
+    values.push(config.restartTime);
+  }
+  if (config.restartDayOfWeek !== undefined) {
+    updates.push("restart_day_of_week = ?");
+    values.push(config.restartDayOfWeek);
+  }
+  if (config.advancedBackupEnabled !== undefined) {
+    updates.push("advanced_backup_enabled = ?");
+    values.push(config.advancedBackupEnabled ? 1 : 0);
+  }
+  if (config.advancedBackupFrequency !== undefined) {
+    updates.push("advanced_backup_frequency = ?");
+    values.push(config.advancedBackupFrequency);
+  }
+  if (config.advancedBackupTime !== undefined) {
+    updates.push("advanced_backup_time = ?");
+    values.push(config.advancedBackupTime);
+  }
+  if (config.advancedBackupDayOfWeek !== undefined) {
+    updates.push("advanced_backup_day_of_week = ?");
+    values.push(config.advancedBackupDayOfWeek);
+  }
+  if (config.advancedBackupMaxCount !== undefined) {
+    updates.push("advanced_backup_max_count = ?");
+    values.push(config.advancedBackupMaxCount);
+  }
+
   if (updates.length === 0) {
     return; // No database fields to update
   }
@@ -361,6 +501,36 @@ export function updateServerConfig(id: string, config: Partial<{
     WHERE id = ?
   `);
   stmt.run(...values);
+}
+
+export function setLastScheduledRestartAt(serverId: string, timestamp: number): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET last_scheduled_restart_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(timestamp, Date.now(), serverId);
+}
+
+export function setLastRestartWarningForRunAt(serverId: string, runAt: number): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET last_restart_warning_for_run_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(runAt, Date.now(), serverId);
+}
+
+export function setLastAdvancedBackupAt(serverId: string, timestamp: number): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    UPDATE servers
+    SET last_advanced_backup_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(timestamp, Date.now(), serverId);
 }
 
 export function deleteServer(id: string): void {
@@ -404,6 +574,46 @@ export function getServerStats(serverId: string, limit: number = 100): ServerSta
     players: row.players,
     maxPlayers: row.maxPlayers,
   }));
+}
+
+// System stats operations (aggregate CPU/memory across all servers)
+export interface SystemStatRow {
+  timestamp: number;
+  cpu: number;
+  memory: number;
+}
+
+export function insertSystemStats(stats: SystemStatRow): void {
+  const database = getDatabase();
+  const stmt = database.prepare(`
+    INSERT INTO system_stats (timestamp, cpu, memory)
+    VALUES (?, ?, ?)
+  `);
+  stmt.run(stats.timestamp, stats.cpu, stats.memory);
+}
+
+export function getSystemStatsHistory(sinceMs: number, limit: number = 10000): SystemStatRow[] {
+  const database = getDatabase();
+  const since = Date.now() - sinceMs;
+  const stmt = database.prepare(`
+    SELECT timestamp, cpu, memory
+    FROM system_stats
+    WHERE timestamp >= ?
+    ORDER BY timestamp ASC
+    LIMIT ?
+  `);
+  const rows = stmt.all(since, limit) as any[];
+  return rows.map((row) => ({
+    timestamp: row.timestamp,
+    cpu: row.cpu,
+    memory: row.memory,
+  }));
+}
+
+export function pruneSystemStats(olderThanMs: number): void {
+  const database = getDatabase();
+  const cutoff = Date.now() - olderThanMs;
+  database.prepare(`DELETE FROM system_stats WHERE timestamp < ?`).run(cutoff);
 }
 
 // Console log operations

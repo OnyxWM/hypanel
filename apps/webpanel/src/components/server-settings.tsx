@@ -47,7 +47,6 @@ export function ServerSettings({ serverId, serverStatus, isOpen, onUpdated }: Se
   const [backupMaxCount, setBackupMaxCount] = useState(5)
   const [aotCacheEnabled, setAotCacheEnabled] = useState(false)
   const [acceptEarlyPlugins, setAcceptEarlyPlugins] = useState(false)
-
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

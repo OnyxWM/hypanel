@@ -8,6 +8,7 @@ import { promisify } from "util";
 import { ServerManager } from "../../server/ServerManager.js";
 import { HYPANEL_SYSTEMD_UNIT, isDockerEnvironment, queueRestartUnit, readUnitJournal } from "../../systemd/systemd.js";
 import { getCurrentVersion, compareVersions } from "../../utils/version.js";
+import { insertSystemStats, getSystemStatsHistory, pruneSystemStats } from "../../database/db.js";
 
 const execAsync = promisify(exec);
 
@@ -68,73 +69,141 @@ function getGitHubReleaseUrl(): { url: string; channel: string; filterBeta: bool
   };
 }
 
+const SYSTEM_STATS_INTERVAL_MS = 60 * 1000; // 1 minute
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Compute aggregated CPU and memory stats from all running server instances.
+ * Reused by GET /stats and the background recording job.
+ */
+async function computeSystemStats(serverManager: ServerManager): Promise<{
+  cpu: number;
+  memory: number;
+  totalMemory: number;
+  freeMemory: number;
+  timestamp: number;
+}> {
+  const totalMemory = os.totalmem();
+  const freeMemory = os.freemem();
+  const totalMemoryGB = totalMemory / 1024 / 1024 / 1024;
+  const freeMemoryGB = freeMemory / 1024 / 1024 / 1024;
+
+  let totalCpu = 0;
+  let totalMemoryBytes = 0;
+
+  const allServers = serverManager.getAllServers();
+  const serverPids: number[] = [];
+
+  for (const server of allServers) {
+    if (server.status === "online") {
+      const instance = serverManager.getInstance(server.id);
+      if (instance) {
+        const proc = instance.getProcess();
+        if (proc.pid) {
+          serverPids.push(proc.pid);
+        }
+      }
+    }
+  }
+
+  if (serverPids.length > 0) {
+    try {
+      const statsObject = await pidusage(serverPids);
+      for (const pid of serverPids) {
+        const stat = statsObject[pid] || statsObject[pid.toString()];
+        if (stat) {
+          totalCpu += stat.cpu || 0;
+          totalMemoryBytes += stat.memory || 0;
+        }
+      }
+    } catch {
+      for (const pid of serverPids) {
+        try {
+          const stat = await pidusage(pid);
+          totalCpu += stat.cpu || 0;
+          totalMemoryBytes += stat.memory || 0;
+        } catch {
+          // Process might have exited, skip it
+        }
+      }
+    }
+  }
+
+  const memoryGB = totalMemoryBytes / 1024 / 1024 / 1024;
+
+  return {
+    cpu: Math.round(totalCpu * 10) / 10,
+    memory: Math.round(memoryGB * 100) / 100,
+    totalMemory: Math.round(totalMemoryGB * 100) / 100,
+    freeMemory: Math.round(freeMemoryGB * 100) / 100,
+    timestamp: Date.now(),
+  };
+}
+
+let systemStatsInterval: ReturnType<typeof setInterval> | null = null;
+
+function startSystemStatsRecording(serverManager: ServerManager): void {
+  if (systemStatsInterval) return;
+
+  const record = async () => {
+    try {
+      const stats = await computeSystemStats(serverManager);
+      insertSystemStats({ timestamp: stats.timestamp, cpu: stats.cpu, memory: stats.memory });
+      pruneSystemStats(SEVEN_DAYS_MS);
+    } catch (err) {
+      console.error("Failed to record system stats:", err);
+    }
+  };
+
+  record();
+  systemStatsInterval = setInterval(record, SYSTEM_STATS_INTERVAL_MS);
+}
+
 export function createSystemRoutes(serverManager: ServerManager): Router {
   const router = Router();
+
+  startSystemStatsRecording(serverManager);
+
+  // GET /api/system/stats/history - Get historical system stats for charts (must be before /stats)
+  router.get("/stats/history", (req: Request, res: Response) => {
+    try {
+      const window = (req.query.window as string) || "12h";
+      const windowMs: Record<string, number> = {
+        "1h": 60 * 60 * 1000,
+        "12h": 12 * 60 * 60 * 1000,
+        "24h": 24 * 60 * 60 * 1000,
+        "1w": 7 * 24 * 60 * 60 * 1000,
+      };
+      const sinceMs = windowMs[window] ?? (12 * 60 * 60 * 1000);
+
+      let rows = getSystemStatsHistory(sinceMs);
+
+      // Downsample for long windows to keep response size reasonable
+      if (window === "24h" && rows.length > 288) {
+        const step = Math.ceil(rows.length / 288);
+        rows = rows.filter((_, i) => i % step === 0);
+      } else if (window === "1w" && rows.length > 336) {
+        const step = Math.ceil(rows.length / 336);
+        rows = rows.filter((_, i) => i % step === 0);
+      }
+
+      res.json({ data: rows });
+    } catch (error) {
+      console.error("Failed to get system stats history:", error);
+      res.status(500).json({ error: "Failed to get system stats history" });
+    }
+  });
 
   // GET /api/system/stats - Get aggregated system resource stats from all running servers
   router.get("/stats", async (req: Request, res: Response) => {
     try {
-      const totalMemory = os.totalmem();
-      const freeMemory = os.freemem();
-      const totalMemoryGB = totalMemory / 1024 / 1024 / 1024;
-      const freeMemoryGB = freeMemory / 1024 / 1024 / 1024;
-      
-      // Aggregate CPU and memory from all running server instances
-      let totalCpu = 0;
-      let totalMemoryBytes = 0;
-      
-      // Get all servers and aggregate stats from online ones
-      const allServers = serverManager.getAllServers();
-      const serverPids: number[] = [];
-      
-      for (const server of allServers) {
-        if (server.status === "online") {
-          const instance = serverManager.getInstance(server.id);
-          if (instance) {
-            const process = instance.getProcess();
-            if (process.pid) {
-              serverPids.push(process.pid);
-            }
-          }
-        }
-      }
-      
-      // Get stats for all server processes
-      if (serverPids.length > 0) {
-        try {
-          const statsObject = await pidusage(serverPids);
-          // pidusage returns an object with PID as keys (may be string or number) when given an array
-          for (const pid of serverPids) {
-            const stat = statsObject[pid] || statsObject[pid.toString()];
-            if (stat) {
-              totalCpu += stat.cpu || 0;
-              totalMemoryBytes += stat.memory || 0;
-            }
-          }
-        } catch (error) {
-          // If pidusage fails for all PIDs at once, try individually
-          for (const pid of serverPids) {
-            try {
-              const stat = await pidusage(pid);
-              totalCpu += stat.cpu || 0;
-              totalMemoryBytes += stat.memory || 0;
-            } catch (err) {
-              // Process might have exited, skip it
-              console.warn(`Failed to get stats for PID ${pid}: ${err}`);
-            }
-          }
-        }
-      }
-      
-      // Convert memory from bytes to GB
-      const memoryGB = totalMemoryBytes / 1024 / 1024 / 1024;
-      
+      const stats = await computeSystemStats(serverManager);
       res.json({
-        cpu: Math.round(totalCpu * 10) / 10, // Round to 1 decimal place
-        memory: Math.round(memoryGB * 100) / 100, // Round to 2 decimal places
-        totalMemory: Math.round(totalMemoryGB * 100) / 100,
-        freeMemory: Math.round(freeMemoryGB * 100) / 100,
-        timestamp: Date.now(),
+        cpu: stats.cpu,
+        memory: stats.memory,
+        totalMemory: stats.totalMemory,
+        freeMemory: stats.freeMemory,
+        timestamp: stats.timestamp,
       });
     } catch (error) {
       console.error("Failed to get system stats:", error);
@@ -645,7 +714,7 @@ export function createSystemRoutes(serverManager: ServerManager): Router {
         return res.status(500).json({
           success: false,
           error: "No .tar.gz asset found in release",
-          message: "Release does not contain a downloadable package",
+          message: "This release has no .tar.gz package attached. To use in-app update, create a tarball of the built app (with apps/backend/dist and apps/webpanel/dist), then upload it as an asset when publishing the GitHub release.",
         });
       }
 

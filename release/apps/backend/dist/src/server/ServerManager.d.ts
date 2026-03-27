@@ -7,6 +7,8 @@ export declare class ServerManager extends EventEmitter {
     private installer;
     private playerListPollingInterval;
     private backupCleanupInterval;
+    private scheduledRestartInterval;
+    private advancedBackupInterval;
     private playerTracker;
     private cachedServerIP;
     constructor();
@@ -17,6 +19,20 @@ export declare class ServerManager extends EventEmitter {
     private setupInstanceListeners;
     private setupInstallerListeners;
     createServer(config: Omit<ServerConfig, "id">): Promise<Server>;
+    /**
+     * Import from Hytale (official) backup: create server and place the backup zip in its backup folder.
+     * Caller must have uploaded the file to a temp path. Server is NOT_INSTALLED; user installs then restores.
+     */
+    importFromHytaleBackup(config: Omit<ServerConfig, "id">, backupZipPath: string): Promise<Server>;
+    /**
+     * Import from Hypanel advanced backup: create server, extract tar to temp, move contents into server root.
+     * Sets install state to INSTALLED. Optionally merges config from extracted server.json and request overrides.
+     */
+    importFromHypanelBackup(config: Omit<ServerConfig, "id">, backupTarPath: string, overrides?: {
+        name?: string;
+        port?: number;
+        maxMemory?: number;
+    }): Promise<Server>;
     updateServerConfig(id: string, config: Partial<{
         name: string;
         ip: string;
@@ -36,6 +52,15 @@ export declare class ServerManager extends EventEmitter {
         aotCacheEnabled?: boolean;
         acceptEarlyPlugins?: boolean;
         customStartupArgs?: string[];
+        restartScheduleEnabled?: boolean;
+        restartFrequency?: string;
+        restartTime?: string;
+        restartDayOfWeek?: number;
+        advancedBackupEnabled?: boolean;
+        advancedBackupFrequency?: string;
+        advancedBackupTime?: string;
+        advancedBackupDayOfWeek?: number;
+        advancedBackupMaxCount?: number;
     }>): Promise<Server>;
     deleteServer(id: string): Promise<void>;
     startServer(id: string): Promise<void>;
@@ -87,10 +112,28 @@ export declare class ServerManager extends EventEmitter {
             size: number;
             modified: Date;
             isDirectory: boolean;
+            backupType?: "official" | "advanced";
         }>;
     }>;
     deleteBackup(serverId: string, backupName: string): Promise<void>;
+    /**
+     * Resolve backup path for both official ({serverId}-back) and advanced (advanced/{serverId}) backups.
+     */
+    private resolveBackupPath;
     getBackupPath(serverId: string, backupName: string): string;
+    /**
+     * Determine backup type from path (official vs advanced).
+     */
+    private getBackupTypeFromPath;
+    /**
+     * Restore a backup. Server must be stopped.
+     * Official backups: copy into serverRoot/universe
+     * Advanced backups: extract tar.gz over server root (replaces all)
+     */
+    restoreBackup(serverId: string, backupName: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     /**
      * Find hytale-downloader executable
      */
@@ -112,6 +155,38 @@ export declare class ServerManager extends EventEmitter {
      * Keeps the 10 most recent backups and deletes older ones
      */
     cleanupOldBackups(): void;
+    /**
+     * Compute the next scheduled restart time (ms since epoch) in the daemon's local time.
+     * Returns null if config is invalid or no next run.
+     */
+    private getNextScheduledRestartTime;
+    /**
+     * Run scheduled restarts: for each server that is due, check for update then update or restart.
+     */
+    private runScheduledRestarts;
+    /**
+     * Send in-game "restarting in 15 minutes" warning once per scheduled run when we enter the 15-min window.
+     */
+    private runScheduledRestartWarnings;
+    private startScheduledRestarts;
+    /**
+     * Compute the next advanced backup time (ms since epoch). Returns null if config invalid.
+     */
+    private getNextAdvancedBackupTime;
+    /**
+     * Run advanced backup: tar.gz the whole server folder into backupDir/advanced/{serverId}/
+     */
+    runAdvancedBackup(serverId: string): Promise<void>;
+    /**
+     * Delete old advanced backup archives beyond advancedBackupMaxCount for a server.
+     */
+    private cleanupOldAdvancedBackups;
+    /**
+     * Run scheduled advanced backups for servers that are due.
+     */
+    private runScheduledAdvancedBackups;
+    private startAdvancedBackupScheduler;
+    private stopAdvancedBackupScheduler;
     /**
      * Start periodic polling of player lists via /who command
      * Runs every 5 minutes for all online servers

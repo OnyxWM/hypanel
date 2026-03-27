@@ -6,13 +6,18 @@ import { ServerCard } from "@/components/server-card"
 import { StatsCard } from "@/components/stats-card"
 import { ResourceChart } from "@/components/resource-chart"
 import { CreateServerDialog } from "@/components/create-server-dialog"
+import { ImportServerDialog } from "@/components/import-server-dialog"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient, wsClient } from "@/lib/api-client"
 import type { Server as ServerType, SystemStats } from "@/lib/api"
 
-interface HistoricalStat {
-  timestamp: number
-  cpu: number
-  memory: number
+type TimeWindow = "1h" | "12h" | "24h" | "1w"
+
+const TIME_WINDOW_LABELS: Record<TimeWindow, string> = {
+  "1h": "Last hour",
+  "12h": "Last 12 hours",
+  "24h": "Last 24 hours",
+  "1w": "Last week",
 }
 
 export default function DashboardPage() {
@@ -21,7 +26,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [installProgress, setInstallProgress] = useState<Record<string, any>>({})
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null)
-  const [historicalStats, setHistoricalStats] = useState<HistoricalStat[]>([])
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("12h")
+  const [chartHistory, setChartHistory] = useState<Array<{ timestamp: number; cpu: number; memory: number }>>([])
 
   useEffect(() => {
     loadServers()
@@ -81,6 +87,20 @@ export default function DashboardPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { data } = await apiClient.getSystemStatsHistory(timeWindow)
+        setChartHistory(data || [])
+      } catch (err) {
+        console.error("Failed to load chart history:", err)
+      }
+    }
+    load()
+    const id = setInterval(load, 30000)
+    return () => clearInterval(id)
+  }, [timeWindow])
+
   const loadServers = async () => {
     try {
       setIsLoading(true)
@@ -99,23 +119,8 @@ export default function DashboardPage() {
     try {
       const stats = await apiClient.getSystemStats()
       setSystemStats(stats)
-      
-      // Add to historical stats
-      setHistoricalStats((prev) => {
-        const newStats = [...prev, {
-          timestamp: stats.timestamp,
-          cpu: stats.cpu,
-          memory: stats.memory,
-        }]
-        
-        // Keep only last 100 data points (approximately 8+ hours at 5 second intervals)
-        // Or keep last 12 hours of data
-        const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000
-        return newStats.filter((stat) => stat.timestamp >= twelveHoursAgo).slice(-100)
-      })
     } catch (err) {
       console.error("Failed to load system stats:", err)
-      // Don't set error state for system stats failures, just log
     }
   }
 
@@ -210,34 +215,49 @@ export default function DashboardPage() {
     }
   }
 
-  // Generate chart data from historical stats
-  const cpuChartData = historicalStats.length > 0
-    ? historicalStats.map((stat) => ({
-        time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-        value: Math.round(stat.cpu * 10) / 10, // Round to 1 decimal
-      }))
-    : systemStats
-    ? [
-        {
-          time: new Date(systemStats.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-          value: Math.round(systemStats.cpu * 10) / 10,
-        },
-      ]
-    : []
+  const handleImportComplete = (server: ServerType) => {
+    setServers((prev) => [...prev, server])
+  }
 
-  const memoryChartData = historicalStats.length > 0
-    ? historicalStats.map((stat) => ({
-        time: new Date(stat.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-        value: Math.round(stat.memory * 100) / 100, // Round to 2 decimals
-      }))
-    : systemStats
-    ? [
-        {
-          time: new Date(systemStats.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-          value: Math.round(systemStats.memory * 100) / 100,
-        },
-      ]
-    : []
+  const formatChartTime = (ts: number) => {
+    const date = new Date(ts)
+    if (timeWindow === "24h" || timeWindow === "1w") {
+      return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    }
+    return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  }
+
+  const cpuChartData =
+    chartHistory.length > 0
+      ? chartHistory.map((stat) => ({
+          time: formatChartTime(stat.timestamp),
+          value: Math.round(stat.cpu * 10) / 10,
+        }))
+      : systemStats
+        ? [
+            {
+              time: formatChartTime(systemStats.timestamp),
+              value: Math.round(systemStats.cpu * 10) / 10,
+            },
+          ]
+        : []
+
+  const memoryChartData =
+    chartHistory.length > 0
+      ? chartHistory.map((stat) => ({
+          time: formatChartTime(stat.timestamp),
+          value: Math.round(stat.memory * 100) / 100,
+        }))
+      : systemStats
+        ? [
+            {
+              time: formatChartTime(systemStats.timestamp),
+              value: Math.round(systemStats.memory * 100) / 100,
+            },
+          ]
+        : []
+
+  const chartWindowLabel = TIME_WINDOW_LABELS[timeWindow]
 
   return (
     <div className="min-h-screen bg-background">
@@ -287,20 +307,34 @@ export default function DashboardPage() {
           </div>
 
           {/* Resource Charts */}
-          <div className="mb-6 grid gap-4 md:grid-cols-2">
-            <ResourceChart
-              title="CPU Usage (Last 12 Hours)"
-              data={cpuChartData}
-              color="var(--chart-1)"
-              maxValue={100}
-            />
-            <ResourceChart
-              title="Memory Usage (Last 12 Hours)"
-              data={memoryChartData}
-              color="var(--chart-2)"
-              unit="GB"
-              maxValue={systemStats ? systemStats.totalMemory : 8}
-            />
+          <div className="mb-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">System resource history</h3>
+              <Tabs value={timeWindow} onValueChange={(v) => setTimeWindow(v as TimeWindow)}>
+                <TabsList className="h-9">
+                  {(["1h", "12h", "24h", "1w"] as const).map((w) => (
+                    <TabsTrigger key={w} value={w} className="text-xs px-2 py-1">
+                      {TIME_WINDOW_LABELS[w]}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <ResourceChart
+                title={`CPU Usage (${chartWindowLabel})`}
+                data={cpuChartData}
+                color="var(--chart-1)"
+                maxValue={100}
+              />
+              <ResourceChart
+                title={`Memory Usage (${chartWindowLabel})`}
+                data={memoryChartData}
+                color="var(--chart-2)"
+                unit="GB"
+                maxValue={systemStats ? systemStats.totalMemory : 8}
+              />
+            </div>
           </div>
 
           {/* Servers Section */}
@@ -310,7 +344,10 @@ export default function DashboardPage() {
                 <h2 className="text-lg font-semibold">Your Servers</h2>
                 <p className="text-sm text-muted-foreground">Manage and monitor your Hytale game servers</p>
               </div>
-              <CreateServerDialog onCreateServer={handleCreateServer} />
+              <div className="flex items-center gap-2">
+                <ImportServerDialog onImportComplete={handleImportComplete} />
+                <CreateServerDialog onCreateServer={handleCreateServer} />
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {servers.map((server) => (

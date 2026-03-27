@@ -155,6 +155,20 @@ export class ApiClient {
     })
   }
 
+  async importServerFromHytaleBackup(formData: FormData): Promise<Server> {
+    return this.request<Server>("/api/servers/import/hytale-backup", {
+      method: "POST",
+      body: formData,
+    })
+  }
+
+  async importServerFromHypanelBackup(formData: FormData): Promise<Server> {
+    return this.request<Server>("/api/servers/import/hypanel-backup", {
+      method: "POST",
+      body: formData,
+    })
+  }
+
   async deleteServer(id: string): Promise<void> {
     await this.request(`/api/servers/${id}`, {
       method: "DELETE",
@@ -182,6 +196,15 @@ export class ApiClient {
       aotCacheEnabled?: boolean
       acceptEarlyPlugins?: boolean
       customStartupArgs?: string[]
+      restartScheduleEnabled?: boolean
+      restartFrequency?: "daily" | "every_1h" | "every_6h" | "every_12h" | "weekly"
+      restartTime?: string
+      restartDayOfWeek?: number
+      advancedBackupEnabled?: boolean
+      advancedBackupFrequency?: "daily" | "weekly"
+      advancedBackupTime?: string
+      advancedBackupDayOfWeek?: number
+      advancedBackupMaxCount?: number
     }>
   ): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}`, {
@@ -204,6 +227,12 @@ export class ApiClient {
 
   async restartServer(id: string): Promise<Server> {
     return this.request<Server>(`/api/servers/${id}/restart`, {
+      method: "POST",
+    })
+  }
+
+  async triggerAdvancedBackup(id: string): Promise<{ success: boolean; message: string; server: Server }> {
+    return this.request<{ success: boolean; message: string; server: Server }>(`/api/servers/${id}/advanced-backup`, {
       method: "POST",
     })
   }
@@ -303,8 +332,20 @@ export class ApiClient {
     })
   }
 
+  async clearDownloaderCredentials(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>("/api/downloader/auth/clear", {
+      method: "POST",
+    })
+  }
+
   async getSystemStats(): Promise<SystemStats> {
     return this.request<SystemStats>("/api/system/stats")
+  }
+
+  async getSystemStatsHistory(window: "1h" | "12h" | "24h" | "1w"): Promise<{ data: Array<{ timestamp: number; cpu: number; memory: number }> }> {
+    return this.request<{ data: Array<{ timestamp: number; cpu: number; memory: number }> }>(
+      `/api/system/stats/history?window=${window}`
+    )
   }
 
   async stopAllServers(force: boolean = false): Promise<SystemActionSummary> {
@@ -361,12 +402,12 @@ export class ApiClient {
   async getBackups(): Promise<Array<{ 
     serverId: string
     serverName: string
-    backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean }>
+    backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean; backupType?: "official" | "advanced" }>
   }>> {
     return this.request<Array<{ 
       serverId: string
       serverName: string
-      backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean }>
+      backups: Array<{ name: string; path: string; size: number; modified: string; isDirectory: boolean; backupType?: "official" | "advanced" }>
     }>>("/api/servers/backups")
   }
 
@@ -374,6 +415,13 @@ export class ApiClient {
     await this.request(`/api/servers/backups/${encodeURIComponent(serverId)}/${encodeURIComponent(backupName)}`, {
       method: "DELETE",
     })
+  }
+
+  async restoreBackup(serverId: string, backupName: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(
+      `/api/servers/backups/${encodeURIComponent(serverId)}/${encodeURIComponent(backupName)}/restore`,
+      { method: "POST" }
+    )
   }
 
   async getAllPlayers(): Promise<Array<{ playerName: string; serverId: string; serverName: string; joinTime: string; lastSeen: string }>> {
